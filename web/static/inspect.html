@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LLM Inspect · AITown3</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=ZCOOL+KuaiLe&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/inspect.css" />
+</head>
+<body class="doodle">
+  <header class="bar">
+    <a class="brand" href="/">← Play</a>
+    <h1>LLM Inspect</h1>
+    <div class="spacer"></div>
+    <button type="button" id="btn-refresh">刷新</button>
+    <button type="button" id="btn-clear" class="danger">清空</button>
+  </header>
+
+  <main class="layout">
+    <aside class="list-pane">
+      <div class="hint">对话 / 目标决策（Qwen·GBNF）与 PDDL/规则规划都会记在这里</div>
+
+      <section class="trace-section">
+        <h2 class="section-title qwen">Qwen <span id="qwen-count" class="count">0</span></h2>
+        <ul id="trace-list-qwen" class="trace-list"></ul>
+      </section>
+
+      <section class="trace-section">
+        <h2 class="section-title local">本地 GBNF <span id="local-count" class="count">0</span></h2>
+        <ul id="trace-list-local" class="trace-list"></ul>
+      </section>
+
+      <section class="trace-section">
+        <h2 class="section-title pddl">PDDL / 规划 <span id="pddl-count" class="count">0</span></h2>
+        <ul id="trace-list-pddl" class="trace-list"></ul>
+      </section>
+    </aside>
+    <section class="detail-pane">
+      <div id="empty" class="empty">选择左侧一条记录。对话、仿真目标决策或规划后会出现日志。</div>
+      <div id="detail" class="detail hidden">
+        <div class="meta-row" id="meta-row"></div>
+        <div class="tabs">
+          <button type="button" data-tab="raw" class="active">Raw 输出</button>
+          <button type="button" data-tab="prompt">Prompt</button>
+          <button type="button" data-tab="parsed">Parsed</button>
+          <button type="button" data-tab="gbnf">GBNF</button>
+        </div>
+        <pre id="panel" class="panel"></pre>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/js/inspect.js"></script>
+</body>
+</html>

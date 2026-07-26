@@ -1,0 +1,146 @@
+{
+  "id": "two_npc_talk",
+  "title": "双 NPC 对话模板",
+  "premise": "测试两个 NPC 在同一地点互相询问、分享事实；可选再测试给予物品。仿真时选 Anna+Ben（或全部 NPC）。",
+  "locations": [
+    {
+      "name": "Plaza",
+      "description": "小镇广场。两人常在这里碰面。",
+      "tags": "hub,social"
+    },
+    {
+      "name": "Garden",
+      "description": "安静的后花园。约定碰头的地方。",
+      "tags": "goal"
+    }
+  ],
+  "adjacencies": [
+    {
+      "a": "Plaza",
+      "b": "Garden"
+    }
+  ],
+  "persons": [
+    {
+      "name": "Observer",
+      "located_at": "Plaza",
+      "role": "player",
+      "personality": "quiet, observant",
+      "background": "A quiet bystander who prefers watching others rather than intervening.",
+      "parent_goal": "",
+      "values": "patience,curiosity",
+      "mood": "calm",
+      "hp": 100,
+      "power_level": 5,
+      "speech_style": "brief"
+    },
+    {
+      "name": "Anna",
+      "located_at": "Plaza",
+      "role": "npc",
+      "personality": "earnest, polite, determined",
+      "background": "Earnest and polite. Looking for Ben; she does not know where they should meet later.",
+      "parent_goal": "",
+      "goal": "Find Ben and learn where to meet",
+      "values": "honesty,duty",
+      "mood": "hopeful",
+      "hp": 90,
+      "power_level": 6,
+      "speech_style": "warm and direct",
+      "secret_policy": "share_gossip",
+      "trust_toward_player": 5
+    },
+    {
+      "name": "Ben",
+      "located_at": "Plaza",
+      "role": "npc",
+      "personality": "calm, helpful, concise",
+      "background": "Calm village courier. Knows the Garden meeting place and carries a Token for Anna; prefers being clear and helpful.",
+      "parent_goal": "",
+      "goal": "Help Anna when she asks, then go to the Garden",
+      "values": "helpfulness,clarity",
+      "mood": "steady",
+      "hp": 95,
+      "power_level": 7,
+      "speech_style": "plain and clear",
+      "secret_policy": "share_gossip",
+      "trust_toward_player": 4,
+      "accepts_from": []
+    }
+  ],
+  "items": [
+    {
+      "name": "Token",
+      "value": 10,
+      "held_by": "Ben",
+      "owned_by": "Ben",
+      "item_kind": "token",
+      "portable": true,
+      "description": "A small brass token Ben should give to Anna."
+    }
+  ],
+  "quests": [
+    {
+      "name": "FindMeetingPlace",
+      "description": "Anna learns from Ben that they meet in the Garden, then goes there.",
+      "stage": "talk",
+      "state": "active",
+      "objective": "Anna and Ben both reach Garden after exchanging the meeting place (and Token).",
+      "involves": [
+        "Anna",
+        "Ben",
+        "Plaza",
+        "Garden",
+        "Token"
+      ],
+      "giver": "Anna"
+    }
+  ],
+  "facts": [
+    {
+      "name": "MeetInGarden",
+      "text": "Anna and Ben should meet later in the Garden next to the Plaza.",
+      "secret_level": 0,
+      "known_by": [
+        "Ben"
+      ]
+    },
+    {
+      "name": "BenKnowsPlan",
+      "text": "Ben already knows the meeting place is the Garden. After talking with Anna he should go there too.",
+      "secret_level": 0,
+      "known_by": [
+        "Ben"
+      ]
+    },
+    {
+      "name": "BenHasToken",
+      "text": "Ben is carrying a Token meant for Anna; he can give it to her at the Plaza.",
+      "secret_level": 0,
+      "known_by": [
+        "Ben"
+      ]
+    },
+    {
+      "name": "AnnaSeeksBen",
+      "text": "Anna is at the Plaza and needs to ask Ben where they should meet.",
+      "secret_level": 0,
+      "known_by": [
+        "Anna"
+      ]
+    }
+  ],
+  "rumors": [],
+  "social": [
+    {
+      "a": "Anna",
+      "rel": "KNOWS",
+      "b": "Ben"
+    },
+    {
+      "a": "Ben",
+      "rel": "KNOWS",
+      "b": "Anna"
+    }
+  ]
+}

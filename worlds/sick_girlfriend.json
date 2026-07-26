@@ -1,0 +1,218 @@
+{
+  "id": "sick_girlfriend",
+  "title": "女友的蓝草",
+  "premise": "女友在家发烧。去诊所问医生，再按他的指引去森林采正确的药草回来给她。",
+  "locations": [
+    {
+      "name": "Home",
+      "description": "狭小的木屋。女友躺在床上，呼吸急促。",
+      "tags": "hub,home"
+    },
+    {
+      "name": "Clinic",
+      "description": "小镇诊所。药柜和药草图鉴摆满架子。",
+      "tags": "social,info"
+    },
+    {
+      "name": "Forest",
+      "description": "潮湿的林间空地。三种颜色的药草混生在一起。",
+      "tags": "item,wild"
+    }
+  ],
+  "adjacencies": [
+    {
+      "a": "Home",
+      "b": "Clinic"
+    },
+    {
+      "a": "Clinic",
+      "b": "Forest"
+    }
+  ],
+  "persons": [
+    {
+      "name": "Traveler",
+      "located_at": "Home",
+      "role": "player",
+      "personality": "worried, determined, careful",
+      "background": "Lives with Lila. She fell ill overnight; he is devoted and does not yet know the remedy.",
+      "parent_goal": "",
+      "goal": "Find a way to help Lila feel better",
+      "values": "love,duty,caution",
+      "mood": "anxious",
+      "hp": 100,
+      "power_level": 10,
+      "speech_style": "soft and urgent"
+    },
+    {
+      "name": "Lila",
+      "located_at": "Home",
+      "role": "npc",
+      "personality": "gentle, tired, trusting",
+      "background": "Fell ill overnight. Too weak to leave bed; trusts those close to her.",
+      "parent_goal": "",
+      "values": "trust,patience",
+      "mood": "feverish",
+      "hp": 22,
+      "power_level": 4,
+      "speech_style": "weak and brief",
+      "secret_policy": "guarded",
+      "trust_toward_player": 8,
+      "accepts_from": [
+        "BlueHerb"
+      ]
+    },
+    {
+      "name": "DoctorRowan",
+      "located_at": "Clinic",
+      "role": "npc",
+      "personality": "precise, calm, helpful",
+      "background": "Village doctor who knows local herbs and gladly advises worried visitors.",
+      "parent_goal": "",
+      "values": "knowledge,care",
+      "mood": "serious",
+      "hp": 95,
+      "power_level": 9,
+      "speech_style": "clear and clinical",
+      "secret_policy": "share_gossip",
+      "trust_toward_player": 3
+    }
+  ],
+  "items": [
+    {
+      "name": "BlueHerb",
+      "value": 40,
+      "located_at": "Forest",
+      "quest_flag": "main_macguffin",
+      "item_kind": "herb",
+      "portable": true,
+      "description": "Cool blue leaves found among other herbs in the Forest.",
+      "effects_on": [
+        {
+          "target": "Lila",
+          "consume": true,
+          "preconditions": [
+            {
+              "op": "has_item",
+              "person": "@actor",
+              "item": "@tool"
+            },
+            {
+              "op": "person_at",
+              "person": "@actor",
+              "location": "@target_loc"
+            },
+            {
+              "op": "person_at",
+              "person": "Lila",
+              "location": "@target_loc"
+            }
+          ],
+          "ops": [
+            {
+              "op": "set_prop",
+              "entity": "Lila",
+              "label": "Person",
+              "prop": "hp",
+              "value": 100
+            },
+            {
+              "op": "set_prop",
+              "entity": "Lila",
+              "label": "Person",
+              "prop": "mood",
+              "value": "relieved"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "RedHerb",
+      "value": 5,
+      "located_at": "Forest",
+      "item_kind": "herb",
+      "portable": true,
+      "description": "Bright red stalk. Looks medicinal but is the wrong plant for fever."
+    },
+    {
+      "name": "YellowHerb",
+      "value": 5,
+      "located_at": "Forest",
+      "item_kind": "herb",
+      "portable": true,
+      "description": "Yellow blossoms. Common decoy; not for Lila's fever."
+    }
+  ],
+  "quests": [
+    {
+      "name": "CureLila",
+      "description": "Find out how to cure Lila and help her recover.",
+      "stage": "ask_doctor",
+      "state": "active",
+      "objective": "Cure Lila.",
+      "involves": [
+        "Lila",
+        "DoctorRowan",
+        "BlueHerb",
+        "Traveler",
+        "Forest"
+      ],
+      "giver": "Lila"
+    }
+  ],
+  "facts": [
+    {
+      "name": "LilaIsSick",
+      "text": "Lila has a high fever at Home and cannot walk to the clinic herself.",
+      "secret_level": 0,
+      "known_by": [
+        "Traveler",
+        "Lila",
+        "DoctorRowan"
+      ]
+    },
+    {
+      "name": "BlueHerbCure",
+      "text": "Lila's fever needs BlueHerb from the Forest. RedHerb and YellowHerb will not help.",
+      "secret_level": 1,
+      "known_by": [
+        "DoctorRowan"
+      ]
+    },
+    {
+      "name": "HerbsInForest",
+      "text": "BlueHerb, RedHerb, and YellowHerb all grow in the Forest near the clinic path.",
+      "secret_level": 0,
+      "known_by": [
+        "DoctorRowan"
+      ]
+    }
+  ],
+  "rumors": [
+    {
+      "name": "RedHerbGossip",
+      "text": "Some villagers swear any bright herb cures fever — even RedHerb.",
+      "about": "BlueHerbCure",
+      "believed_by": []
+    },
+    {
+      "name": "YellowHerbGossip",
+      "text": "A passerby claimed YellowHerb smells like medicine, so it must work.",
+      "about": "BlueHerbCure",
+      "believed_by": []
+    }
+  ],
+  "social": [
+    {
+      "a": "Traveler",
+      "rel": "FRIENDS_WITH",
+      "b": "Lila"
+    },
+    {
+      "a": "DoctorRowan",
+      "rel": "KNOWS",
+      "b": "Lila"
+    }
+  ]
+}

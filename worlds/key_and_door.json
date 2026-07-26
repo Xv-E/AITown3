@@ -1,0 +1,141 @@
+{
+  "id": "key_and_door",
+  "title": "钥匙与门",
+  "premise": "走到储藏室拿钥匙，回到大厅对金库门使用钥匙打开通路。",
+  "locations": [
+    {
+      "name": "Hall",
+      "description": "石砌大厅。北面有一扇紧闭的金库门。",
+      "tags": "hub"
+    },
+    {
+      "name": "Storage",
+      "description": "尘土味的储藏室，架子上可能藏着东西。",
+      "tags": "item"
+    },
+    {
+      "name": "Vault",
+      "description": "金库内室。门打开后才能进入。",
+      "tags": "secret,goal"
+    }
+  ],
+  "adjacencies": [
+    {
+      "a": "Hall",
+      "b": "Storage"
+    }
+  ],
+  "persons": [
+    {
+      "name": "Traveler",
+      "located_at": "Hall",
+      "role": "player",
+      "personality": "focused, practical",
+      "background": "A lone traveler who likes solving practical puzzles around town.",
+      "parent_goal": "",
+      "goal": "Explore the hall and figure out how the vault door works",
+      "values": "curiosity,persistence",
+      "mood": "determined",
+      "hp": 100,
+      "power_level": 10
+    }
+  ],
+  "items": [
+    {
+      "name": "DoorKey",
+      "value": 50,
+      "located_at": "Storage",
+      "quest_flag": "main_macguffin",
+      "item_kind": "key",
+      "portable": true,
+      "description": "Opens VaultDoor. Use it on the door in Hall.",
+      "effects_on": [
+        {
+          "target": "VaultDoor",
+          "consume": true,
+          "preconditions": [
+            {
+              "op": "prop_eq",
+              "entity": "VaultDoor",
+              "label": "Item",
+              "prop": "locked",
+              "value": true
+            },
+            {
+              "op": "has_item",
+              "person": "@actor",
+              "item": "@tool"
+            },
+            {
+              "op": "person_at",
+              "person": "@actor",
+              "location": "@target_loc"
+            },
+            {
+              "op": "item_at",
+              "entity": "VaultDoor",
+              "location": "@target_loc"
+            }
+          ],
+          "ops": [
+            {
+              "op": "set_prop",
+              "entity": "VaultDoor",
+              "label": "Item",
+              "prop": "locked",
+              "value": false
+            },
+            {
+              "op": "link",
+              "a": "Hall",
+              "a_label": "Location",
+              "b": "Vault",
+              "b_label": "Location",
+              "rel": "ADJACENT_TO",
+              "bidirectional": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "VaultDoor",
+      "value": 0,
+      "located_at": "Hall",
+      "item_kind": "door",
+      "locked": true,
+      "portable": false,
+      "accepts_from": [
+        "DoorKey"
+      ],
+      "description": "Heavy vault door. Accepts DoorKey via world-configured graph ops."
+    }
+  ],
+  "quests": [
+    {
+      "name": "OpenTheVault",
+      "description": "Get the key and open the vault door.",
+      "stage": "fetch_key",
+      "state": "active",
+      "objective": "Collect DoorKey, then Use item on VaultDoor.",
+      "involves": [
+        "DoorKey",
+        "VaultDoor",
+        "Traveler",
+        "Vault"
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "name": "KeyInStorage",
+      "text": "The DoorKey rests on a shelf in Storage.",
+      "secret_level": 0,
+      "known_by": [
+        "Traveler"
+      ]
+    }
+  ],
+  "rumors": [],
+  "social": []
+}

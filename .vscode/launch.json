@@ -1,0 +1,66 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "AITown3: Web 服务",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/web/server.py",
+            "args": [
+                "--host",
+                "127.0.0.1",
+                "--port",
+                "8765"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "envFile": "${workspaceFolder}/.env",
+            "justMyCode": false,
+            "subProcess": false
+        },
+        {
+            "name": "AITown3: Web 服务 (终端热重载，勿用断点)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/web/server.py",
+            "args": [
+                "--host",
+                "127.0.0.1",
+                "--port",
+                "8765",
+                "--reload"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "envFile": "${workspaceFolder}/.env",
+            "justMyCode": true,
+            "subProcess": false
+        },
+        {
+            "name": "AITown3: 当前文件",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "envFile": "${workspaceFolder}/.env",
+            "justMyCode": false,
+            "subProcess": false
+        },
+        {
+            "name": "AITown3: Pytest (当前文件)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "pytest",
+            "args": [
+                "${file}",
+                "-v"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "envFile": "${workspaceFolder}/.env",
+            "justMyCode": false,
+            "subProcess": false
+        }
+    ]
+}

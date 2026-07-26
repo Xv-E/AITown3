@@ -1,0 +1,845 @@
+"""
+按角色上下文生成可用动作与参数选项。
+"""
+
+from __future__ import annotations
+
+from typing import Any, Dict, List, Optional, Tuple
+
+from registry import get_registry
+
+
+def _person_state(world, name: str) -> Optional[Dict[str, Any]]:
+    rows = world.run_query(
+        """
+        MATCH (p:Person {name: $name})
+        OPTIONAL MATCH (p)-[:LOCATED_AT]->(l:Location)
+        OPTIONAL MATCH (p)-[:HAS_ITEM]->(i:Item)
+        RETURN p.name AS name,
+               coalesce(p.hp, 0) AS hp,
+               coalesce(p.power_level, 0) AS power_level,
+               coalesce(p.dead, false) AS dead,
+               coalesce(p.is_player, false) AS is_player,
+               coalesce(p.role, 'npc') AS role,
+               l.name AS location,
+               collect(DISTINCT i.name) AS held_items,
+               p.personality AS personality,
+               p.background AS background,
+               p.parent_goal AS parent_goal,
+               coalesce(p.goal, '') AS goal,
+               p.values AS values,
+               p.mood AS mood
+        """,
+        name=name,
+    )
+    if not rows:
+        return None
+    r = rows[0]
+    held = [x for x in (r.get("held_items") or []) if x]
+    hp = int(r.get("hp") or 0)
+    dead = bool(r.get("dead"))
+    alive = hp > 0 and not dead
+    role = str(r.get("role") or "npc")
+    is_player = bool(r.get("is_player")) or role == "player"
+    return {
+        "name": r["name"],
+        "hp": hp,
+        "power_level": int(r.get("power_level") or 0),
+        "dead": dead,
+        "alive": alive,
+        "is_player": is_player,
+        "role": "player" if is_player else role,
+        "location": r.get("location"),
+        "held_items": held,
+        "personality": r.get("personality") or "",
+        "background": r.get("background") or "",
+        "parent_goal": r.get("parent_goal") or "",
+        "goal": r.get("goal") or "",
+        "values": r.get("values") or "",
+        "mood": r.get("mood") or "",
+    }
+
+
+def _adjacent_locations(world, loc: str) -> List[str]:
+    rows = world.run_query(
+        """
+        MATCH (l:Location {name: $loc})-[:ADJACENT_TO]->(n:Location)
+        RETURN n.name AS name ORDER BY name
+        """,
+        loc=loc,
+    )
+    return [r["name"] for r in rows if r.get("name")]
+
+
+def _locked_exits(world, loc: str) -> List[Dict[str, str]]:
+    """当前位置锁定门通向的地点（需 use_on 开门）。"""
+    if not loc:
+        return []
+    out = []
+    for door in _doors_at_location(world, loc):
+        if not door.get("locked"):
+            continue
+        to = door.get("connects_to") or ""
+        if not to:
+            continue
+        out.append({
+            "to": to,
+            "key": door.get("key_item") or "",
+            "door": door.get("name") or "",
+        })
+    return out
+
+
+def _people_at_location(world, loc: str, exclude: Optional[str] = None) -> List[Dict[str, Any]]:
+    rows = world.run_query(
+        """
+        MATCH (p:Person)-[:LOCATED_AT]->(l:Location {name: $loc})
+        RETURN p.name AS name,
+               coalesce(p.hp, 0) AS hp,
+               coalesce(p.dead, false) AS dead,
+               coalesce(p.power_level, 0) AS power_level,
+               coalesce(p.is_player, false) AS is_player,
+               coalesce(p.role, 'npc') AS role,
+               coalesce(p.mood, '') AS mood,
+               coalesce(p.personality, '') AS personality,
+               coalesce(p.trust_toward_player, 0) AS trust_toward_player,
+               coalesce(p.speech_style, '') AS speech_style,
+               coalesce(p.secret_policy, 'share_gossip') AS secret_policy
+        ORDER BY name
+        """,
+        loc=loc,
+    )
+    out = []
+    for r in rows:
+        n = r.get("name")
+        if not n or n == exclude:
+            continue
+        hp = int(r.get("hp") or 0)
+        dead = bool(r.get("dead"))
+        role = str(r.get("role") or "npc")
+        is_player = bool(r.get("is_player")) or role == "player"
+        personality = (r.get("personality") or "")[:80]
+        out.append({
+            "name": n,
+            "hp": hp,
+            "power_level": int(r.get("power_level") or 0),
+            "alive": hp > 0 and not dead,
+            "is_player": is_player,
+            "role": "player" if is_player else role,
+            "mood": r.get("mood") or "",
+            "personality": personality,
+            "trust_toward_player": int(r.get("trust_toward_player") or 0),
+            "speech_style": r.get("speech_style") or "",
+            "secret_policy": r.get("secret_policy") or "share_gossip",
+        })
+    return out
+
+
+def _enrich_item_interaction(item: Dict[str, Any]) -> Dict[str, Any]:
+    """用会话交互表补全 key_item / connects_to（优先于图属性）。"""
+    name = item.get("name") or ""
+    if not name:
+        return item
+    try:
+        from world_interactions import (
+            destination_from_interaction,
+            find_interaction,
+            tools_for_target,
+        )
+
+        tools = tools_for_target(name)
+        if tools:
+            item = dict(item)
+            item["key_item"] = tools[0]
+            inter = find_interaction(tools[0], name)
+            loc = item.get("_loc")  # optional
+            if inter:
+                # connects_to：link 另一端；无 loc 时取 pair 中非门所在侧需调用方传入
+                pair_dest = None
+                if loc:
+                    pair_dest = destination_from_interaction(inter, from_loc=loc)
+                if not pair_dest:
+                    from world_interactions import link_pair
+
+                    pair = link_pair(inter)
+                    if pair:
+                        a, b = pair
+                        # 若无法判断 from，保留 connects_to 旧值或取 b
+                        pair_dest = item.get("connects_to") or b
+                if pair_dest:
+                    item["connects_to"] = pair_dest
+    except Exception:
+        pass
+    return item
+
+
+def _items_at_location(world, loc: str) -> List[Dict[str, Any]]:
+    """地上且未被持有的物品（含门等固定物）。"""
+    rows = world.run_query(
+        """
+        MATCH (i:Item)-[:LOCATED_AT]->(l:Location {name: $loc})
+        WHERE NOT (:Person)-[:HAS_ITEM]->(i)
+        RETURN i.name AS name,
+               coalesce(i.value, 0) AS value,
+               coalesce(i.description, '') AS description,
+               coalesce(i.quest_flag, '') AS quest_flag,
+               coalesce(i.item_kind, '') AS item_kind,
+               coalesce(i.locked, false) AS locked,
+               coalesce(i.key_item, '') AS key_item,
+               coalesce(i.connects_to, '') AS connects_to,
+               coalesce(i.portable, true) AS portable,
+               i.script AS script
+        ORDER BY name
+        """,
+        loc=loc,
+    )
+    out = []
+    for r in rows:
+        if not r.get("name"):
+            continue
+        script_raw = r.get("script")
+        script_obj = None
+        if isinstance(script_raw, str) and script_raw.strip():
+            try:
+                import json
+
+                script_obj = json.loads(script_raw)
+            except Exception:
+                script_obj = {"lore": script_raw}
+        elif isinstance(script_raw, dict):
+            script_obj = script_raw
+        item = {
+            "name": r["name"],
+            "value": int(r.get("value") or 0),
+            "description": r.get("description") or "",
+            "quest_flag": r.get("quest_flag") or "",
+            "item_kind": r.get("item_kind") or "",
+            "locked": bool(r.get("locked")),
+            "key_item": r.get("key_item") or "",
+            "connects_to": r.get("connects_to") or "",
+            "portable": False if r.get("portable") is False else True,
+            "script": script_obj,
+            "_loc": loc,
+        }
+        out.append(_enrich_item_interaction(item))
+    return out
+
+
+
+def _item_names_at_location(world, loc: str) -> List[str]:
+    return [x["name"] for x in _items_at_location(world, loc)]
+
+
+def _pickable_names_at_location(world, loc: str) -> List[str]:
+    return [
+        x["name"]
+        for x in _items_at_location(world, loc)
+        if x.get("item_kind") != "door" and x.get("portable", True)
+    ]
+
+
+def _doors_at_location(world, loc: str) -> List[Dict[str, Any]]:
+    return [
+        x for x in _items_at_location(world, loc)
+        if (x.get("item_kind") or "").lower() == "door"
+    ]
+
+
+def _is_interactable_item(item: Dict[str, Any]) -> bool:
+    """门 / 固定物 / 带 interactive script 的机关。"""
+    kind = (item.get("item_kind") or "").lower()
+    if kind in ("door", "campfire", "source", "fixture", "puzzle", "mechanism", "tree"):
+        return True
+    if item.get("portable") is False:
+        return True
+    script = item.get("script")
+    if isinstance(script, str) and script.strip():
+        try:
+            import json
+
+            script = json.loads(script)
+        except Exception:
+            script = {"lore": script}
+    if isinstance(script, dict):
+        if script.get("interactive") or script.get("behavior"):
+            return True
+    return False
+
+
+def _split_ground_items(
+    items: List[Dict[str, Any]],
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """拆成 (可拾取物品, 可交互物)。"""
+    pickable: List[Dict[str, Any]] = []
+    interactables: List[Dict[str, Any]] = []
+    for it in items:
+        if _is_interactable_item(it):
+            interactables.append(it)
+        else:
+            pickable.append(it)
+    return pickable, interactables
+
+
+def _field(
+    name: str,
+    typ: str,
+    *,
+    value: str = "",
+    options: Optional[List[str]] = None,
+    readonly: bool = False,
+    label: Optional[str] = None,
+) -> Dict[str, Any]:
+    return {
+        "name": name,
+        "type": typ,
+        "label": label or name,
+        "value": value,
+        "options": options or [],
+        "readonly": readonly,
+    }
+
+
+def _build_action_entries(world, person: str, state: Dict[str, Any]) -> List[Dict[str, Any]]:
+    reg = get_registry()
+    loc = state.get("location")
+    held = state.get("held_items") or []
+    alive = state.get("alive", True)
+    adjacent = _adjacent_locations(world, loc) if loc else []
+    people_here = _people_at_location(world, loc, exclude=person) if loc else []
+    alive_here = [p["name"] for p in people_here if p["alive"]]
+    items_here = _pickable_names_at_location(world, loc) if loc else []
+    doors_here = _doors_at_location(world, loc) if loc else []
+    locked_doors = [
+        d for d in doors_here
+        if d.get("locked") and d.get("key_item")
+    ]
+    # 会话交互：当前地点上的任意目标（物品/人）× 手持工具
+    interact_matches: List[Dict[str, Any]] = []
+    catalog: Dict[str, Any] = {}
+    try:
+        from world_interactions import (
+            destination_from_interaction,
+            list_interactions,
+            use_on_catalog,
+        )
+
+        catalog = use_on_catalog()
+        ground_names = {x["name"] for x in (_items_at_location(world, loc) if loc else [])}
+        people_names = set(alive_here)
+        present = ground_names | people_names
+        for inter in list_interactions():
+            if inter.target not in present:
+                continue
+            if inter.tool not in held:
+                continue
+            to = destination_from_interaction(inter, from_loc=loc) if loc else None
+            if not to:
+                to = loc or ""
+            interact_matches.append({
+                "name": inter.target,
+                "key_item": inter.tool,
+                "connects_to": to,
+                "consume": inter.consumes_tool,
+            })
+    except Exception:
+        pass
+    if not interact_matches:
+        interact_matches = [
+            d for d in locked_doors if d.get("key_item") in held
+        ]
+    # 当前地点所有可点目标（用于 UI 选目标）
+    target_opts = sorted(
+        {x["name"] for x in (_items_at_location(world, loc) if loc else [])}
+        | set(alive_here)
+    )
+    entries: List[Dict[str, Any]] = []
+
+    for action in reg.all():
+        fields: List[Dict[str, Any]] = []
+        available = False
+        defaults: Dict[str, str] = {}
+
+        if action.name == "move":
+            if loc and adjacent:
+                available = True
+                defaults = {"c": person, "from": loc, "to": adjacent[0]}
+                fields = [
+                    _field("c", "Person", value=person, readonly=True, label="角色"),
+                    _field("from", "Location", value=loc, readonly=True, label="起点"),
+                    _field("to", "Location", value=adjacent[0], options=adjacent, label="目的地"),
+                ]
+
+        elif action.name == "pick_up":
+            if loc and items_here:
+                available = True
+                defaults = {"c": person, "i": items_here[0], "l": loc}
+                fields = [
+                    _field("c", "Person", value=person, readonly=True, label="角色"),
+                    _field("i", "Item", value=items_here[0], options=items_here, label="物品"),
+                    _field("l", "Location", value=loc, readonly=True, label="位置"),
+                ]
+
+        elif action.name == "drop":
+            if held and loc:
+                available = True
+                defaults = {"c": person, "i": held[0], "l": loc}
+                fields = [
+                    _field("c", "Person", value=person, readonly=True, label="角色"),
+                    _field("i", "Item", value=held[0], options=held, label="物品"),
+                    _field("l", "Location", value=loc, readonly=True, label="位置"),
+                ]
+
+        elif action.name == "give":
+            if held and alive_here and loc:
+                available = True
+                defaults = {"giver": person, "i": held[0], "receiver": alive_here[0], "l": loc}
+                fields = [
+                    _field("giver", "Person", value=person, readonly=True, label="给予者"),
+                    _field("i", "Item", value=held[0], options=held, label="物品"),
+                    _field("receiver", "Person", value=alive_here[0], options=alive_here, label="接收者"),
+                    _field("l", "Location", value=loc, readonly=True, label="位置"),
+                ]
+
+        elif action.name == "talk":
+            if alive and alive_here and loc:
+                available = True
+                defaults = {"a": person, "b": alive_here[0], "l": loc}
+                fields = [
+                    _field("a", "Person", value=person, readonly=True, label="角色 A"),
+                    _field("b", "Person", value=alive_here[0], options=alive_here, label="对话对象"),
+                    _field("l", "Location", value=loc, readonly=True, label="位置"),
+                ]
+
+        elif action.name == "attack":
+            if alive and alive_here and loc:
+                available = True
+                defaults = {"attacker": person, "target": alive_here[0], "l": loc}
+                fields = [
+                    _field("attacker", "Person", value=person, readonly=True, label="攻击者"),
+                    _field("target", "Person", value=alive_here[0], options=alive_here, label="目标"),
+                    _field("l", "Location", value=loc, readonly=True, label="位置"),
+                ]
+
+        elif action.name == "use_item":
+            if alive and held:
+                available = True
+                defaults = {"c": person, "i": held[0]}
+                fields = [
+                    _field("c", "Person", value=person, readonly=True, label="角色"),
+                    _field("i", "Item", value=held[0], options=held, label="物品"),
+                ]
+
+        elif action.name == "use_on":
+            # 有背包 + 同地有人或物：可点「对目标使用」，具体是否可行看世界交互表
+            matching = interact_matches
+            if alive and loc and held and target_opts:
+                available = True
+                if matching:
+                    hit = matching[0]
+                    tool = hit["key_item"]
+                    tgt = hit["name"]
+                    to = hit.get("connects_to") or loc
+                    tool_opts = list({m["key_item"] for m in matching})
+                    tgt_opts = list({m["name"] for m in matching}) or target_opts
+                else:
+                    tool = held[0]
+                    tgt = target_opts[0]
+                    to = loc
+                    tool_opts = list(held)
+                    tgt_opts = target_opts
+                defaults = {
+                    "c": person,
+                    "i": tool,
+                    "target": tgt,
+                    "from": loc,
+                    "to": to,
+                }
+                fields = [
+                    _field("c", "Person", value=person, readonly=True, label="角色"),
+                    _field("i", "Item", value=tool, options=tool_opts, label="使用物"),
+                    _field("target", "Item", value=tgt, options=tgt_opts, label="目标"),
+                    _field("from", "Location", value=loc, readonly=True, label="当前位置"),
+                    _field("to", "Location", value=to, readonly=True, label="参考地点"),
+                ]
+
+        elif action.name == "interact":
+            scripted = []
+            for it in context.get("interactables_here") or []:
+                sc = it.get("script") if isinstance(it, dict) else None
+                if isinstance(sc, dict) and (sc.get("interactive") or sc.get("behavior")):
+                    scripted.append(it["name"])
+                elif (it.get("item_kind") or "").lower() in ("puzzle", "mechanism", "tree"):
+                    scripted.append(it["name"])
+            if alive and loc and scripted:
+                available = True
+                defaults = {"c": person, "target": scripted[0], "option": "auto"}
+                fields = [
+                    _field("c", "Person", value=person, readonly=True, label="角色"),
+                    _field("target", "Item", value=scripted[0], options=scripted, label="机关"),
+                    _field(
+                        "option",
+                        "Item",
+                        value="auto",
+                        options=["auto"],
+                        label="选项(auto=LLM选择)",
+                    ),
+                ]
+
+        if available:
+            # 用 check 标注首个默认组合是否可行
+            feasible, reason = action.check(world, **defaults)
+            entries.append({
+                "name": action.name,
+                "description": action.description,
+                "category": action.category,
+                "available": True,
+                "feasible": feasible,
+                "feasible_hint": reason if not feasible else "可执行",
+                "defaults": defaults,
+                "fields": fields,
+            })
+
+    # 不可用的动作也列出（灰色），方便用户理解
+    available_names = {e["name"] for e in entries}
+    for action in reg.all():
+        if action.name not in available_names:
+            reason = _unavailable_reason(
+                action.name, loc, held, alive, adjacent, alive_here, items_here, locked_doors
+            )
+            entries.append({
+                "name": action.name,
+                "description": action.description,
+                "category": action.category,
+                "available": False,
+                "feasible": False,
+                "feasible_hint": reason,
+                "defaults": {},
+                "fields": [],
+            })
+
+    # 可用动作排前面
+    entries.sort(key=lambda x: (not x["available"], x["name"]))
+    return entries
+
+
+def _unavailable_reason(
+    action_name: str,
+    loc: Optional[str],
+    held: List[str],
+    alive: bool,
+    adjacent: List[str],
+    alive_here: List[str],
+    items_here: List[str],
+    locked_doors: Optional[List[Dict[str, Any]]] = None,
+) -> str:
+    if not loc:
+        return "角色没有当前位置"
+    locked_doors = locked_doors or []
+    use_on_hint = ""
+    if action_name == "use_on":
+        if not held:
+            use_on_hint = "没有持有物品"
+        elif not alive:
+            use_on_hint = "角色已死亡"
+        else:
+            use_on_hint = "同地点没有可选目标"
+    reasons = {
+        "move": "没有相邻地点可去" if not adjacent else "",
+        "pick_up": "当前位置没有可拾取物品" if not items_here else "",
+        "drop": "没有持有物品" if not held else "",
+        "give": "需要持有物品且同位置有其他角色" if not (held and alive_here) else "",
+        "talk": "同位置没有其他存活角色" if not alive_here else ("角色已死亡" if not alive else ""),
+        "attack": "同位置没有其他存活角色" if not alive_here else ("角色已死亡" if not alive else ""),
+        "use_item": "没有持有物品" if not held else ("角色已死亡" if not alive else ""),
+        "use_on": use_on_hint or "当前不可用",
+    }
+    return reasons.get(action_name, "当前不可用")
+
+
+def list_characters(world) -> List[Dict[str, Any]]:
+    names = world.list_entities("Person")
+    out = []
+    for name in names:
+        state = _person_state(world, name)
+        if state:
+            out.append({
+                "name": state["name"],
+                "location": state["location"],
+                "hp": state["hp"],
+                "power_level": state["power_level"],
+                "alive": state["alive"],
+                "held_items": state["held_items"],
+                "is_player": state["is_player"],
+                "role": state["role"],
+            })
+    return out
+
+
+def get_player(world) -> Optional[Dict[str, Any]]:
+    """返回 is_player / role=player 的角色；若多个取第一个。"""
+    rows = world.run_query(
+        """
+        MATCH (p:Person)
+        WHERE coalesce(p.is_player, false) = true OR coalesce(p.role, '') = 'player'
+        RETURN p.name AS name
+        ORDER BY p.name
+        LIMIT 1
+        """
+    )
+    if rows and rows[0].get("name"):
+        return _person_state(world, rows[0]["name"])
+    # 兜底：名为 Traveler
+    for name in world.list_entities("Person") or []:
+        if name == "Traveler":
+            return _person_state(world, name)
+    return None
+
+
+def get_location_info(world, loc: str) -> Optional[Dict[str, Any]]:
+    rows = world.run_query(
+        """
+        MATCH (l:Location {name: $loc})
+        RETURN l.name AS name,
+               coalesce(l.description, '') AS description,
+               coalesce(l.tags, '') AS tags
+        """,
+        loc=loc,
+    )
+    if not rows:
+        return None
+    r = rows[0]
+    return {
+        "name": r["name"],
+        "description": r.get("description") or "",
+        "tags": r.get("tags") or "",
+    }
+
+
+def list_locations_graph(world) -> Dict[str, Any]:
+    """全图地点 + 邻接边，供房间地图布局。
+
+    每个地点分开返回：
+      - persons: 在场人物
+      - items: 可拾取地上物品
+      - interactables: 门等可交互物
+    """
+    loc_rows = world.run_query(
+        """
+        MATCH (l:Location)
+        OPTIONAL MATCH (p:Person)-[:LOCATED_AT]->(l)
+        OPTIONAL MATCH (l)-[:ADJACENT_TO]->(adj:Location)
+        RETURN l.name AS name,
+               coalesce(l.description, '') AS description,
+               coalesce(l.tags, '') AS tags,
+               collect(DISTINCT p.name) AS persons,
+               collect(DISTINCT adj.name) AS adjacent
+        ORDER BY name
+        """
+    )
+    edge_rows = world.run_query(
+        """
+        MATCH (a:Location)-[:ADJACENT_TO]->(b:Location)
+        WHERE a.name < b.name
+        RETURN a.name AS a, b.name AS b
+        ORDER BY a, b
+        """
+    )
+    locations = []
+    for r in loc_rows:
+        name = r.get("name")
+        if not name:
+            continue
+        persons = [x for x in (r.get("persons") or []) if x]
+        adjacent = [x for x in (r.get("adjacent") or []) if x]
+        pickable, interactables = _split_ground_items(_items_at_location(world, name))
+        locations.append({
+            "name": name,
+            "description": r.get("description") or "",
+            "tags": r.get("tags") or "",
+            "persons": persons,
+            "items": [x["name"] for x in pickable],
+            "interactables": [
+                {
+                    "name": x["name"],
+                    "item_kind": x.get("item_kind") or "",
+                    "locked": bool(x.get("locked")),
+                    "key_item": x.get("key_item") or "",
+                    "connects_to": x.get("connects_to") or "",
+                }
+                for x in interactables
+            ],
+            "adjacent": adjacent,
+        })
+    edges = [{"a": r["a"], "b": r["b"]} for r in edge_rows if r.get("a") and r.get("b")]
+    return {"locations": locations, "edges": edges}
+
+
+def get_character_actions(world, person: str) -> Dict[str, Any]:
+    state = _person_state(world, person)
+    if state is None:
+        return {"found": False, "name": person}
+
+    loc = state.get("location")
+    people_here = _people_at_location(world, loc, exclude=person) if loc else []
+    all_ground = _items_at_location(world, loc) if loc else []
+    pickable, interactables = _split_ground_items(all_ground)
+    adjacent = _adjacent_locations(world, loc) if loc else []
+    locked = _locked_exits(world, loc) if loc else []
+
+    actions = _build_action_entries(world, person, state)
+    available_count = sum(1 for a in actions if a["available"])
+
+    return {
+        "found": True,
+        "character": state,
+        "context": {
+            "adjacent_locations": adjacent,
+            "locked_exits": locked,
+            "people_here": people_here,
+            "items_here": [x["name"] for x in pickable],
+            "items_here_detail": pickable,
+            "interactables_here": interactables,
+            # 兼容：全部地上实体（含门）
+            "ground_all_detail": all_ground,
+        },
+        "actions": actions,
+        "available_action_count": available_count,
+    }
+
+
+def get_play_state(world) -> Dict[str, Any]:
+    """一次拉齐游玩状态。"""
+    player = get_player(world)
+    if player is None:
+        return {
+            "found": False,
+            "message": "当前世界没有玩家角色。请加载模板世界，或用导演创建事件。",
+            "map": list_locations_graph(world),
+        }
+
+    name = player["name"]
+    loc = player.get("location")
+    actions_data = get_character_actions(world, name)
+    context = actions_data.get("context") or {}
+    loc_info = get_location_info(world, loc) if loc else None
+    quests = []
+    try:
+        qrows = world.run_query(
+            """
+            MATCH (q:Quest)
+            RETURN q.name AS name,
+                   coalesce(q.description, '') AS description,
+                   coalesce(q.stage, '') AS stage,
+                   coalesce(q.state, '') AS state,
+                   coalesce(q.objective, '') AS objective
+            ORDER BY name
+            """
+        )
+        quests = [
+            {
+                "name": r["name"],
+                "description": r.get("description") or "",
+                "stage": r.get("stage") or "",
+                "state": r.get("state") or "",
+                "objective": r.get("objective") or "",
+            }
+            for r in qrows
+            if r.get("name")
+        ]
+    except Exception:
+        quests = []
+
+    known_clues = _player_known_clues(world, name)
+
+    return {
+        "found": True,
+        "player": player,
+        "current_location": loc_info or {"name": loc, "description": "", "tags": ""},
+        "adjacent": context.get("adjacent_locations") or [],
+        "locked_exits": context.get("locked_exits") or [],
+        "here": {
+            "persons": context.get("people_here") or [],
+            "items": context.get("items_here_detail")
+            or [{"name": n} for n in (context.get("items_here") or [])],
+            "interactables": context.get("interactables_here") or [],
+        },
+        "inventory": player.get("held_items") or [],
+        "use_on_by_target": _use_on_catalog_safe(),
+        "known_clues": known_clues,
+        "available_actions": [
+            a for a in (actions_data.get("actions") or []) if a.get("available")
+        ],
+        "all_actions": actions_data.get("actions") or [],
+        "quests": quests,
+        "map": list_locations_graph(world),
+        "simulation": _play_simulation_snapshot(world),
+        "characters": list_characters(world),
+    }
+
+
+def _player_known_clues(world, person: str) -> List[Dict[str, Any]]:
+    """主角已知 Fact / 相信的 Rumor，供玩法页线索栏。"""
+    out: List[Dict[str, Any]] = []
+    try:
+        facts = world.run_query(
+            """
+            MATCH (p:Person {name: $n})-[:KNOWS_FACT]->(f:Fact)
+            RETURN f.name AS name, coalesce(f.text, '') AS text,
+                   coalesce(f.secret_level, 0) AS secret_level
+            ORDER BY name
+            """,
+            n=person,
+        ) or []
+        for r in facts:
+            if not r.get("name"):
+                continue
+            out.append({
+                "kind": "fact",
+                "name": r["name"],
+                "text": r.get("text") or "",
+                "secret_level": int(r.get("secret_level") or 0),
+            })
+        rumors = world.run_query(
+            """
+            MATCH (p:Person {name: $n})-[:BELIEVES]->(r:Rumor)
+            RETURN r.name AS name, coalesce(r.text, '') AS text
+            ORDER BY name
+            """,
+            n=person,
+        ) or []
+        for r in rumors:
+            if not r.get("name"):
+                continue
+            out.append({
+                "kind": "rumor",
+                "name": r["name"],
+                "text": r.get("text") or "",
+                "secret_level": 0,
+            })
+    except Exception:
+        pass
+    return out
+
+
+def _use_on_catalog_safe() -> Dict[str, Any]:
+    try:
+        from world_interactions import use_on_catalog
+
+        return use_on_catalog()
+    except Exception:
+        return {}
+
+
+def _play_simulation_snapshot(world) -> Dict[str, Any]:
+    """玩法页 NPC 活动摘要。"""
+    try:
+        from world_simulator import get_world_simulator
+
+        sim = get_world_simulator()
+        return {
+            "sim_time": sim.sim_time,
+            "tick": sim.tick_count,
+            "npc_activity": sim.npc_activity_summary(world),
+        }
+    except Exception:
+        return {"sim_time": 0, "tick": 0, "npc_activity": []}

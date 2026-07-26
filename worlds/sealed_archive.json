@@ -1,0 +1,638 @@
+{
+  "id": "sealed_archive",
+  "title": "封印档案室",
+  "premise": "从酒馆打听入手：铁匠铺撬棍撬开庭院活板门，地窖取锈钥匙开档案门；可选药膏救学者、火漆盖文书安抚守卫。",
+  "locations": [
+    {
+      "name": "MarketSquare",
+      "description": "小镇广场。摊位与告示板旁总能听到闲话。",
+      "tags": "hub,market"
+    },
+    {
+      "name": "Tavern",
+      "description": "暖黄灯光的旅店。老板娘消息灵通。",
+      "tags": "social,info"
+    },
+    {
+      "name": "Workshop",
+      "description": "铁匠铺。工具挂满墙，地上散落金属件。",
+      "tags": "item,craft"
+    },
+    {
+      "name": "Courtyard",
+      "description": "石板庭院。中央有一扇上了锈的活板门。",
+      "tags": "hub,outdoor"
+    },
+    {
+      "name": "Cellar",
+      "description": "潮冷地窖。架子上可能藏着旧物。活板门打开后才能进出。",
+      "tags": "secret,item"
+    },
+    {
+      "name": "ArchiveAntechamber",
+      "description": "档案前厅。尽头是沉重的封印门，伤员靠墙坐着。",
+      "tags": "quest"
+    },
+    {
+      "name": "SealedArchive",
+      "description": "尘封的档案内室。门打开后才能进入。",
+      "tags": "secret,goal"
+    }
+  ],
+  "adjacencies": [
+    {
+      "a": "MarketSquare",
+      "b": "Tavern"
+    },
+    {
+      "a": "MarketSquare",
+      "b": "Workshop"
+    },
+    {
+      "a": "MarketSquare",
+      "b": "Courtyard"
+    },
+    {
+      "a": "Courtyard",
+      "b": "ArchiveAntechamber"
+    }
+  ],
+  "persons": [
+    {
+      "name": "Traveler",
+      "located_at": "MarketSquare",
+      "role": "player",
+      "personality": "curious, persistent, careful",
+      "background": "A courier hired about sealed records. Curious and persistent; does not yet know how the doors open and asks locals.",
+      "parent_goal": "",
+      "goal": "Ask around town for leads about the sealed archive",
+      "values": "curiosity,duty,compassion",
+      "mood": "determined",
+      "hp": 100,
+      "power_level": 12,
+      "speech_style": "plain and brief"
+    },
+    {
+      "name": "InnkeeperMara",
+      "located_at": "Tavern",
+      "role": "npc",
+      "personality": "witty, observant, helpful",
+      "background": "Runs the tavern; witty and observant, trades gossip and steers travelers toward useful rumors.",
+      "parent_goal": "",
+      "values": "hospitality,curiosity",
+      "mood": "amused",
+      "hp": 90,
+      "power_level": 8,
+      "speech_style": "warm and teasing",
+      "secret_policy": "share_gossip",
+      "trust_toward_player": 4
+    },
+    {
+      "name": "BlacksmithTor",
+      "located_at": "Workshop",
+      "role": "npc",
+      "personality": "blunt, helpful",
+      "background": "Town smith; blunt and helpful, keeps tools orderly and answers practical questions.",
+      "parent_goal": "",
+      "values": "craft,honesty",
+      "mood": "busy",
+      "hp": 110,
+      "power_level": 15,
+      "speech_style": "short and gruff",
+      "secret_policy": "share_gossip",
+      "trust_toward_player": 3
+    },
+    {
+      "name": "GuardRenn",
+      "located_at": "Courtyard",
+      "role": "antagonist",
+      "personality": "suspicious, rigid",
+      "background": "Suspicious courtyard guard; rigid about order, distrusts strangers near the cellar without proper papers.",
+      "parent_goal": "",
+      "values": "order,loyalty",
+      "mood": "wary",
+      "hp": 120,
+      "power_level": 18,
+      "speech_style": "formal and clipped",
+      "secret_policy": "guarded",
+      "trust_toward_player": 0,
+      "accepts_from": [
+        "BlankWarrant"
+      ]
+    },
+    {
+      "name": "ScholarElise",
+      "located_at": "ArchiveAntechamber",
+      "role": "npc",
+      "personality": "frail, grateful, scholarly",
+      "background": "Frail scholar injured while researching; grateful when helped and protective of archive knowledge.",
+      "parent_goal": "",
+      "values": "knowledge,gratitude",
+      "mood": "pained",
+      "hp": 25,
+      "power_level": 6,
+      "speech_style": "soft and precise",
+      "secret_policy": "guarded",
+      "trust_toward_player": 0,
+      "accepts_from": [
+        "HealingSalve"
+      ]
+    }
+  ],
+  "items": [
+    {
+      "name": "Crowbar",
+      "value": 20,
+      "located_at": "Workshop",
+      "item_kind": "tool",
+      "portable": true,
+      "description": "Pries open Trapdoor. Does not disappear after use.",
+      "effects_on": [
+        {
+          "target": "Trapdoor",
+          "consume": false,
+          "preconditions": [
+            {
+              "op": "prop_eq",
+              "entity": "Trapdoor",
+              "label": "Item",
+              "prop": "locked",
+              "value": true
+            },
+            {
+              "op": "has_item",
+              "person": "@actor",
+              "item": "@tool"
+            },
+            {
+              "op": "person_at",
+              "person": "@actor",
+              "location": "@target_loc"
+            },
+            {
+              "op": "item_at",
+              "entity": "Trapdoor",
+              "location": "@target_loc"
+            }
+          ],
+          "ops": [
+            {
+              "op": "set_prop",
+              "entity": "Trapdoor",
+              "label": "Item",
+              "prop": "locked",
+              "value": false
+            },
+            {
+              "op": "link",
+              "a": "Courtyard",
+              "a_label": "Location",
+              "b": "Cellar",
+              "b_label": "Location",
+              "rel": "ADJACENT_TO",
+              "bidirectional": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Trapdoor",
+      "value": 0,
+      "located_at": "Courtyard",
+      "item_kind": "door",
+      "locked": true,
+      "portable": false,
+      "accepts_from": [
+        "Crowbar"
+      ],
+      "description": "Rusted courtyard hatch. Accepts Crowbar to open the Cellar path."
+    },
+    {
+      "name": "RustyKey",
+      "value": 40,
+      "located_at": "Cellar",
+      "quest_flag": "main_macguffin",
+      "item_kind": "key",
+      "portable": true,
+      "description": "Opens ArchiveDoor. Consumed on use.",
+      "effects_on": [
+        {
+          "target": "ArchiveDoor",
+          "consume": true,
+          "preconditions": [
+            {
+              "op": "prop_eq",
+              "entity": "ArchiveDoor",
+              "label": "Item",
+              "prop": "locked",
+              "value": true
+            },
+            {
+              "op": "has_item",
+              "person": "@actor",
+              "item": "@tool"
+            },
+            {
+              "op": "person_at",
+              "person": "@actor",
+              "location": "@target_loc"
+            },
+            {
+              "op": "item_at",
+              "entity": "ArchiveDoor",
+              "location": "@target_loc"
+            }
+          ],
+          "ops": [
+            {
+              "op": "set_prop",
+              "entity": "ArchiveDoor",
+              "label": "Item",
+              "prop": "locked",
+              "value": false
+            },
+            {
+              "op": "link",
+              "a": "ArchiveAntechamber",
+              "a_label": "Location",
+              "b": "SealedArchive",
+              "b_label": "Location",
+              "rel": "ADJACENT_TO",
+              "bidirectional": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ArchiveDoor",
+      "value": 0,
+      "located_at": "ArchiveAntechamber",
+      "item_kind": "door",
+      "locked": true,
+      "portable": false,
+      "accepts_from": [
+        "RustyKey"
+      ],
+      "description": "Heavy sealed door. Accepts RustyKey."
+    },
+    {
+      "name": "HealingSalve",
+      "value": 30,
+      "located_at": "MarketSquare",
+      "item_kind": "consumable",
+      "portable": true,
+      "description": "Use on ScholarElise. Consumed. Restores her strength so she can talk clearly.",
+      "effects_on": [
+        {
+          "target": "ScholarElise",
+          "consume": true,
+          "preconditions": [
+            {
+              "op": "has_item",
+              "person": "@actor",
+              "item": "@tool"
+            },
+            {
+              "op": "person_at",
+              "person": "@actor",
+              "location": "@target_loc"
+            },
+            {
+              "op": "person_at",
+              "person": "ScholarElise",
+              "location": "@target_loc"
+            }
+          ],
+          "ops": [
+            {
+              "op": "set_prop",
+              "entity": "ScholarElise",
+              "label": "Person",
+              "prop": "hp",
+              "value": 100
+            },
+            {
+              "op": "set_prop",
+              "entity": "ScholarElise",
+              "label": "Person",
+              "prop": "mood",
+              "value": "grateful"
+            },
+            {
+              "op": "set_prop",
+              "entity": "ScholarElise",
+              "label": "Person",
+              "prop": "trust_toward_player",
+              "value": 8
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Potion",
+      "value": 40,
+      "located_at": "MarketSquare",
+      "item_kind": "consumable",
+      "portable": true,
+      "description": "Drink with Use item to restore your own HP. Consumed."
+    },
+    {
+      "name": "BrassSeal",
+      "value": 25,
+      "located_at": "Cellar",
+      "item_kind": "tool",
+      "portable": true,
+      "description": "Stamp BlankWarrant. Seal itself is not consumed.",
+      "effects_on": [
+        {
+          "target": "BlankWarrant",
+          "consume": false,
+          "preconditions": [
+            {
+              "op": "has_item",
+              "person": "@actor",
+              "item": "@tool"
+            },
+            {
+              "op": "person_at",
+              "person": "@actor",
+              "location": "@target_loc"
+            },
+            {
+              "op": "item_at",
+              "entity": "BlankWarrant",
+              "location": "@target_loc"
+            },
+            {
+              "op": "prop_neq",
+              "entity": "BlankWarrant",
+              "label": "Item",
+              "prop": "stamped",
+              "value": true
+            }
+          ],
+          "ops": [
+            {
+              "op": "set_prop",
+              "entity": "BlankWarrant",
+              "label": "Item",
+              "prop": "stamped",
+              "value": true
+            },
+            {
+              "op": "set_prop",
+              "entity": "BlankWarrant",
+              "label": "Item",
+              "prop": "description",
+              "value": "Official stamped warrant. GuardRenn may accept it."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "BlankWarrant",
+      "value": 15,
+      "located_at": "Tavern",
+      "item_kind": "document",
+      "portable": true,
+      "stamped": false,
+      "accepts_from": [
+        "BrassSeal"
+      ],
+      "description": "Unsigned paper. Use BrassSeal on it while holding both.",
+      "effects_on": [
+        {
+          "target": "GuardRenn",
+          "consume": true,
+          "preconditions": [
+            {
+              "op": "prop_eq",
+              "entity": "BlankWarrant",
+              "label": "Item",
+              "prop": "stamped",
+              "value": true
+            },
+            {
+              "op": "has_item",
+              "person": "@actor",
+              "item": "@tool"
+            },
+            {
+              "op": "person_at",
+              "person": "@actor",
+              "location": "@target_loc"
+            },
+            {
+              "op": "person_at",
+              "person": "GuardRenn",
+              "location": "@target_loc"
+            }
+          ],
+          "ops": [
+            {
+              "op": "set_prop",
+              "entity": "GuardRenn",
+              "label": "Person",
+              "prop": "mood",
+              "value": "appeased"
+            },
+            {
+              "op": "set_prop",
+              "entity": "GuardRenn",
+              "label": "Person",
+              "prop": "trust_toward_player",
+              "value": 40
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Lantern",
+      "value": 10,
+      "located_at": "Workshop",
+      "item_kind": "tool",
+      "portable": true,
+      "description": "Ordinary lantern. No special world interactions — decoy item."
+    }
+  ],
+  "quests": [
+    {
+      "name": "BreachTheArchive",
+      "description": "Learn from locals how to reach the sealed archive, then get inside.",
+      "stage": "ask_around",
+      "state": "active",
+      "objective": "Ask locals, open the way into the sealed archive, and enter it.",
+      "involves": [
+        "InnkeeperMara",
+        "BlacksmithTor",
+        "Crowbar",
+        "Trapdoor",
+        "RustyKey",
+        "ArchiveDoor",
+        "Traveler",
+        "SealedArchive",
+        "ScholarElise"
+      ]
+    },
+    {
+      "name": "AidTheScholar",
+      "description": "Optional: treat ScholarElise so she can share what she knows about the archive door.",
+      "stage": "find_salve",
+      "state": "active",
+      "objective": "Help the injured scholar in the antechamber.",
+      "involves": [
+        "HealingSalve",
+        "ScholarElise",
+        "Traveler",
+        "InnkeeperMara"
+      ],
+      "giver": "InnkeeperMara"
+    },
+    {
+      "name": "QuietTheGuard",
+      "description": "Optional: stamp a warrant and show it to GuardRenn.",
+      "stage": "find_seal",
+      "state": "active",
+      "objective": "Calm the courtyard guard with proper papers.",
+      "involves": [
+        "BrassSeal",
+        "BlankWarrant",
+        "GuardRenn",
+        "InnkeeperMara"
+      ],
+      "giver": "InnkeeperMara"
+    }
+  ],
+  "facts": [
+    {
+      "name": "CourierBrief",
+      "text": "You were hired to recover sealed records from the town archive. You do not yet know how the doors open. People at the Tavern often hear useful gossip.",
+      "secret_level": 0,
+      "known_by": [
+        "Traveler"
+      ]
+    },
+    {
+      "name": "AskTorForCrowbar",
+      "text": "BlacksmithTor at the Workshop keeps a Crowbar by the forge. It can pry open the Courtyard Trapdoor.",
+      "secret_level": 0,
+      "known_by": [
+        "InnkeeperMara",
+        "BlacksmithTor"
+      ]
+    },
+    {
+      "name": "TrapdoorLeadsToCellar",
+      "text": "The rusted Trapdoor in the Courtyard leads down into a Cellar once forced open.",
+      "secret_level": 0,
+      "known_by": [
+        "InnkeeperMara",
+        "GuardRenn",
+        "BlacksmithTor"
+      ]
+    },
+    {
+      "name": "KeyInCellar",
+      "text": "A RustyKey that opens ArchiveDoor is hidden in the Cellar under the Courtyard Trapdoor.",
+      "secret_level": 1,
+      "known_by": [
+        "InnkeeperMara",
+        "ScholarElise"
+      ]
+    },
+    {
+      "name": "EliseNeedsSalve",
+      "text": "ScholarElise is hurt in ArchiveAntechamber. HealingSalve from MarketSquare can restore her so she can talk clearly.",
+      "secret_level": 0,
+      "known_by": [
+        "InnkeeperMara"
+      ]
+    },
+    {
+      "name": "EliseKnowsArchiveDoor",
+      "text": "ArchiveDoor will only open with the RustyKey from the Cellar. After that you can enter SealedArchive.",
+      "secret_level": 1,
+      "known_by": [
+        "ScholarElise"
+      ]
+    },
+    {
+      "name": "SealStampsWarrant",
+      "text": "BrassSeal from the Cellar can stamp BlankWarrant found at the Tavern. The stamped warrant may calm GuardRenn.",
+      "secret_level": 1,
+      "known_by": [
+        "InnkeeperMara"
+      ]
+    },
+    {
+      "name": "PotionAtMarket",
+      "text": "A Potion on MarketSquare can be drunk (Use item) to heal yourself if you are injured.",
+      "secret_level": 0,
+      "known_by": [
+        "InnkeeperMara"
+      ]
+    },
+    {
+      "name": "LanternIsDecoy",
+      "text": "The Lantern in the Workshop is ordinary and does not open any doors.",
+      "secret_level": 0,
+      "known_by": [
+        "BlacksmithTor"
+      ]
+    }
+  ],
+  "rumors": [
+    {
+      "name": "CellarWhispers",
+      "text": "Folks say the courtyard hatch hides damp shelves and old keys.",
+      "about": "KeyInCellar",
+      "believed_by": [
+        "InnkeeperMara",
+        "GuardRenn"
+      ]
+    },
+    {
+      "name": "WarrantGossip",
+      "text": "Paperwork with a brass seal can quiet the courtyard guard.",
+      "about": "SealStampsWarrant",
+      "believed_by": [
+        "InnkeeperMara"
+      ]
+    },
+    {
+      "name": "HurtScholarRumor",
+      "text": "Someone collapsed in the archive antechamber and needs salve from the square.",
+      "about": "EliseNeedsSalve",
+      "believed_by": [
+        "InnkeeperMara"
+      ]
+    }
+  ],
+  "social": [
+    {
+      "a": "InnkeeperMara",
+      "rel": "FRIENDS_WITH",
+      "b": "BlacksmithTor"
+    },
+    {
+      "a": "GuardRenn",
+      "rel": "KNOWS",
+      "b": "ScholarElise"
+    },
+    {
+      "a": "BlacksmithTor",
+      "rel": "KNOWS",
+      "b": "GuardRenn"
+    },
+    {
+      "a": "InnkeeperMara",
+      "rel": "KNOWS",
+      "b": "ScholarElise"
+    }
+  ]
+}
