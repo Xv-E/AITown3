@@ -95,7 +95,7 @@ def _pick_explore(world: "Neo4jWorld", character: str, *, prefer_unvisited: bool
     return {
         "goal": goal,
         "target_entity": pool[0],
-        "reason": f"根据设定：{'探索未知区域' if goal.startswith('Explore') else '前往目标地点'} {pool[0]}",
+        "reason": f"Based on profile: {'explore unknown area' if goal.startswith('Explore') else 'go to location'} {pool[0]}",
         "priority": 0.9,
         "confidence": 0.75,
     }
@@ -108,7 +108,7 @@ def _pick_social(world: "Neo4jWorld", character: str) -> Optional[Dict[str, Any]
     return {
         "goal": "Gain information",
         "target_entity": persons[0],
-        "reason": f"根据设定：与 {persons[0]} 交流获取信息",
+        "reason": f"Based on profile: talk to {persons[0]} for information",
         "priority": 0.8,
         "confidence": 0.7,
     }
@@ -130,7 +130,7 @@ def _pick_collect(world: "Neo4jWorld", character: str) -> Optional[Dict[str, Any
     return {
         "goal": "Collect item",
         "target_entity": pickable[0],
-        "reason": f"根据设定：收集物品 {pickable[0]}",
+        "reason": f"Based on profile: collect item {pickable[0]}",
         "priority": 0.75,
         "confidence": 0.65,
     }
@@ -194,7 +194,7 @@ def _pick_unlock(world: "Neo4jWorld", character: str) -> Optional[Dict[str, Any]
             return {
                 "goal": "Use item on",
                 "target_entity": r["door"],
-                "reason": f"根据设定：对 {r['door']} 使用 {r['key']}",
+                "reason": f"Based on profile: use {r['key']} on {r['door']}",
                 "priority": 0.95,
                 "confidence": 0.85,
             }
@@ -214,7 +214,7 @@ def _pick_unlock(world: "Neo4jWorld", character: str) -> Optional[Dict[str, Any]
             return {
                 "goal": "Collect item",
                 "target_entity": key,
-                "reason": f"根据设定：先收集 {key}",
+                "reason": f"Based on profile: collect {key} first",
                 "priority": 0.92,
                 "confidence": 0.8,
             }
@@ -237,7 +237,7 @@ def _pick_combat(world: "Neo4jWorld", character: str) -> Optional[Dict[str, Any]
         return {
             "goal": "Defeat enemy",
             "target_entity": target,
-            "reason": f"根据设定：击败敌人 {target}",
+            "reason": f"Based on profile: defeat enemy {target}",
             "priority": 0.85,
             "confidence": 0.6,
         }
@@ -247,7 +247,7 @@ def _pick_combat(world: "Neo4jWorld", character: str) -> Optional[Dict[str, Any]
     return {
         "goal": "Defeat enemy",
         "target_entity": persons[0],
-        "reason": f"根据设定：挑战 {persons[0]}",
+        "reason": f"Based on profile: challenge {persons[0]}",
         "priority": 0.7,
         "confidence": 0.5,
     }
@@ -282,7 +282,7 @@ def profile_aware_pick_goal(world: "Neo4jWorld", agent: "AgentProfile") -> Dict[
     return {
         "goal": "Go to location",
         "target_entity": locations[0] if locations else None,
-        "reason": "根据设定：默认探索",
+        "reason": "Based on profile: default exploration",
         "priority": 0.5,
         "confidence": 0.5,
     }

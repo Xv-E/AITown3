@@ -551,11 +551,11 @@ def _soft_npc_fallback(
         mood = str(getattr(knowledge, "mood", "") or "")
     low = (style + " " + role + " " + mood).lower()
     if "antagonist" in low or "liar" in low or "thief" in low or "nervous" in low:
-        npc_text = "钥匙？我……我没看见，别用那种眼神看我。"
+        npc_text = "The key? I… I haven't seen it. Don't look at me like that."
     elif "guard" in low or "captain" in low:
-        npc_text = "城堡钥匙的事我也在查，你若有线索就说来听听。"
+        npc_text = "I'm looking into the castle key myself. Share any leads you have."
     else:
-        npc_text = "钥匙不见了？这事闹得不小，我也只听到些闲话。"
+        npc_text = "The key's missing? It's quite the stir — I've only heard rumors."
     if len(npc_text) > 160:
         npc_text = npc_text[:160]
     lines: List[Dict[str, str]] = []

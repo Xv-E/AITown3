@@ -1,5 +1,5 @@
 """
-Web 端世界模拟器 — 将 GameLoop 与 UI 计划状态桥接（持续时钟）。
+Web world simulator — bridges GameLoop with UI plan state (continuous clock).
 """
 
 from __future__ import annotations
@@ -91,7 +91,7 @@ def agent_state_to_dict(state: AgentState, overlay: AgentUIOverlay, *, sim_time:
     pending = state.pending_action.to_dict() if state.pending_action else None
     busy_remaining = max(0.0, state.sim_busy_until - sim_time) if state.sim_busy_until else 0.0
 
-    # 以 GameLoop 实时状态为准；overlay 仅作 API 决策的补充
+    # Prefer live GameLoop state; overlay supplements API decisions only
     decision_mode = state.decision_mode or overlay.decision_mode
     decision_process = state.decision_process or overlay.decision_process
     candidate_goals = state.candidate_goals or overlay.candidate_goals
@@ -124,7 +124,7 @@ def agent_state_to_dict(state: AgentState, overlay: AgentUIOverlay, *, sim_time:
 
 
 class WorldSimulator:
-    """单例：持有 GameLoop 与 UI overlay 状态。"""
+    """Singleton holding GameLoop and UI overlay state."""
 
     def __init__(self) -> None:
         self._game_loop: Optional[GameLoop] = None
@@ -143,7 +143,7 @@ class WorldSimulator:
         self._last_result = None
 
     def dedupe_agents(self) -> None:
-        """移除 GameLoop 中重复名称的 Agent（保留第一个）。"""
+        """Remove duplicate-named agents from GameLoop (keep the first)."""
         loop = self._game_loop
         if loop is None:
             return
@@ -223,7 +223,7 @@ class WorldSimulator:
             return
         overlay = self._overlay(name)
         overlay.inject_error = error
-        # 写入计划后清掉陈旧候选，避免 UI 只显示 LLM 候选却看不到步骤
+        # After injecting a plan, clear stale candidates so UI shows steps, not only LLM candidates
         if plan and not error:
             overlay.candidate_goals = list(state.candidate_goals or overlay.candidate_goals)
             overlay.inject_error = None
@@ -314,7 +314,7 @@ class WorldSimulator:
         return out
 
     def npc_activity_summary(self, world) -> List[Dict[str, Any]]:
-        """供玩法页展示的角色活动摘要（含勾选自动规划的玩家）。"""
+        """Character activity summary for the play page (includes auto-planning players)."""
         plans = self.list_plan_dicts(world)
         out = []
         for p in plans:
@@ -361,7 +361,7 @@ class WorldSimulator:
                 state_dict = agent_state_to_dict(
                     state, self._overlay(name), sim_time=loop.sim_time
                 )
-                # 同步 overlay 自 AgentState
+                # Sync overlay from AgentState
                 if state.decision_mode:
                     self.set_decision_overlay(
                         name,
@@ -441,7 +441,7 @@ class WorldSimulator:
         force_mock: bool = False,
         include_player: bool = False,
     ) -> Dict[str, Any]:
-        """兼容旧 API：instant tick。"""
+        """Legacy API compatibility: instant tick."""
         return self.tick(
             world,
             dt=1.0,
@@ -454,7 +454,7 @@ class WorldSimulator:
         )
 
     def _auto_decide_llm(self, world, name: str, *, force_mock: bool = False) -> None:
-        """手动 decide API 仍可用；仿真路径由 GameLoop 内部决策。"""
+        """Manual decide API remains available; simulation path uses GameLoop internal decisions."""
         from llm_service import run_llm_decision
         from character_plans import _sanitize_goal_target
         from goal_feasibility import assess_goal
@@ -483,7 +483,7 @@ class WorldSimulator:
         )
         selected = decision.get("selected_goal")
         if not selected or not selected.get("goal"):
-            self.inject_plan(name, {}, [], error="LLM 未能生成有效目标", world=world)
+            self.inject_plan(name, {}, [], error="LLM did not produce a valid goal", world=world)
             return
 
         goal_data = dict(selected)
@@ -499,7 +499,7 @@ class WorldSimulator:
                 assessed.goal_data,
                 [],
                 engine=assessed.engine,
-                error=assessed.reason or "规划失败",
+                error=assessed.reason or "Planning failed",
                 world=world,
             )
             return
@@ -532,7 +532,7 @@ class WorldSimulator:
         goal_data = {
             "goal": selected["goal"],
             "target_entity": selected.get("target_entity"),
-            "reason": selected.get("reason", "规则决策"),
+            "reason": selected.get("reason", "Rule-based decision"),
             "priority": selected.get("priority", 0.5),
             "confidence": selected.get("confidence", 0.5),
         }
@@ -543,7 +543,7 @@ class WorldSimulator:
                 assessed.goal_data,
                 [],
                 engine=assessed.engine,
-                error=assessed.reason or "规划失败",
+                error=assessed.reason or "Planning failed",
                 world=world,
             )
             return

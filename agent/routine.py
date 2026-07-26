@@ -63,13 +63,13 @@ def day_phase(hour: float) -> str:
 
 def phase_label(phase: str) -> str:
     return {
-        "dawn": "黎明",
-        "morning": "上午",
-        "lunch": "午饭",
-        "afternoon": "下午",
-        "dusk": "黄昏",
-        "dinner": "晚饭",
-        "night": "夜晚",
+        "dawn": "Dawn",
+        "morning": "Morning",
+        "lunch": "Lunch",
+        "afternoon": "Afternoon",
+        "dusk": "Dusk",
+        "dinner": "Dinner",
+        "night": "Night",
     }.get(phase, phase)
 
 
@@ -114,7 +114,7 @@ def format_clock(
     )
     day = int(absolute_hours // 24.0) + 1
     phase = phase_label(day_phase(h))
-    sky = "夜" if is_night(h) else "昼"
+    sky = "Night" if is_night(h) else "Day"
     return f"Day {day} {hour:02d}:{minute:02d} ({phase}/{sky})"
 
 
@@ -245,9 +245,9 @@ def routine_goal_candidate(
 
     if goal == "Go to location":
         target = slot.location
-        reason = f"日程：前往 {slot.location}"
+        reason = f"Routine: go to {slot.location}"
         if slot.activity:
-            reason += f"（{slot.activity}）"
+            reason += f" ({slot.activity})"
     elif goal == "Gain information":
         # 未指定对象时先到日程地点，到场后再社交打断
         if not slot.target_entity:
@@ -257,9 +257,9 @@ def routine_goal_candidate(
             else:
                 goal = "Go to location"
                 target = slot.location
-        reason = f"日程：{slot.activity or '社交/打听'}"
+        reason = f"Routine: {slot.activity or 'social / gather info'}"
     else:
-        reason = f"日程：{slot.activity or goal}"
+        reason = f"Routine: {slot.activity or goal}"
 
     return {
         "goal": goal,
@@ -338,9 +338,9 @@ def should_social_interrupt(
 
 
 def social_interrupt_goal(social_target: str, *, activity: str = "") -> Dict[str, Any]:
-    reason = f"遇见 {social_target}，临时改计划交谈"
+    reason = f"Met {social_target}; pausing routine to talk"
     if activity:
-        reason = f"日程「{activity}」中遇见 {social_target}，改计划交谈"
+        reason = f"During routine '{activity}', met {social_target}; switching to talk"
     return {
         "goal": "Gain information",
         "target_entity": social_target,

@@ -53,7 +53,7 @@ def _item_pickability(world: "Neo4jWorld", item: str) -> Tuple[bool, str, Option
         n=item,
     )
     if rows and rows[0].get("holder"):
-        return False, f"{item} 已被 {rows[0]['holder']} 持有", None
+        return False, f"{item} is held by {rows[0]['holder']}", None
 
     meta = world.run_query(
         """
@@ -67,7 +67,7 @@ def _item_pickability(world: "Neo4jWorld", item: str) -> Tuple[bool, str, Option
         kind = str(meta[0].get("kind") or "").lower()
         portable = meta[0].get("portable")
         if kind == "door" or portable is False:
-            return False, f"{item} 不可拾取", None
+            return False, f"{item} is not pickable", None
 
     item_loc = _get_entity_location(world, "Item", item)
     if item_loc:
@@ -78,8 +78,8 @@ def _item_pickability(world: "Neo4jWorld", item: str) -> Tuple[bool, str, Option
         n=item,
     )
     if rows and rows[0].get("owner"):
-        return False, f"{item} 不在地上（{rows[0]['owner']} 拥有），无法拾取", None
-    return False, f"{item} 不在任何地点，无法拾取", None
+        return False, f"{item} is not on the ground ({rows[0]['owner']} owns it); cannot pick up", None
+    return False, f"{item} is not at any location; cannot pick up", None
 
 
 def _plan_collect_item(
@@ -114,7 +114,7 @@ def _plan_collect_item(
         if not result["success"]:
             return PlanResult(
                 success=False,
-                error=result.get("error", "寻路到物品位置失败"),
+                error=result.get("error", "Pathfinding to item location failed"),
                 used_rule_based=True,
             )
         plan.extend(result["plan"])
@@ -198,23 +198,23 @@ def _plan_use_item_on(
         if not tools or not target_loc:
             return PlanResult(
                 success=False,
-                error=f"{target} 无可互动工具或位置（检查 accepts_from / effects_on）",
+                error=f"{target} has no usable tools or location (check accepts_from / effects_on)",
                 used_rule_based=True,
             )
         key = next((t for t in tools if t in _held_items(world, character)), None)
         if not key:
             return PlanResult(
                 success=False,
-                error=f"需要先持有 {'/'.join(tools)} 才能对 {target} 使用",
+                error=f"Must hold {'/'.join(tools)} before using on {target}",
                 used_rule_based=True,
             )
         to_loc = target_loc
     else:
         if not info:
-            return PlanResult(success=False, error=f"找不到目标 {target}", used_rule_based=True)
+            return PlanResult(success=False, error=f"Target not found: {target}", used_rule_based=True)
         can_interact = bool(tools) or str(info["kind"]).lower() == "door"
         if not can_interact:
-            return PlanResult(success=False, error=f"{target} 不可互动", used_rule_based=True)
+            return PlanResult(success=False, error=f"{target} is not interactable", used_rule_based=True)
         if not info["locked"] and str(info["kind"]).lower() == "door":
             return PlanResult(success=True, plan=[], engine="rule:use-on", used_rule_based=True)
         key = info["key_item"] or (tools[0] if tools else "")
@@ -223,13 +223,13 @@ def _plan_use_item_on(
         if not key or not target_loc:
             return PlanResult(
                 success=False,
-                error=f"{target} 缺少可用工具或位置（检查 effects_on / accepts_from）",
+                error=f"{target} missing usable tool or location (check effects_on / accepts_from)",
                 used_rule_based=True,
             )
         if key not in _held_items(world, character):
             return PlanResult(
                 success=False,
-                error=f"需要先持有 {key} 才能对 {target} 使用",
+                error=f"Must hold {key} before using on {target}",
                 used_rule_based=True,
             )
 
@@ -243,7 +243,7 @@ def _plan_use_item_on(
         if not result["success"]:
             return PlanResult(
                 success=False,
-                error=result.get("error", "寻路到目标失败"),
+                error=result.get("error", "Pathfinding to target failed"),
                 used_rule_based=True,
             )
         plan.extend(result["plan"])
@@ -275,12 +275,12 @@ def _plan_interact_with(
             is_interactive_item,
         )
     except Exception:
-        return PlanResult(success=False, error="item_interact 不可用", used_rule_based=True)
+        return PlanResult(success=False, error="item_interact unavailable", used_rule_based=True)
 
     if not is_interactive_item(world, target):
         return PlanResult(
             success=False,
-            error=f"{target} 没有可交互 script",
+            error=f"{target} has no interactive script",
             used_rule_based=True,
         )
 
@@ -304,13 +304,13 @@ def _plan_interact_with(
                 else:
                     return PlanResult(
                         success=False,
-                        error=f"{target} 无临时 action '{option}'（有: {sorted(ids)}）",
+                        error=f"{target} has no ephemeral action '{option}' (available: {sorted(ids)})",
                         used_rule_based=True,
                     )
         except Exception as e:
             return PlanResult(
                 success=False,
-                error=f"无法加载临时 actions: {e}",
+                error=f"Failed to load ephemeral actions: {e}",
                 used_rule_based=True,
             )
     else:
@@ -318,7 +318,7 @@ def _plan_interact_with(
 
     target_loc = _get_entity_location(world, "Item", target)
     if not target_loc:
-        return PlanResult(success=False, error=f"{target} 不在任何地点", used_rule_based=True)
+        return PlanResult(success=False, error=f"{target} is not at any location", used_rule_based=True)
 
     cur = _get_person_location(world, character)
     plan: List[PlanStep] = []
@@ -333,7 +333,7 @@ def _plan_interact_with(
         if not result["success"]:
             return PlanResult(
                 success=False,
-                error=result.get("error", "寻路到机关失败"),
+                error=result.get("error", "Pathfinding to mechanism failed"),
                 used_rule_based=True,
             )
         plan.extend(result["plan"])
@@ -360,7 +360,7 @@ def _plan_defeat_enemy(
 
     target_loc = _get_entity_location(world, "Person", target)
     if target_loc is None:
-        return PlanResult(success=False, error=f"找不到目标 {target} 的位置", used_rule_based=True)
+        return PlanResult(success=False, error=f"Cannot find location of {target}", used_rule_based=True)
 
     cur = _get_person_location(world, character)
     plan: List[PlanStep] = []
@@ -371,7 +371,7 @@ def _plan_defeat_enemy(
         if not result["success"]:
             return PlanResult(
                 success=False,
-                error=result.get("error", "寻路失败"),
+                error=result.get("error", "Pathfinding failed"),
                 used_rule_based=True,
             )
         plan.extend(result["plan"])
@@ -409,10 +409,10 @@ def _plan_gain_information(
             target = persons[0]
 
     if not target:
-        return PlanResult(success=False, error="Gain information 需要对话对象", used_rule_based=True)
+        return PlanResult(success=False, error="Gain information requires a conversation target", used_rule_based=True)
 
     if target == character:
-        return PlanResult(success=False, error="不能与自己对话获取信息", used_rule_based=True)
+        return PlanResult(success=False, error="Cannot talk to yourself for information", used_rule_based=True)
 
     locations = world.list_entities("Location") or []
     if target in locations:
@@ -422,16 +422,16 @@ def _plan_gain_information(
         domain, problem = build_pathfinding_pddl(world, character, target)
         result = solve_pddl(domain, problem, engines=["bfs"])
         if not result["success"]:
-            return PlanResult(success=False, error=result.get("error", "寻路失败"), used_rule_based=True)
+            return PlanResult(success=False, error=result.get("error", "Pathfinding failed"), used_rule_based=True)
         return PlanResult(success=True, plan=result["plan"], engine="rule:gain-info", used_rule_based=True)
 
     if target not in persons:
-        return PlanResult(success=False, error=f"未知对话对象: {target}", used_rule_based=True)
+        return PlanResult(success=False, error=f"Unknown conversation target: {target}", used_rule_based=True)
 
     # 相识(KNOWS)≠已问到线索；仍可再次 talk
     target_loc = _get_entity_location(world, "Person", target)
     if target_loc is None:
-        return PlanResult(success=False, error=f"找不到 {target} 的位置", used_rule_based=True)
+        return PlanResult(success=False, error=f"Cannot find location of {target}", used_rule_based=True)
 
     cur = _get_person_location(world, character)
     plan: List[PlanStep] = []
@@ -444,7 +444,7 @@ def _plan_gain_information(
         if not result["success"]:
             return PlanResult(
                 success=False,
-                error=result.get("error", "寻路到对话对象失败"),
+                error=result.get("error", "Pathfinding to conversation target failed"),
                 used_rule_based=True,
             )
         plan.extend(result["plan"])
@@ -524,13 +524,13 @@ def _plan_go_to_location(
     if target_loc and target_loc not in locations:
         return PlanResult(
             success=False,
-            error=f"未知地点「{target_loc}」。有效地点: {', '.join(locations)}",
+            error=f"Unknown location '{target_loc}'. Valid locations: {', '.join(locations)}",
             used_rule_based=True,
         )
 
     resolved = target_loc or _suggest_location(world, character, explore=explore)
     if not resolved:
-        return PlanResult(success=False, error="需要指定有效地点", used_rule_based=True)
+        return PlanResult(success=False, error="A valid location is required", used_rule_based=True)
 
     if explore:
         rows = world.run_query(
@@ -553,7 +553,7 @@ def _plan_go_to_location(
     if not result["success"]:
         return PlanResult(
             success=False,
-            error=result.get("error", "寻路失败"),
+            error=result.get("error", "Pathfinding failed"),
             used_rule_based=True,
         )
     engine = "rule:explore" if explore else "rule:goto"
@@ -680,7 +680,7 @@ def _record_plan_trace(
         f"goal_facts: {result.goal_facts or []}",
         "",
         "# Planned steps",
-        plan_text if result.success else f"(failed) {err or '规划失败'}",
+        plan_text if result.success else f"(failed) {err or 'Planning failed'}",
     ]
     if domain:
         prompt_parts.append("")
@@ -698,9 +698,9 @@ def _record_plan_trace(
     record_trace(
         kind="pddl_plan",
         prompt="\n".join(prompt_parts),
-        raw=plan_text if result.success else (err or "规划失败"),
+        raw=plan_text if result.success else (err or "Planning failed"),
         ok=bool(result.success),
-        error="" if result.success else (err or "规划失败"),
+        error="" if result.success else (err or "Planning failed"),
         meta={
             "character": character,
             "goal": goal_term,
@@ -741,7 +741,7 @@ def plan_for_goal(
 
     t0 = time.perf_counter()
     pddl_buf: Dict[str, str] = {}
-    result = PlanResult(success=False, error="规划未完成")
+    result = PlanResult(success=False, error="Planning incomplete")
     try:
         result = _plan_for_goal_impl(
             world, character, data, engines=engines, pddl_buf=pddl_buf
@@ -751,7 +751,7 @@ def plan_for_goal(
         if result.problem_str and not pddl_buf.get("problem"):
             pddl_buf["problem"] = result.problem_str
     except Exception as e:
-        result = PlanResult(success=False, error=f"规划异常: {e}")
+        result = PlanResult(success=False, error=f"Planning error: {e}")
     finally:
         _record_plan_trace(
             character=character,
@@ -795,7 +795,7 @@ def _plan_for_goal_impl(
             others = [p for p in persons if p != character]
             target = others[0] if others else None
         if not target:
-            return PlanResult(success=False, error="Defeat enemy 需要 target_entity")
+            return PlanResult(success=False, error="Defeat enemy requires target_entity")
         return _finalize(_plan_defeat_enemy(world, character, target))
 
     if goal_term in ("Collect item", "Accumulate items", "Strengthen abilities", "Enhance capabilities"):
@@ -803,7 +803,7 @@ def _plan_for_goal_impl(
             items = world.list_entities("Item")
             target = items[0] if items else None
         if not target:
-            return PlanResult(success=False, error=f"{goal_term} 需要 target_entity")
+            return PlanResult(success=False, error=f"{goal_term} requires target_entity")
         return _finalize(_plan_collect_item(world, character, target))
 
     if goal_term == "Use item on":
@@ -828,7 +828,7 @@ def _plan_for_goal_impl(
                 )
                 target = rows[0]["n"] if rows else None
         if not target:
-            return PlanResult(success=False, error="Use item on 需要互动目标")
+            return PlanResult(success=False, error="Use item on requires an interaction target")
         # 规则路径优先（BFS 寻路 + use_on）；人物目标只走规则（PDDL 无 person use_on）
         goal_facts = converter.convert_goal_to_pddl(
             {"goal": goal_term, "target_entity": target}, character
@@ -869,7 +869,7 @@ def _plan_for_goal_impl(
                 problem_str=problem_str,
             ))
         if result.get("error"):
-            rule.error = f"{rule.error or '规则回退失败'}; PDDL: {result.get('error')}"
+            rule.error = f"{rule.error or 'Rule fallback failed'}; PDDL: {result.get('error')}"
         return _finalize(rule)
 
     if goal_term == "Interact with":
@@ -884,7 +884,7 @@ def _plan_for_goal_impl(
             except Exception:
                 target = None
         if not target:
-            return PlanResult(success=False, error="Interact with 需要机关/脚本物品")
+            return PlanResult(success=False, error="Interact with requires a scripted item/mechanism")
         option = (
             goal_data.get("interact_action")
             or (goal_data.get("metadata") or {}).get("interact_action")
@@ -956,6 +956,6 @@ def _plan_for_goal_impl(
 
     return PlanResult(
         success=False,
-        error=result.get("error", "规划失败"),
+        error=result.get("error", "Planning failed"),
         goal_facts=goal_facts,
     )

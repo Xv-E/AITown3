@@ -1,5 +1,5 @@
 """
-游玩状态 API 辅助 — 从 character_actions 再导出，便于 server 引用。
+Play-state API helpers — re-exported from character_actions for server use.
 """
 
 from __future__ import annotations

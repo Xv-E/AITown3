@@ -30,7 +30,7 @@ class MoveAction(Action):
     def __init__(self):
         super().__init__(
             name="move",
-            description="角色沿相邻位置从 from 移动到 to",
+            description="Move character along adjacent locations from → to",
             parameters=[
                 Param("c", "Person"),
                 Param("from", "Location"),
@@ -53,11 +53,11 @@ class MoveAction(Action):
         to_loc = kwargs["to"]
         cur = get_person_location(world, c)
         if cur != from_loc:
-            return False, f"{c} 当前不在 {from_loc}（在 {cur}）"
+            return False, f"{c} is not at {from_loc} (currently at {cur})"
         if not world.has_directed_relationship(
             from_loc, "Location", to_loc, "Location", "ADJACENT_TO"
         ):
-            return False, f"{from_loc} 无法前往 {to_loc}（无单向邻接）"
+            return False, f"{from_loc} cannot reach {to_loc} (no directed adjacency)"
         return True, "ok"
 
     def apply(self, world, c: str, **kwargs) -> None:
@@ -74,7 +74,7 @@ class PickUpAction(Action):
     def __init__(self):
         super().__init__(
             name="pick_up",
-            description="拾取当前位置的物品",
+            description="Pick up an item at the current location",
             parameters=[
                 Param("c", "Person"),
                 Param("i", "Item"),
@@ -95,18 +95,18 @@ class PickUpAction(Action):
     def check(self, world, c: str, i: str, l: str) -> Tuple[bool, str]:
         loc = get_person_location(world, c)
         if loc is None:
-            return False, f"{c} 没有当前位置"
+            return False, f"{c} has no current location"
         if l != loc:
-            return False, f"位置参数 {l} 与 {c} 当前位置 {loc} 不一致"
+            return False, f"Location param {l} does not match {c}'s current location {loc}"
         item_loc = get_item_location(world, i)
         if item_loc != loc:
-            return False, f"物品 {i} 不在 {c} 所处的 {loc}（在 {item_loc}）"
+            return False, f"Item {i} is not at {c}'s location {loc} (at {item_loc})"
         if get_item_holder(world, i) is not None:
-            return False, f"物品 {i} 已被他人持有"
+            return False, f"Item {i} is already held by someone else"
         kind = (get_property(world, i, "Item", "item_kind") or "") or ""
         portable = get_property(world, i, "Item", "portable")
         if str(kind).lower() == "door" or portable is False:
-            return False, f"{i} 不可拾取"
+            return False, f"{i} is not pickable"
         return True, "ok"
 
     def apply(self, world, c: str, i: str, l: str) -> None:
@@ -122,7 +122,7 @@ class DropAction(Action):
     def __init__(self):
         super().__init__(
             name="drop",
-            description="把持有的物品放在当前位置",
+            description="Drop a held item at the current location",
             parameters=[
                 Param("c", "Person"),
                 Param("i", "Item"),
@@ -141,12 +141,12 @@ class DropAction(Action):
 
     def check(self, world, c: str, i: str, l: str) -> Tuple[bool, str]:
         if get_item_holder(world, i) != c:
-            return False, f"{c} 并未持有 {i}"
+            return False, f"{c} is not holding {i}"
         loc = get_person_location(world, c)
         if loc is None:
-            return False, f"{c} 没有当前位置"
+            return False, f"{c} has no current location"
         if l != loc:
-            return False, f"位置参数 {l} 与 {c} 当前位置 {loc} 不一致"
+            return False, f"Location param {l} does not match {c}'s current location {loc}"
         return True, "ok"
 
     def apply(self, world, c: str, i: str, l: str) -> None:
@@ -162,7 +162,7 @@ class GiveAction(Action):
     def __init__(self):
         super().__init__(
             name="give",
-            description="同一位置上把物品转交给另一人",
+            description="Give a held item to another person at the same location",
             parameters=[
                 Param("giver", "Person"),
                 Param("i", "Item"),
@@ -183,13 +183,13 @@ class GiveAction(Action):
 
     def check(self, world, giver: str, i: str, receiver: str, l: str) -> Tuple[bool, str]:
         if get_item_holder(world, i) != giver:
-            return False, f"{giver} 并未持有 {i}"
+            return False, f"{giver} is not holding {i}"
         loc_g = get_person_location(world, giver)
         loc_r = get_person_location(world, receiver)
         if loc_g is None or loc_r is None or loc_g != loc_r:
-            return False, f"{giver}({loc_g}) 与 {receiver}({loc_r}) 不在同一位置"
+            return False, f"{giver}({loc_g}) and {receiver}({loc_r}) are not at the same location"
         if l != loc_g:
-            return False, f"位置参数 {l} 与双方所在位置 {loc_g} 不一致"
+            return False, f"Location param {l} does not match both parties' location {loc_g}"
         return True, "ok"
 
     def apply(self, world, giver: str, i: str, receiver: str, l: str) -> None:
@@ -203,7 +203,7 @@ class TalkAction(Action):
     def __init__(self):
         super().__init__(
             name="talk",
-            description="同一位置的两人对话，建立 KNOWS 关系（双向）",
+            description="Two people at the same location talk; create KNOWS both ways",
             parameters=[
                 Param("a", "Person"),
                 Param("b", "Person"),
@@ -224,17 +224,17 @@ class TalkAction(Action):
 
     def check(self, world, a: str, b: str, l: str) -> Tuple[bool, str]:
         if a == b:
-            return False, "不能和自己对话"
+            return False, "Cannot talk to yourself"
         loc_a = get_person_location(world, a)
         loc_b = get_person_location(world, b)
         if loc_a is None or loc_b is None or loc_a != loc_b:
-            return False, f"{a}({loc_a}) 与 {b}({loc_b}) 不在同一位置"
+            return False, f"{a}({loc_a}) and {b}({loc_b}) are not at the same location"
         if l != loc_a:
-            return False, f"位置参数 {l} 与双方所在位置 {loc_a} 不一致"
+            return False, f"Location param {l} does not match both parties' location {loc_a}"
         for n in (a, b):
             hp = get_property(world, n, "Person", "hp")
             if hp is None or hp <= 0:
-                return False, f"{n} 已死亡或未设置 hp"
+                return False, f"{n} is dead or has no hp set"
         return True, "ok"
 
     def apply(self, world, a: str, b: str, l: str) -> None:
@@ -248,7 +248,7 @@ class AttackAction(Action):
     def __init__(self):
         super().__init__(
             name="attack",
-            description="同一位置攻击目标，按 attacker.power_level 扣 hp",
+            description="Attack a target at the same location; reduce HP by attacker.power_level",
             parameters=[
                 Param("attacker", "Person"),
                 Param("target", "Person"),
@@ -268,17 +268,17 @@ class AttackAction(Action):
 
     def check(self, world, attacker: str, target: str, l: str) -> Tuple[bool, str]:
         if attacker == target:
-            return False, "不能攻击自己"
+            return False, "Cannot attack yourself"
         for n in (attacker, target):
             hp = get_property(world, n, "Person", "hp")
             if hp is None or hp <= 0:
-                return False, f"{n} 已死亡或未设置 hp"
+                return False, f"{n} is dead or has no hp set"
         loc_a = get_person_location(world, attacker)
         loc_b = get_person_location(world, target)
         if loc_a is None or loc_b is None or loc_a != loc_b:
-            return False, f"{attacker}({loc_a}) 与 {target}({loc_b}) 不在同一位置"
+            return False, f"{attacker}({loc_a}) and {target}({loc_b}) are not at the same location"
         if l != loc_a:
-            return False, f"位置参数 {l} 与双方所在位置 {loc_a} 不一致"
+            return False, f"Location param {l} does not match both parties' location {loc_a}"
         return True, "ok"
 
     def apply(self, world, attacker: str, target: str, l: str) -> None:
@@ -299,7 +299,7 @@ class UseItemAction(Action):
     def __init__(self):
         super().__init__(
             name="use_item",
-            description="使用持有的物品（Potion 加血；使用后销毁）",
+            description="Use a held item (Potion restores HP; consumed on use)",
             parameters=[
                 Param("c", "Person"),
                 Param("i", "Item"),
@@ -316,15 +316,15 @@ class UseItemAction(Action):
 
     def check(self, world, c: str, i: str) -> Tuple[bool, str]:
         if get_item_holder(world, i) != c:
-            return False, f"{c} 并未持有 {i}"
+            return False, f"{c} is not holding {i}"
         hp = get_property(world, c, "Person", "hp")
         if hp is None or hp <= 0:
-            return False, f"{c} 已死亡"
+            return False, f"{c} is dead"
         if i.lower().startswith("potion") or i == "Potion":
             return True, "ok"
         kind = str(get_property(world, i, "Item", "item_kind") or "").lower()
         if kind == "key":
-            return False, f"{i} 应对门使用（use_on），不能直接 use_item"
+            return False, f"{i} should be used on a door (use_on), not use_item"
         if kind in ("food", "meal", "cooked"):
             return True, "ok"
         return True, "ok"
@@ -352,7 +352,7 @@ class UseOnAction(Action):
     def __init__(self):
         super().__init__(
             name="use_on",
-            description="对目标使用持有物品（效果由世界配置的图操作决定）",
+            description="Use a held item on a target (effects from world graph ops)",
             parameters=[
                 Param("c", "Person"),
                 Param("i", "Item"),
@@ -384,18 +384,18 @@ class UseOnAction(Action):
 
         from_loc = kwargs.get("from")
         if get_item_holder(world, i) != c:
-            return False, f"{c} 并未持有 {i}"
+            return False, f"{c} is not holding {i}"
         hp = get_property(world, c, "Person", "hp")
         if hp is None or hp <= 0:
-            return False, f"{c} 已死亡"
+            return False, f"{c} is dead"
         cur = get_person_location(world, c)
         if from_loc and cur != from_loc:
-            return False, f"{c} 当前不在 {from_loc}（在 {cur}）"
+            return False, f"{c} is not at {from_loc} (currently at {cur})"
         t_loc = target_location(world, target)
         if t_loc is None:
-            return False, f"找不到目标 {target}"
+            return False, f"Target not found: {target}"
         if from_loc and t_loc != from_loc:
-            return False, f"{target} 不在 {from_loc}（在 {t_loc}）"
+            return False, f"{target} is not at {from_loc} (at {t_loc})"
         ok, reason, _ = can_use_on(world, c, i, target)
         if not ok:
             return False, reason
@@ -420,7 +420,7 @@ class InteractAction(Action):
     def __init__(self):
         super().__init__(
             name="interact",
-            description="执行物品上的临时交互 Action（Cypher，非硬编码）",
+            description="Run a temporary interact Action on an item (Cypher, not hardcoded)",
             parameters=[
                 Param("c", "Person"),
                 Param("target", "Item"),
@@ -440,11 +440,11 @@ class InteractAction(Action):
 
         hp = get_property(world, c, "Person", "hp")
         if hp is None or hp <= 0:
-            return False, f"{c} 已死亡"
+            return False, f"{c} is dead"
         if not world.get_entity_by_name(target, label="Item"):
-            return False, f"未知物品: {target}"
+            return False, f"Unknown item: {target}"
         if not is_interactive_item(world, target):
-            return False, f"{target} 没有可交互 script"
+            return False, f"{target} has no interactive script"
         cur = get_person_location(world, c)
         rows = world.run_query(
             "MATCH (i:Item {name: $n})-[:LOCATED_AT]->(l:Location) RETURN l.name AS loc LIMIT 1",
@@ -452,9 +452,9 @@ class InteractAction(Action):
         )
         t_loc = rows[0]["loc"] if rows else None
         if not t_loc:
-            return False, f"{target} 不在地上"
+            return False, f"{target} is not on the ground"
         if cur != t_loc:
-            return False, f"{c} 与 {target} 不在同一地点"
+            return False, f"{c} and {target} are not at the same location"
         return True, "ok"
 
     def apply(self, world, c: str, target: str, option: str = "auto") -> None:
@@ -468,7 +468,7 @@ class InteractAction(Action):
             force_mock=bool(getattr(__import__("item_interact"), "FORCE_MOCK", False)),
         )
         if not result.get("ok"):
-            raise RuntimeError(result.get("error") or "交互失败")
+            raise RuntimeError(result.get("error") or "Interaction failed")
 
 
 # ============== wait ==============
@@ -479,7 +479,7 @@ class WaitAction(Action):
     def __init__(self):
         super().__init__(
             name="wait",
-            description="原地等待片刻",
+            description="Wait in place for a moment",
             parameters=[Param("c", "Person")],
             category="general",
             preconditions_pddl=["(alive ?c)"],
@@ -489,7 +489,7 @@ class WaitAction(Action):
     def check(self, world, c: str) -> Tuple[bool, str]:
         hp = get_property(world, c, "Person", "hp")
         if hp is None or hp <= 0:
-            return False, f"{c} 已死亡"
+            return False, f"{c} is dead"
         return True, "ok"
 
     def apply(self, world, c: str) -> None:
@@ -532,7 +532,7 @@ class ActionRegistry:
     def execute(self, world, name: str, **kwargs) -> Tuple[bool, str]:
         action = self.get(name)
         if action is None:
-            return False, f"未知动作: {name}"
+            return False, f"Unknown action: {name}"
         return action.execute(world, **kwargs)
 
     def to_pddl_block(self) -> str:

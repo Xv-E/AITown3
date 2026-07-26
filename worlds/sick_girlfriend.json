@@ -1,21 +1,21 @@
 {
   "id": "sick_girlfriend",
-  "title": "女友的蓝草",
-  "premise": "女友在家发烧。去诊所问医生，再按他的指引去森林采正确的药草回来给她。",
+  "title": "Lila's Blue Herb",
+  "premise": "Your girlfriend is feverish at home. Visit the clinic, ask the doctor, then follow his directions into the forest to gather the right herb and bring it back to her.",
   "locations": [
     {
       "name": "Home",
-      "description": "狭小的木屋。女友躺在床上，呼吸急促。",
+      "description": "A cramped wooden house. Your girlfriend lies in bed, breathing hard.",
       "tags": "hub,home"
     },
     {
       "name": "Clinic",
-      "description": "小镇诊所。药柜和药草图鉴摆满架子。",
+      "description": "The town clinic. Shelves lined with medicine cabinets and herb guides.",
       "tags": "social,info"
     },
     {
       "name": "Forest",
-      "description": "潮湿的林间空地。三种颜色的药草混生在一起。",
+      "description": "A damp forest clearing. Herbs of three colors grow mixed together.",
       "tags": "item,wild"
     }
   ],

@@ -1,5 +1,5 @@
 """
-LLM 调用追踪：内存环形缓冲，供日志与 /inspect 页面查看。
+LLM call tracing: in-memory ring buffer for logs and the /inspect page.
 """
 
 from __future__ import annotations
@@ -32,17 +32,17 @@ def record_llm_trace(
     gbnf: Optional[Dict[str, Any]] = None,
     elapsed_ms: Optional[float] = None,
 ) -> str:
-    """写入一条追踪记录，返回 id。
+    """Append a trace record and return its id.
 
     kind:
-      - dialogue: 对话
-      - goal_decision: 多步目标决策（Qwen / 本地 GBNF）
-      - pddl_plan: PDDL 或规则规划结果
-    meta 约定字段（可选）:
+      - dialogue: conversation
+      - goal_decision: multi-step goal decision (Qwen / local GBNF)
+      - pddl_plan: PDDL or rule-based planning result
+    meta optional fields:
       - provider: "qwen" | "local_gbnf" | "pddl"
       - fallback_used: bool
       - character / step / goal / target_entity / engine
-    gbnf 约定字段（可选）:
+    gbnf optional fields:
       - used, error, grammar_preview, provider, fallback_used
     """
     tid = uuid.uuid4().hex[:12]

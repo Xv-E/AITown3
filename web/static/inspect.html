@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -14,13 +14,13 @@
     <a class="brand" href="/">← Play</a>
     <h1>LLM Inspect</h1>
     <div class="spacer"></div>
-    <button type="button" id="btn-refresh">刷新</button>
-    <button type="button" id="btn-clear" class="danger">清空</button>
+    <button type="button" id="btn-refresh">Refresh</button>
+    <button type="button" id="btn-clear" class="danger">Clear</button>
   </header>
 
   <main class="layout">
     <aside class="list-pane">
-      <div class="hint">对话 / 目标决策（Qwen·GBNF）与 PDDL/规则规划都会记在这里</div>
+      <div class="hint">Dialogue / goal decisions (Qwen·GBNF) and PDDL/rule planning are logged here</div>
 
       <section class="trace-section">
         <h2 class="section-title qwen">Qwen <span id="qwen-count" class="count">0</span></h2>
@@ -28,21 +28,21 @@
       </section>
 
       <section class="trace-section">
-        <h2 class="section-title local">本地 GBNF <span id="local-count" class="count">0</span></h2>
+        <h2 class="section-title local">Local GBNF <span id="local-count" class="count">0</span></h2>
         <ul id="trace-list-local" class="trace-list"></ul>
       </section>
 
       <section class="trace-section">
-        <h2 class="section-title pddl">PDDL / 规划 <span id="pddl-count" class="count">0</span></h2>
+        <h2 class="section-title pddl">PDDL / Planning <span id="pddl-count" class="count">0</span></h2>
         <ul id="trace-list-pddl" class="trace-list"></ul>
       </section>
     </aside>
     <section class="detail-pane">
-      <div id="empty" class="empty">选择左侧一条记录。对话、仿真目标决策或规划后会出现日志。</div>
+      <div id="empty" class="empty">Select a record on the left. Logs appear after dialogue, sim goal decisions, or planning.</div>
       <div id="detail" class="detail hidden">
         <div class="meta-row" id="meta-row"></div>
         <div class="tabs">
-          <button type="button" data-tab="raw" class="active">Raw 输出</button>
+          <button type="button" data-tab="raw" class="active">Raw output</button>
           <button type="button" data-tab="prompt">Prompt</button>
           <button type="button" data-tab="parsed">Parsed</button>
           <button type="button" data-tab="gbnf">GBNF</button>

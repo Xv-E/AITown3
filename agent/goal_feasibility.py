@@ -97,26 +97,26 @@ def sanitize_goal_target(
 
     if goal in SOCIAL_GOALS:
         if t == character:
-            return None, "社交/战斗目标不能指向自己"
+            return None, "Social/combat goals cannot target yourself"
         if not _entity_exists(world, t, "Person"):
             # 尝试地点（Gain information 允许探索地点）
             if goal == "Gain information" and _entity_exists(world, t, "Location"):
                 return t, None
-            return None, f"未知人物: {t}"
+            return None, f"Unknown person: {t}"
         if _is_dead(world, t) and goal == "Defeat enemy":
-            return None, f"{t} 已死亡，无法作为击败目标"
+            return None, f"{t} is dead and cannot be a defeat target"
         if _is_dead(world, t) and goal == "Gain information":
-            return None, f"{t} 已死亡，无法对话"
+            return None, f"{t} is dead and cannot be talked to"
         return t, None
 
     if goal in LOCATION_GOALS:
         if not _entity_exists(world, t, "Location"):
-            return None, f"未知地点: {t}"
+            return None, f"Unknown location: {t}"
         return t, None
 
     if goal in ITEM_GOALS:
         if not _entity_exists(world, t, "Item"):
-            return None, f"未知物品: {t}"
+            return None, f"Unknown item: {t}"
         rows = world.run_query(
             """
             MATCH (i:Item {name: $n})
@@ -128,7 +128,7 @@ def sanitize_goal_target(
         if rows:
             kind = str(rows[0].get("kind") or "").lower()
             if kind == "door" or rows[0].get("portable") is False:
-                return None, f"{t} 不可拾取，请改用 Use item on"
+                return None, f"{t} is not pickable; use Use item on instead"
         return t, None
 
     if goal in USE_ON_GOALS:
@@ -142,7 +142,7 @@ def sanitize_goal_target(
         except Exception:
             pass
         if not _entity_exists(world, t, "Item"):
-            return None, f"未知互动目标: {t}"
+            return None, f"Unknown interaction target: {t}"
         rows = world.run_query(
             """
             MATCH (i:Item {name: $n})
@@ -152,28 +152,28 @@ def sanitize_goal_target(
             n=t,
         )
         if not rows or str(rows[0].get("kind") or "").lower() != "door":
-            return None, f"{t} 不是可互动目标（无 effects_on / accepts_from）"
+            return None, f"{t} is not a valid interaction target (no effects_on / accepts_from)"
         return t, None
 
     if goal in INTERACT_GOALS:
         if not _entity_exists(world, t, "Item"):
-            return None, f"未知机关/物品: {t}"
+            return None, f"Unknown mechanism/item: {t}"
         try:
             from item_interact import is_interactive_item
 
             if not is_interactive_item(world, t):
-                return None, f"{t} 没有可交互 script（behavior/interactive）"
+                return None, f"{t} has no interactive script (behavior/interactive)"
         except Exception:
-            return None, f"{t} 交互脚本不可用"
+            return None, f"{t} interaction script unavailable"
         return t, None
 
     # 通用：任一类实体
     for label in ("Person", "Location", "Item"):
         if _entity_exists(world, t, label):
             if label == "Person" and t == character and goal in SOCIAL_GOALS:
-                return None, "不能指向自己"
+                return None, "Cannot target yourself"
             return t, None
-    return None, f"未知实体: {t}"
+    return None, f"Unknown entity: {t}"
 
 
 def is_goal_satisfied(
@@ -266,7 +266,7 @@ def assess_goal(
 
     goal = (cleaned.get("goal") or "").strip()
     if not goal:
-        return FeasibilityResult(ok=False, goal_data=cleaned, reason="缺少目标")
+        return FeasibilityResult(ok=False, goal_data=cleaned, reason="Missing goal")
 
     raw_target = cleaned.get("target_entity")
     target, err = sanitize_goal_target(world, character, goal, raw_target)
@@ -282,7 +282,7 @@ def assess_goal(
         return FeasibilityResult(
             ok=True,
             goal_data=cleaned,
-            reason="目标已满足",
+            reason="Goal already satisfied",
             already_satisfied=True,
             plan=[],
             engine="satisfied",
@@ -301,7 +301,7 @@ def assess_goal(
         return FeasibilityResult(
             ok=False,
             goal_data=cleaned,
-            reason=plan_result.error or "规划失败",
+            reason=plan_result.error or "Planning failed",
             engine=plan_result.engine,
         )
     return FeasibilityResult(

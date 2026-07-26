@@ -143,7 +143,7 @@ class GameLoop:
         agent._decider = decider  # noqa: SLF001
         self.agents.append(AgentState(agent=agent))
         if self.verbose:
-            print(f"[+] 添加 Agent: {agent.name}")
+            print(f"[+] Added agent: {agent.name}")
 
     def get_agent_state(self, name: str) -> Optional[AgentState]:
         for state in self.agents:
@@ -222,13 +222,13 @@ class GameLoop:
             fire = world_report.get("campfire") or {}
             if fire.get("name") is not None:
                 print(
-                    f"   物品 {fire.get('name')}: fuel={float(fire.get('fuel') or 0):.1f} "
+                    f"   Item {fire.get('name')}: fuel={float(fire.get('fuel') or 0):.1f} "
                     f"lit={fire.get('lit')}"
                 )
             alerts = world_report.get("alerts") or []
             if alerts:
                 a0 = alerts[0]
-                print(f"   script告警: [{a0.get('signal')}] {a0.get('item')}: {a0.get('message')}")
+                print(f"   script alert: [{a0.get('signal')}] {a0.get('item')}: {a0.get('message')}")
             print(f"{'=' * 60}\n")
 
         results = {
@@ -256,7 +256,7 @@ class GameLoop:
                 )
             except Exception as e:
                 if self.verbose:
-                    print(f"[ERR] Agent {state.agent.name} tick 失败: {e}")
+                    print(f"[ERR] Agent {state.agent.name} tick failed: {e}")
                 state.status = "failed"
                 # 防止执行异常后 pending 永远挂起
                 if state.pending_action and self.sim_time >= state.pending_action.completes_at:
@@ -298,7 +298,7 @@ class GameLoop:
                         decided += 1
                 except Exception as e:
                     if self.verbose:
-                        print(f"[ERR] Agent {state.agent.name} 决策 tick 失败: {e}")
+                        print(f"[ERR] Agent {state.agent.name} decision tick failed: {e}")
                     state.status = "failed"
                     by_name[state.agent.name] = {
                         "agent": state.agent.name,
@@ -315,7 +315,7 @@ class GameLoop:
         while True:
             if limit and self.tick_count >= limit:
                 if self.verbose:
-                    print(f"\n[END] 达到最大 tick 数 {limit}，结束")
+                    print(f"\n[END] Reached max tick count {limit}, stopping")
                 break
             turn = self.run_turn()
             game_result["turns"].append(turn)
@@ -376,7 +376,7 @@ class GameLoop:
             result["interrupted"] = True
             result["phase"] = "hard_interrupt"
             if can_plan and not self._is_dead(state):
-                self._failure_replan(state, reason=state.replan_reason or "硬中断", instant=instant)
+                self._failure_replan(state, reason=state.replan_reason or "Hard interrupt", instant=instant)
                 result["goal"] = state.last_goal
             result["status"] = state.status
             return result
@@ -448,7 +448,7 @@ class GameLoop:
                 if can_plan:
                     self._failure_replan(
                         state,
-                        reason=state.replan_reason or "下一步预检失败",
+                        reason=state.replan_reason or "Next step precheck failed",
                         instant=instant,
                     )
                     result["goal"] = state.last_goal
@@ -546,7 +546,7 @@ class GameLoop:
             state.is_interrupted = True
             state.interrupt_count += 1
             state.status = "failed"
-            state.replan_reason = "角色已死亡"
+            state.replan_reason = "Character is dead"
             return True
         if agent.hp < HARD_INTERRUPT_HP and (state.pending_action or state.current_plan):
             # 进行中才硬打断
@@ -556,7 +556,7 @@ class GameLoop:
             state.plan_index = 0
             state.is_interrupted = True
             state.interrupt_count += 1
-            state.replan_reason = "HP 过低"
+            state.replan_reason = "HP too low"
             state.status = "failed"
             return True
         return False
@@ -583,7 +583,7 @@ class GameLoop:
             state.plan_error = reason
             state.status = "failed"
             if self.verbose:
-                print(f"[WARN] [{state.agent.name}] 预检失败: {reason}")
+                print(f"[WARN] [{state.agent.name}] precheck failed: {reason}")
             return None
 
         duration = get_action_duration(action_name, instant=instant)
@@ -619,7 +619,7 @@ class GameLoop:
         action_name, args = pending.name, pending.args
         if self.verbose:
             print(
-                f"[EXEC] [{agent.name}] 完成 {state.plan_index + 1}/"
+                f"[EXEC] [{agent.name}] completed {state.plan_index + 1}/"
                 f"{len(state.current_plan or [])}: {action_name}({', '.join(args)})"
             )
         try:
@@ -627,7 +627,7 @@ class GameLoop:
         except Exception as e:
             action_result = ActionResult(
                 success=False,
-                message=f"执行异常: {e}",
+                message=f"Execution error: {e}",
                 agent_name=agent.name,
                 action_type=action_name,
             )
@@ -669,7 +669,7 @@ class GameLoop:
 
         if action_result.success and state.current_plan and state.plan_index >= len(state.current_plan):
             if self.verbose:
-                print(f"[DONE] [{agent.name}] 计划完成")
+                print(f"[DONE] [{agent.name}] plan complete")
             agent.complete_current_goal()
             state.current_plan = None
             state.plan_index = 0
@@ -729,7 +729,7 @@ class GameLoop:
         if action is None:
             if action_name in ("noop",):
                 return True, "ok"
-            return False, f"未知动作: {action_name}"
+            return False, f"Unknown action: {action_name}"
         kwargs = {p.name: v for p, v in zip(action.parameters, args)}
         return action.check(self.world, **kwargs)
 
@@ -782,7 +782,7 @@ class GameLoop:
                         if self.verbose:
                             print(f"[SCRIPT] [{agent.name}] {fire_goal.get('reason')}")
                         self._adopt_planned_goal(
-                            state, assessed, reason=fire_goal.get("reason") or "物品脚本告警"
+                            state, assessed, reason=fire_goal.get("reason") or "Item script alert"
                         )
                         return True
 
@@ -814,8 +814,8 @@ class GameLoop:
             assessed = assess_goal(self.world, agent.name, goal, engines=self.plan_engines)
             if assessed.ok and not assessed.already_satisfied and assessed.plan:
                 if self.verbose:
-                    print(f"[MEET] [{agent.name}] 遇见 {social_target}，改计划交谈")
-                self._adopt_planned_goal(state, assessed, reason=goal.get("reason") or "遇见交流")
+                    print(f"[MEET] [{agent.name}] met {social_target}; switching to talk")
+                self._adopt_planned_goal(state, assessed, reason=goal.get("reason") or "Met someone to talk to")
                 state.last_social_at = self.sim_time
                 return True
 
@@ -844,7 +844,7 @@ class GameLoop:
                 cand = {
                     "goal": "Go to location",
                     "target_entity": slot.location,
-                    "reason": f"日程换段：前往 {slot.location}",
+                    "reason": f"Routine slot change: go to {slot.location}",
                     "priority": 0.72,
                     "confidence": 0.8,
                     "source": "routine",
@@ -865,13 +865,13 @@ class GameLoop:
             return False
         if self.verbose:
             print(
-                f"[ROUTINE] [{agent.name}] 日程换段 → "
+                f"[ROUTINE] [{agent.name}] routine slot change → "
                 f"{cand.get('goal')}->{cand.get('target_entity')} ({slot.activity})"
             )
         self._adopt_planned_goal(
             state,
             assessed,
-            reason=cand.get("reason") or "日程换段",
+            reason=cand.get("reason") or "Routine slot change",
         )
         return True
 
@@ -935,7 +935,7 @@ class GameLoop:
                     {
                         "goal": "Go to location",
                         "target_entity": slot.location,
-                        "reason": f"日程：前往 {slot.location} 以便遇见他人",
+                        "reason": f"Routine: go to {slot.location} to meet others",
                         "priority": 0.72,
                         "confidence": 0.8,
                         "source": "routine",
@@ -984,7 +984,7 @@ class GameLoop:
 
         state.status = "deciding"
         if self.verbose:
-            print(f"[THINK] [{agent.name}] 决策 | 位置: {agent.location} | HP: {agent.hp}")
+            print(f"[THINK] [{agent.name}] deciding | location: {agent.location} | HP: {agent.hp}")
 
         # 供 PromptBuilder 显示正确的一日时段
         agent._sim_time = self.sim_time  # noqa: SLF001
@@ -1002,7 +1002,7 @@ class GameLoop:
             state.decision_process = {
                 "planner": "profile_aware",
                 "settings": agent.get_settings_summary(),
-                "note": "规则决策：日程 + 临时 interact actions + 性格",
+                "note": "Rule-based decision: routine + ephemeral interact actions + personality",
                 "routine": routine_cands[0] if routine_cands else None,
                 "ephemeral_n": len(ephemeral_cands),
             }
@@ -1034,7 +1034,7 @@ class GameLoop:
             state.decision_process = {
                 "force_mock": False,
                 "settings": agent.get_settings_summary(),
-                "note": "日程 + 临时 interact actions + LLM，经可行性筛选",
+                "note": "Routine + ephemeral interact actions + LLM, filtered by feasibility",
                 "routine": routine_cands[0] if routine_cands else None,
                 "ephemeral_n": len(ephemeral_cands),
             }
@@ -1125,7 +1125,7 @@ class GameLoop:
                 state.decision_process = {
                     "planner": "profile_aware",
                     "settings": agent.get_settings_summary(),
-                    "note": "候选均不可行/已满足后的规则兜底",
+                    "note": "Rule fallback after all candidates infeasible or already satisfied",
                     "llm_goal_overridden": llm_goal,
                     "fallback_goal": {
                         "goal": fallback.get("goal"),
@@ -1135,7 +1135,7 @@ class GameLoop:
                 state.candidate_goals = [fallback]
                 if self.verbose and llm_goal:
                     print(
-                        f"[GOAL] [{agent.name}] LLM目标被覆盖: "
+                        f"[GOAL] [{agent.name}] LLM goal overridden: "
                         f"{llm_goal.get('goal')}->{llm_goal.get('target_entity')} "
                         f"=> {fallback.get('goal')}->{fallback.get('target_entity')}"
                     )
@@ -1156,7 +1156,7 @@ class GameLoop:
             state.last_goal = {
                 "goal": "Go to location",
                 "target_entity": agent.location,
-                "reason": "无可行动目标，等待",
+                "reason": "No actionable goal; waiting",
                 "priority": 0.1,
                 "confidence": 0.1,
             }
@@ -1190,7 +1190,7 @@ class GameLoop:
             ia = goal_data.get("interact_action") or ""
             extra = f" [{ia}]" if ia else ""
             print(
-                f"[GOAL] [{agent.name}] 选择: {goal_data.get('goal')} -> "
+                f"[GOAL] [{agent.name}] selected: {goal_data.get('goal')} -> "
                 f"{goal_data.get('target_entity')}{extra}"
             )
 
@@ -1210,7 +1210,7 @@ class GameLoop:
                 [],
                 ActionResult(
                     success=True,
-                    message=f"目标已满足: {goal_data.get('goal')}",
+                    message=f"Goal already satisfied: {goal_data.get('goal')}",
                     agent_name=agent.name,
                     action_type="noop",
                 ),
@@ -1228,7 +1228,7 @@ class GameLoop:
             state.decision_cooldown_until = self.sim_time + self.decision_cooldown
         state.replan_reason = None
         if self.verbose:
-            print(f"   计划 {len(state.current_plan)} 步 (engine={state.plan_engine})")
+            print(f"   plan {len(state.current_plan)} steps (engine={state.plan_engine})")
             for i, step in enumerate(state.current_plan, 1):
                 print(f"     {i}. {step[0]}({', '.join(step[1])})")
         return out
@@ -1255,7 +1255,7 @@ class GameLoop:
 
         key = _goal_key(state.last_goal)
         if self.verbose:
-            print(f"[REPLAN] [{agent.name}] 失败重规划: {reason}")
+            print(f"[REPLAN] [{agent.name}] failure replan: {reason}")
 
         # 1) 同目标再规划一次
         if state.last_goal:
@@ -1274,7 +1274,7 @@ class GameLoop:
                 state.status = "idle"
                 state.last_goal = retry.goal_data
                 if self.verbose:
-                    print(f"   同目标重规划成功: {len(state.current_plan)} 步")
+                    print(f"   same-goal replan succeeded: {len(state.current_plan)} steps")
                 return
             if key and key not in state.tried_goal_keys:
                 state.tried_goal_keys.append(key)
@@ -1285,7 +1285,7 @@ class GameLoop:
         if state.current_plan:
             state.is_interrupted = False
             if self.verbose:
-                print(f"   换目标重规划成功 (fallback={decided.get('fallback')})")
+                print(f"   alternate-goal replan succeeded (fallback={decided.get('fallback')})")
             return
 
         # 3) wait + backoff
@@ -1297,7 +1297,7 @@ class GameLoop:
         state.status = "idle"
         state.replan_backoff_until = self.sim_time + self.replan_backoff
         if self.verbose:
-            print(f"   重规划失败，等待 backoff={self.replan_backoff}s")
+            print(f"   replan failed; waiting backoff={self.replan_backoff}s")
 
     def _execute_plan_step(
         self,
@@ -1319,7 +1319,7 @@ class GameLoop:
         if action is None:
             return ActionResult(
                 success=False,
-                message=f"未知动作: {action_name}",
+                message=f"Unknown action: {action_name}",
                 agent_name=agent.name,
                 action_type=action_name,
             )

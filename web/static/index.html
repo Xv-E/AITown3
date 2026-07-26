@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=ZCOOL+KuaiLe&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/css/play.css" />
+  <link rel="stylesheet" href="/static/css/play.css?v=3" />
   <script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
 </head>
 <body class="doodle">
@@ -20,29 +20,29 @@
       <span class="meta" id="player-hp-text">0</span>
     </div>
     <div class="topbar-spacer"></div>
-    <span id="status">连接中...</span>
+    <span id="status">Connecting...</span>
     <span id="llm-badge" class="llm-badge">LLM ...</span>
-    <button class="btn secondary" id="btn-director" type="button">新事件</button>
-    <button class="btn secondary" id="btn-graph" type="button">图谱</button>
-    <a class="btn secondary" id="btn-inspect" href="/inspect" target="_blank" rel="noopener">LLM 日志</a>
-    <button class="btn secondary" id="btn-worlds" type="button">模板世界</button>
+    <button class="btn secondary" id="btn-director" type="button">New event</button>
+    <button class="btn secondary" id="btn-graph" type="button">Graph</button>
+    <a class="btn secondary" id="btn-inspect" href="/inspect" target="_blank" rel="noopener">LLM log</a>
+    <button class="btn secondary" id="btn-worlds" type="button">Template worlds</button>
   </header>
 
   <div class="stage">
     <aside class="npc-pane" id="npc-pane">
-      <div class="pane-title">角色</div>
+      <div class="pane-title">Characters</div>
       <div class="npc-roster" id="npc-roster"></div>
       <div class="npc-dossier" id="npc-dossier">
-        <div class="dossier-empty" id="dossier-empty">选择左侧角色查看设定、规划与日志</div>
+        <div class="dossier-empty" id="dossier-empty">Select a character to view profile, plan, and log</div>
         <div class="dossier-body hidden" id="dossier-body">
           <div class="dossier-header">
             <h2 id="dossier-name">—</h2>
             <div class="dossier-meta" id="dossier-meta"></div>
           </div>
           <div class="dossier-tabs">
-            <button type="button" class="dossier-tab active" data-tab="info">资料</button>
-            <button type="button" class="dossier-tab" data-tab="plan">规划</button>
-            <button type="button" class="dossier-tab" data-tab="log">日志</button>
+            <button type="button" class="dossier-tab active" data-tab="info">Info</button>
+            <button type="button" class="dossier-tab" data-tab="plan">Plan</button>
+            <button type="button" class="dossier-tab" data-tab="log">Log</button>
           </div>
           <div class="dossier-panels">
             <div class="dossier-panel active" id="dossier-panel-info"></div>
@@ -54,75 +54,71 @@
     </aside>
 
     <section class="map-pane">
-      <div class="pane-title">游戏地图</div>
+      <div class="pane-title">Game map</div>
       <div class="room-scene">
         <div class="game-viewport">
           <div class="location-banner">
             <div class="banner-text">
-              <h2 id="room-title">加载中…</h2>
+              <h2 id="room-title">Loading…</h2>
               <p class="desc" id="room-desc"></p>
             </div>
-            <div class="banner-hint">点击相邻地点移动 · 数字键 1–9</div>
+            <div class="banner-hint">Click an adjacent place to move · keys 1–9</div>
           </div>
-          <canvas id="town-canvas" aria-label="城镇地图"></canvas>
+          <canvas id="town-canvas" aria-label="Town map"></canvas>
           <div class="loc-tooltip hidden" id="loc-tooltip" role="tooltip"></div>
         </div>
 
         <div class="room-hud">
           <div class="hud-block">
-            <div class="section-label">出口</div>
+            <div class="section-label">Exits</div>
             <div class="exits-row" id="exits-row"></div>
           </div>
           <div class="hud-block">
-            <div class="section-label">在场人物</div>
+            <div class="section-label">People</div>
             <div class="entity-grid" id="people-grid"></div>
           </div>
           <div class="hud-block">
-            <div class="section-label">地上物品</div>
+            <div class="section-label">Things</div>
             <div class="entity-grid" id="items-grid"></div>
-          </div>
-          <div class="hud-block">
-            <div class="section-label">可交互</div>
-            <div class="entity-grid" id="interact-grid"></div>
           </div>
         </div>
       </div>
     </section>
 
     <aside class="side-pane">
-      <div class="pane-title">操作台</div>
+      <div class="pane-title">Console</div>
       <div class="side-tabs" id="side-tabs">
-        <button type="button" class="side-tab active" data-side-tab="action">行动</button>
-        <button type="button" class="side-tab" data-side-tab="sim">仿真</button>
-        <button type="button" class="side-tab" data-side-tab="log">日志</button>
+        <button type="button" class="side-tab active" data-side-tab="action">Actions</button>
+        <button type="button" class="side-tab" data-side-tab="sim">Simulation</button>
+        <button type="button" class="side-tab" data-side-tab="log">Log</button>
       </div>
       <div class="side-body" id="play-side">
         <div class="side-panel active" id="side-panel-action">
           <div class="action-panel">
             <div class="target-box" id="target-box">
-              <span class="empty">选择目标后可执行动作</span>
+              <span class="empty">Select a target to act</span>
             </div>
             <div class="action-btns" id="action-btns"></div>
-            <div class="inv-row">背包：<strong id="inv-text">—</strong></div>
-            <div class="quest-row">任务：<strong id="quest-text">—</strong></div>
-            <div class="quest-row clues-row">线索：<strong id="clue-text">—</strong></div>
+            <div class="inv-row">Inventory: <strong id="inv-text">—</strong></div>
+            <div class="quest-row">Quest: <strong id="quest-text">—</strong></div>
+            <div class="quest-row clues-row">Clues: <strong id="clue-text">—</strong></div>
           </div>
         </div>
         <div class="side-panel" id="side-panel-sim">
           <div class="sim-panel">
             <div class="sim-controls">
-              <button class="btn" id="btn-sim-start" type="button">启动仿真</button>
-              <button class="btn secondary" id="btn-sim-stop" type="button">停止仿真</button>
+              <button class="btn" id="btn-sim-start" type="button">Start simulation</button>
+              <button class="btn secondary" id="btn-sim-stop" type="button">Stop simulation</button>
             </div>
-            <label class="sim-llm" for="sel-sim-character">仿真对象
+            <label class="sim-llm" for="sel-sim-character">Simulate
               <select id="sel-sim-character">
-                <option value="">全部 NPC</option>
+                <option value="">All NPCs</option>
               </select>
             </label>
-            <label class="sim-llm"><input type="checkbox" id="chk-sim-llm" /> 用 LLM 决策（否则规则决策）</label>
-            <label class="sim-llm"><input type="checkbox" id="chk-sim-player" /> 玩家也自动规划（仅「全部」时有效）</label>
-            <div class="sim-meta" id="sim-meta">仿真未运行</div>
-            <div class="section-label">活动</div>
+            <label class="sim-llm"><input type="checkbox" id="chk-sim-llm" /> Use LLM decisions (else rules)</label>
+            <label class="sim-llm"><input type="checkbox" id="chk-sim-player" /> Auto-plan for player too (only when “All”)</label>
+            <div class="sim-meta" id="sim-meta">Simulation not running</div>
+            <div class="section-label">Activity</div>
             <div class="npc-activity" id="npc-activity"></div>
           </div>
         </div>
@@ -140,62 +136,62 @@
 
   <div class="gate" id="gate">
     <div class="gate-card">
-      <h2>开始游玩</h2>
-      <p>当前世界没有玩家角色。选择一个模板世界，或用导演创建自定义事件。</p>
+      <h2>Start playing</h2>
+      <p>No player character in the current world. Pick a template world, or create a custom event with the Director.</p>
       <div class="template-list" id="gate-worlds"></div>
-      <button class="btn secondary" id="btn-gate-director" type="button">打开导演</button>
+      <button class="btn secondary" id="btn-gate-director" type="button">Open Director</button>
     </div>
   </div>
 
   <div class="modal-backdrop" id="worlds-modal">
     <div class="modal">
-      <h2>模板世界</h2>
-      <p class="hint">从 <code>worlds/*.json</code> 文本配置加载。加载会清空当前世界与记忆。</p>
+      <h2>Template worlds</h2>
+      <p class="hint">Load from <code>worlds/*.json</code> text configs. Loading clears the current world and memory.</p>
       <div class="template-list" id="worlds-list"></div>
       <div class="modal-actions">
-        <button class="btn secondary" id="btn-worlds-close" type="button">关闭</button>
+        <button class="btn secondary" id="btn-worlds-close" type="button">Close</button>
       </div>
     </div>
   </div>
 
   <div class="modal-backdrop" id="talk-modal">
     <div class="modal">
-      <h2>与 <span id="talk-npc-name">NPC</span> 交谈</h2>
-      <p class="hint" id="talk-hint">输入你要对他说的话，对方会回应。</p>
-      <label for="talk-input">你说</label>
-      <textarea id="talk-input" rows="4" placeholder="例如：听说城堡的钥匙不见了，你知道什么吗？"></textarea>
+      <h2>Talk to <span id="talk-npc-name">NPC</span></h2>
+      <p class="hint" id="talk-hint">Type what you want to say; they will reply.</p>
+      <label for="talk-input">You say</label>
+      <textarea id="talk-input" rows="4" placeholder="e.g. I heard the castle key is missing — do you know anything?"></textarea>
       <div class="modal-actions">
-        <button class="btn secondary" id="btn-talk-cancel" type="button">取消</button>
-        <button class="btn" id="btn-talk-send" type="button">发送</button>
+        <button class="btn secondary" id="btn-talk-cancel" type="button">Cancel</button>
+        <button class="btn" id="btn-talk-send" type="button">Send</button>
       </div>
     </div>
   </div>
 
   <div class="modal-backdrop" id="director-modal">
     <div class="modal modal-wide">
-      <h2>导演 · 新事件</h2>
-      <p class="hint">① 写下大概剧情 → ② AI 分四步补充（骨架→世界→卡司→机制）并做可解性校验 → ③ 检查/改 JSON → ④ 确认写入世界。预设关卡请用「模板世界」。</p>
+      <h2>Director · New event</h2>
+      <p class="hint">① Sketch the story → ② AI fills in four steps (skeleton→world→cast→mechanics) with solvability checks → ③ Review/edit JSON → ④ Confirm to write the world. For preset levels use “Template worlds”.</p>
       <p class="director-status" id="director-status"></p>
 
-      <label for="director-prompt">事件草稿（大概即可）</label>
-      <textarea id="director-prompt" rows="4">一个旅人要去储藏室拿钥匙，再打开金库的门。</textarea>
+      <label for="director-prompt">Event draft (rough is fine)</label>
+      <textarea id="director-prompt" rows="4">A traveler must get a key from storage, then open the vault door.</textarea>
 
-      <label for="director-draft-json">可选：部分蓝图 JSON（有则 AI 在此基础上补全）</label>
-      <textarea id="director-draft-json" rows="3" placeholder='例如 {"persons":[{"name":"Traveler","role":"player"}],"title":"开锁试玩"}'></textarea>
+      <label for="director-draft-json">Optional: partial blueprint JSON (AI completes on top of this)</label>
+      <textarea id="director-draft-json" rows="3" placeholder='e.g. {"persons":[{"name":"Traveler","role":"player"}],"title":"Unlock demo"}'></textarea>
 
-      <div class="director-preview" id="director-preview">尚未规划 — 先点「AI 补充」</div>
+      <div class="director-preview" id="director-preview">Not planned yet — click “AI complete” first</div>
 
-      <label for="director-blueprint-json">补全结果（可改后再确认）</label>
-      <textarea id="director-blueprint-json" rows="10" placeholder="AI 补充后的完整蓝图会出现在这里，确认前可手改。"></textarea>
+      <label for="director-blueprint-json">Completed result (edit before confirming)</label>
+      <textarea id="director-blueprint-json" rows="10" placeholder="The full blueprint from AI will appear here; you can edit it before confirming."></textarea>
 
       <div class="modal-actions">
-        <button class="btn secondary" id="btn-director-close" type="button">关闭</button>
-        <button class="btn secondary" id="btn-director-plan" type="button">AI 补充</button>
-        <button class="btn" id="btn-director-build" type="button">确认写入世界</button>
+        <button class="btn secondary" id="btn-director-close" type="button">Close</button>
+        <button class="btn secondary" id="btn-director-plan" type="button">AI complete</button>
+        <button class="btn" id="btn-director-build" type="button">Confirm & write world</button>
       </div>
     </div>
   </div>
 
-  <script src="/static/js/play.js"></script>
+  <script src="/static/js/play.js?v=4"></script>
 </body>
 </html>

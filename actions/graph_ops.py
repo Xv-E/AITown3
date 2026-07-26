@@ -19,7 +19,7 @@ def resolve_token(token: Any, ctx: Dict[str, str]) -> Any:
     if token.startswith("@"):
         key = token[1:]
         if key not in ctx:
-            raise ValueError(f"未知占位符: {token}")
+            raise ValueError(f"Unknown placeholder: {token}")
         return ctx[key]
     return token
 
@@ -50,9 +50,9 @@ def check_condition(world, cond: Dict[str, Any], ctx: Dict[str, str]) -> Tuple[b
             got = get_property(world, entity, label, prop)
             if isinstance(want, bool):
                 if bool(got) != want:
-                    return False, f"{entity}.{prop} 期望 {want}，实际 {got}"
+                    return False, f"{entity}.{prop} expected {want}, got {got}"
             elif got != want:
-                return False, f"{entity}.{prop} 期望 {want}，实际 {got}"
+                return False, f"{entity}.{prop} expected {want}, got {got}"
             return True, "ok"
 
         if op == "prop_neq":
@@ -63,9 +63,9 @@ def check_condition(world, cond: Dict[str, Any], ctx: Dict[str, str]) -> Tuple[b
             got = get_property(world, entity, label, prop)
             if isinstance(want, bool):
                 if bool(got) == want:
-                    return False, f"{entity}.{prop} 不应为 {want}"
+                    return False, f"{entity}.{prop} should not be {want}"
             elif got == want:
-                return False, f"{entity}.{prop} 不应为 {want}"
+                return False, f"{entity}.{prop} should not be {want}"
             return True, "ok"
 
         if op == "prop_gte":
@@ -77,7 +77,7 @@ def check_condition(world, cond: Dict[str, Any], ctx: Dict[str, str]) -> Tuple[b
             try:
                 got_n = float(got if got is not None else 0)
             except (TypeError, ValueError):
-                return False, f"{entity}.{prop} 不是数值: {got}"
+                return False, f"{entity}.{prop} is not numeric: {got}"
             if got_n < want:
                 return False, f"{entity}.{prop}={got_n} < {want}"
             return True, "ok"
@@ -86,7 +86,7 @@ def check_condition(world, cond: Dict[str, Any], ctx: Dict[str, str]) -> Tuple[b
             person = resolve_token(cond["person"], ctx)
             item = resolve_token(cond["item"], ctx)
             if get_item_holder(world, item) != person:
-                return False, f"{person} 未持有 {item}"
+                return False, f"{person} is not holding {item}"
             return True, "ok"
 
         if op == "person_at":
@@ -94,7 +94,7 @@ def check_condition(world, cond: Dict[str, Any], ctx: Dict[str, str]) -> Tuple[b
             loc = resolve_token(cond["location"], ctx)
             cur = get_person_location(world, person)
             if cur != loc:
-                return False, f"{person} 不在 {loc}（在 {cur}）"
+                return False, f"{person} is not at {loc} (at {cur})"
             return True, "ok"
 
         if op == "item_at":
@@ -102,7 +102,7 @@ def check_condition(world, cond: Dict[str, Any], ctx: Dict[str, str]) -> Tuple[b
             loc = resolve_token(cond["location"], ctx)
             cur = get_item_location(world, entity)
             if cur != loc:
-                return False, f"{entity} 不在 {loc}（在 {cur}）"
+                return False, f"{entity} is not at {loc} (at {cur})"
             return True, "ok"
 
         if op == "has_rel":
@@ -112,7 +112,7 @@ def check_condition(world, cond: Dict[str, Any], ctx: Dict[str, str]) -> Tuple[b
             b_label = cond.get("b_label") or "Location"
             rel = cond.get("rel") or "ADJACENT_TO"
             if not world.has_relationship(a, a_label, b, b_label, rel):
-                return False, f"缺少关系 {a}-[{rel}]->{b}"
+                return False, f"Missing relationship {a}-[{rel}]->{b}"
             return True, "ok"
 
         if op == "not_has_rel":
@@ -122,10 +122,10 @@ def check_condition(world, cond: Dict[str, Any], ctx: Dict[str, str]) -> Tuple[b
             b_label = cond.get("b_label") or "Location"
             rel = cond.get("rel") or "ADJACENT_TO"
             if world.has_relationship(a, a_label, b, b_label, rel):
-                return False, f"不应存在关系 {a}-[{rel}]->{b}"
+                return False, f"Relationship should not exist {a}-[{rel}]->{b}"
             return True, "ok"
 
-        return False, f"未知条件原语: {op}"
+        return False, f"Unknown condition primitive: {op}"
     except Exception as e:
         return False, str(e)
 
@@ -244,7 +244,7 @@ def apply_op(world, op_spec: Dict[str, Any], ctx: Dict[str, str]) -> None:
         world.delete_entity(entity, label=label)
         return
 
-    raise ValueError(f"未知操作原语: {op}")
+    raise ValueError(f"Unknown operation primitive: {op}")
 
 
 def check_all(world, conditions: List[Dict[str, Any]], ctx: Dict[str, str]) -> Tuple[bool, str]:

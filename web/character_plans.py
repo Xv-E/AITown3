@@ -1,7 +1,7 @@
 """
-Web 端角色计划系统 — 目标设定、PDDL 规划、逐步执行。
+Web character plan system — goal setting, PDDL planning, step-by-step execution.
 
-执行状态由 WorldSimulator + GameLoop 统一管理。
+Execution state is managed centrally by WorldSimulator + GameLoop.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ def _sanitize_goal_target(
     goal: str,
     target_entity: Optional[str],
 ) -> Optional[str]:
-    """对话/攻击类目标不能指向自己。"""
+    """Social/combat goals cannot target self."""
     if not target_entity:
         return None
     t = target_entity.strip()
@@ -41,11 +41,11 @@ def _sanitize_goal_target(
 
 def _validate_plan_step(character: str, action_name: str, args: List[str]) -> Optional[str]:
     if action_name == "talk" and len(args) >= 2 and args[0] == args[1]:
-        return f"不能与自己对话: talk({args[0]}, {args[1]})"
+        return f"Cannot talk to self: talk({args[0]}, {args[1]})"
     if action_name == "attack" and len(args) >= 2 and args[0] == args[1]:
-        return f"不能攻击自己: attack({args[0]}, {args[1]})"
+        return f"Cannot attack self: attack({args[0]}, {args[1]})"
     if action_name == "talk" and len(args) >= 2 and args[0] != character and args[1] != character:
-        return f"talk 必须包含角色 {character}"
+        return f"talk must include character {character}"
     return None
 
 
@@ -131,7 +131,7 @@ class CharacterPlanState:
 
 
 def _mock_pick_goal(world, character: str) -> Dict[str, Any]:
-    """根据 Neo4j 中的角色设定选择目标（profile 模式）。"""
+    """Pick a goal from Neo4j character profile (profile mode)."""
     from agent_profile import AgentProfile
     from profile_planner import profile_aware_pick_goal
 
@@ -140,7 +140,7 @@ def _mock_pick_goal(world, character: str) -> Dict[str, Any]:
 
 
 class CharacterPlanManager:
-    """管理所有角色的计划状态（委托 WorldSimulator）。"""
+    """Manage plan state for all characters (delegates to WorldSimulator)."""
 
     def __init__(self) -> None:
         self._sim = get_world_simulator()
@@ -192,7 +192,7 @@ class CharacterPlanManager:
         goal_data = {
             "goal": goal,
             "target_entity": target_entity,
-            "reason": reason or f"手动设定: {goal}",
+            "reason": reason or f"Manual goal: {goal}",
             "priority": 0.8,
             "confidence": 0.9,
         }
@@ -231,7 +231,7 @@ class CharacterPlanManager:
                 goal_data,
                 [],
                 engine=result.engine,
-                error=result.error or "规划失败",
+                error=result.error or "Planning failed",
                 world=world,
             )
             return self._sim.get_plan_dict(world, name)
@@ -278,7 +278,7 @@ class CharacterPlanManager:
             name,
             selected["goal"],
             selected.get("target_entity"),
-            reason=selected.get("reason", "规则决策"),
+            reason=selected.get("reason", "Rule-based decision"),
         )
 
     def llm_decide(
@@ -346,7 +346,7 @@ class CharacterPlanManager:
             )
         if not selected or not selected.get("goal"):
             self._sim.inject_plan(
-                name, {}, [], error="LLM 未能生成有效目标", world=world
+                name, {}, [], error="LLM did not produce a valid goal", world=world
             )
             return self._sim.get_plan_dict(world, name)
 
@@ -355,7 +355,7 @@ class CharacterPlanManager:
             name,
             selected["goal"],
             selected.get("target_entity"),
-            reason=selected.get("reason", "LLM 决策"),
+            reason=selected.get("reason", "LLM decision"),
         )
 
     def execute_next_step(self, world, name: str) -> Dict[str, Any]:
@@ -372,7 +372,7 @@ class CharacterPlanManager:
         return {
             "character": name,
             "skipped": True,
-            "reason": "无 Agent 状态",
+            "reason": "No agent state",
             "state": self._sim.get_plan_dict(world, name),
         }
 
@@ -432,7 +432,7 @@ def list_goal_terms() -> List[Dict[str, str]]:
 
 
 def get_goal_target_options(world, character: str, goal: str) -> Dict[str, Any]:
-    """根据目标类型返回可选 target_entity 列表。"""
+    """Return optional target_entity list for the given goal type."""
     locations = world.list_entities("Location")
     items = world.list_entities("Item")
     persons = [p for p in world.list_entities("Person") if p != character]
@@ -505,12 +505,12 @@ def get_goal_target_options(world, character: str, goal: str) -> Dict[str, Any]:
 def _target_hint(goal: str, options: List[str]) -> str:
     if goal in COLLECT_GOALS:
         if not options:
-            return "没有可拾取的地上物品（已被持有或未放置在地点）"
-        return f"可拾取地上物品：{', '.join(options)}"
+            return "No pickable items on the ground (already held or not placed at a location)"
+        return f"Pickable ground items: {', '.join(options)}"
     if goal == "Use item on":
         if not options:
-            return "没有上锁的门"
-        return f"可互动的锁门：{', '.join(options)}"
+            return "No locked doors"
+        return f"Interactable locked doors: {', '.join(options)}"
     return ""
 
 

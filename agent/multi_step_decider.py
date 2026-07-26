@@ -284,7 +284,7 @@ Respond with a single JSON object:
                 goal_data["metadata"]["interact_action"] = ia
         decision_process = {
             "planner": "single_shot",
-            "note": "单次 LLM 决策，仅一个目标",
+            "note": "Single LLM decision, one goal only",
             "settings": agent.get_settings_summary(),
             "synthesis_result": {
                 "final_goal": final_goal,
@@ -808,7 +808,7 @@ Respond with a JSON object:
                 prompt=repair_prompt,
                 raw=repair_raw or "",
                 ok=False,
-                error="本地 GBNF 修复后仍无法解析",
+                error="Still unparseable after local GBNF repair",
                 meta={**base_meta, "provider": "local_gbnf", "fallback_used": True},
                 gbnf=ginfo,
                 elapsed_ms=(time.perf_counter() - t1) * 1000,
@@ -1328,7 +1328,7 @@ Respond with a JSON array of {num_candidates} objects:
         return SynthesisResult(
             final_goal=goal_dict.get("goal", "Go to location"),
             target_entity=goal_dict.get("target_entity"),
-            reasoning=goal_dict.get("reason", "根据角色设定"),
+            reasoning=goal_dict.get("reason", "Based on profile"),
             confidence=float(goal_dict.get("confidence", 0.7)),
             contributing_factors={
                 "values": 0.3,
@@ -1344,7 +1344,7 @@ Respond with a JSON array of {num_candidates} objects:
         return SynthesisResult(
             final_goal="Gain information",
             target_entity=None,
-            reasoning="默认决策（LLM未初始化）",
+            reasoning="Default decision (LLM not initialized)",
             confidence=0.5,
             contributing_factors={
                 "values": 0.25,
@@ -1452,11 +1452,11 @@ Respond with a JSON array of {num_candidates} objects:
             confidence = max(0.3, min(0.95, base_confidence))
 
             # 生成推理说明
-            reasoning_parts = [f"选择目标: {goal_term}"]
+            reasoning_parts = [f"Selected goal: {goal_term}"]
             if target_entity:
-                reasoning_parts.append(f"目标实体: {target_entity}")
-            reasoning_parts.append("（默认决策，LLM未初始化）")
-            reasoning = "，".join(reasoning_parts)
+                reasoning_parts.append(f"Target entity: {target_entity}")
+            reasoning_parts.append("(default decision, LLM not initialized)")
+            reasoning = ", ".join(reasoning_parts)
             
             candidate = SynthesisResult(
                 final_goal=goal_term,
@@ -1511,15 +1511,15 @@ Respond with a JSON array of {num_candidates} objects:
             relevant_values=[],
             value_conflicts=[],
             value_alignment=0.5,
-            reasoning="默认值（LLM未初始化）",
+            reasoning="Default value (LLM not initialized)",
             recommended_actions=[]
         )
         
         default_emotion = EmotionAnalysis(
             current_emotion="neutral",
             emotion_intensity=0.5,
-            emotion_cause="默认值",
-            emotion_impact="无影响",
+            emotion_cause="Default value",
+            emotion_impact="No impact",
             recommended_actions=[]
         )
         
@@ -1527,7 +1527,7 @@ Respond with a JSON array of {num_candidates} objects:
             relevant_background=[],
             past_experiences=[],
             learned_lessons=[],
-            background_influence="无影响",
+            background_influence="No impact",
             recommended_actions=[]
         )
         
@@ -1542,7 +1542,7 @@ Respond with a JSON array of {num_candidates} objects:
         default_synthesis = SynthesisResult(
             final_goal="Gain information",
             target_entity=None,
-            reasoning="默认决策（LLM未初始化）",
+            reasoning="Default decision (LLM not initialized)",
             confidence=0.5,
             contributing_factors={}
         )
@@ -1559,7 +1559,7 @@ Respond with a JSON array of {num_candidates} objects:
             "goal_data": {
                 "goal": "Gain information",
                 "target_entity": None,
-                "reason": "默认决策（LLM未初始化）"
+                "reason": "Default decision (LLM not initialized)"
             },
             "decision_process": decision_process.to_dict()
         }

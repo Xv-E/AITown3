@@ -1,41 +1,41 @@
 {
   "id": "sealed_archive",
-  "title": "封印档案室",
-  "premise": "从酒馆打听入手：铁匠铺撬棍撬开庭院活板门，地窖取锈钥匙开档案门；可选药膏救学者、火漆盖文书安抚守卫。",
+  "title": "Sealed Archive",
+  "premise": "Start by asking around the tavern: borrow a crowbar from the smithy to pry open the courtyard trapdoor, fetch the rusty key from the cellar to unlock the archive door; optionally use salve to save the scholar or stamp a warrant to appease the guard.",
   "locations": [
     {
       "name": "MarketSquare",
-      "description": "小镇广场。摊位与告示板旁总能听到闲话。",
+      "description": "The town square. Gossip always drifts near the stalls and notice board.",
       "tags": "hub,market"
     },
     {
       "name": "Tavern",
-      "description": "暖黄灯光的旅店。老板娘消息灵通。",
+      "description": "A tavern lit with warm yellow lamps. The innkeeper hears everything.",
       "tags": "social,info"
     },
     {
       "name": "Workshop",
-      "description": "铁匠铺。工具挂满墙，地上散落金属件。",
+      "description": "The blacksmith's shop. Tools cover the walls; metal scraps litter the floor.",
       "tags": "item,craft"
     },
     {
       "name": "Courtyard",
-      "description": "石板庭院。中央有一扇上了锈的活板门。",
+      "description": "A flagstone courtyard. A rusted trapdoor sits at its center.",
       "tags": "hub,outdoor"
     },
     {
       "name": "Cellar",
-      "description": "潮冷地窖。架子上可能藏着旧物。活板门打开后才能进出。",
+      "description": "A damp, cold cellar. Old things may hide on the shelves. Only reachable once the trapdoor is open.",
       "tags": "secret,item"
     },
     {
       "name": "ArchiveAntechamber",
-      "description": "档案前厅。尽头是沉重的封印门，伤员靠墙坐着。",
+      "description": "The archive antechamber. A heavy sealed door blocks the far end; an injured scholar slumps against the wall.",
       "tags": "quest"
     },
     {
       "name": "SealedArchive",
-      "description": "尘封的档案内室。门打开后才能进入。",
+      "description": "The dusty archive inner chamber. Enter only after the door is unlocked.",
       "tags": "secret,goal"
     }
   ],

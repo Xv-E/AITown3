@@ -1,16 +1,16 @@
 {
   "id": "two_npc_talk",
-  "title": "双 NPC 对话模板",
-  "premise": "测试两个 NPC 在同一地点互相询问、分享事实；可选再测试给予物品。仿真时选 Anna+Ben（或全部 NPC）。",
+  "title": "Two-NPC Dialogue Template",
+  "premise": "Test two NPCs at the same location asking each other questions and sharing facts; optionally test giving items. For simulation, select Anna+Ben (or all NPCs).",
   "locations": [
     {
       "name": "Plaza",
-      "description": "小镇广场。两人常在这里碰面。",
+      "description": "The town square. The two often meet here.",
       "tags": "hub,social"
     },
     {
       "name": "Garden",
-      "description": "安静的后花园。约定碰头的地方。",
+      "description": "A quiet back garden. Their agreed meeting spot.",
       "tags": "goal"
     }
   ],

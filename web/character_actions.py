@@ -1,5 +1,5 @@
 """
-按角色上下文生成可用动作与参数选项。
+Generate available actions and parameter options from character context.
 """
 
 from __future__ import annotations
@@ -72,7 +72,7 @@ def _adjacent_locations(world, loc: str) -> List[str]:
 
 
 def _locked_exits(world, loc: str) -> List[Dict[str, str]]:
-    """当前位置锁定门通向的地点（需 use_on 开门）。"""
+    """Destinations behind locked doors at the current location (requires use_on to unlock)."""
     if not loc:
         return []
     out = []
@@ -136,7 +136,7 @@ def _people_at_location(world, loc: str, exclude: Optional[str] = None) -> List[
 
 
 def _enrich_item_interaction(item: Dict[str, Any]) -> Dict[str, Any]:
-    """用会话交互表补全 key_item / connects_to（优先于图属性）。"""
+    """Enrich key_item / connects_to from session interaction table (overrides graph properties)."""
     name = item.get("name") or ""
     if not name:
         return item
@@ -154,7 +154,7 @@ def _enrich_item_interaction(item: Dict[str, Any]) -> Dict[str, Any]:
             inter = find_interaction(tools[0], name)
             loc = item.get("_loc")  # optional
             if inter:
-                # connects_to：link 另一端；无 loc 时取 pair 中非门所在侧需调用方传入
+                # connects_to: other end of link; caller must pass loc when door side is ambiguous
                 pair_dest = None
                 if loc:
                     pair_dest = destination_from_interaction(inter, from_loc=loc)
@@ -164,7 +164,7 @@ def _enrich_item_interaction(item: Dict[str, Any]) -> Dict[str, Any]:
                     pair = link_pair(inter)
                     if pair:
                         a, b = pair
-                        # 若无法判断 from，保留 connects_to 旧值或取 b
+                        # If from is unknown, keep existing connects_to or use b
                         pair_dest = item.get("connects_to") or b
                 if pair_dest:
                     item["connects_to"] = pair_dest
@@ -174,7 +174,7 @@ def _enrich_item_interaction(item: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _items_at_location(world, loc: str) -> List[Dict[str, Any]]:
-    """地上且未被持有的物品（含门等固定物）。"""
+    """Ground items not held by anyone (including doors and fixtures)."""
     rows = world.run_query(
         """
         MATCH (i:Item)-[:LOCATED_AT]->(l:Location {name: $loc})
@@ -246,7 +246,7 @@ def _doors_at_location(world, loc: str) -> List[Dict[str, Any]]:
 
 
 def _is_interactable_item(item: Dict[str, Any]) -> bool:
-    """门 / 固定物 / 带 interactive script 的机关。"""
+    """Doors / fixtures / devices with interactive scripts."""
     kind = (item.get("item_kind") or "").lower()
     if kind in ("door", "campfire", "source", "fixture", "puzzle", "mechanism", "tree"):
         return True
@@ -269,7 +269,7 @@ def _is_interactable_item(item: Dict[str, Any]) -> bool:
 def _split_ground_items(
     items: List[Dict[str, Any]],
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-    """拆成 (可拾取物品, 可交互物)。"""
+    """Split into (pickable items, interactables)."""
     pickable: List[Dict[str, Any]] = []
     interactables: List[Dict[str, Any]] = []
     for it in items:
@@ -313,7 +313,7 @@ def _build_action_entries(world, person: str, state: Dict[str, Any]) -> List[Dic
         d for d in doors_here
         if d.get("locked") and d.get("key_item")
     ]
-    # 会话交互：当前地点上的任意目标（物品/人）× 手持工具
+    # Session interactions: any target (item/person) at current location × held tools
     interact_matches: List[Dict[str, Any]] = []
     catalog: Dict[str, Any] = {}
     try:
@@ -347,7 +347,7 @@ def _build_action_entries(world, person: str, state: Dict[str, Any]) -> List[Dic
         interact_matches = [
             d for d in locked_doors if d.get("key_item") in held
         ]
-    # 当前地点所有可点目标（用于 UI 选目标）
+    # All clickable targets at current location (for UI target selection)
     target_opts = sorted(
         {x["name"] for x in (_items_at_location(world, loc) if loc else [])}
         | set(alive_here)
@@ -364,9 +364,9 @@ def _build_action_entries(world, person: str, state: Dict[str, Any]) -> List[Dic
                 available = True
                 defaults = {"c": person, "from": loc, "to": adjacent[0]}
                 fields = [
-                    _field("c", "Person", value=person, readonly=True, label="角色"),
-                    _field("from", "Location", value=loc, readonly=True, label="起点"),
-                    _field("to", "Location", value=adjacent[0], options=adjacent, label="目的地"),
+                    _field("c", "Person", value=person, readonly=True, label="Character"),
+                    _field("from", "Location", value=loc, readonly=True, label="From"),
+                    _field("to", "Location", value=adjacent[0], options=adjacent, label="To"),
                 ]
 
         elif action.name == "pick_up":
@@ -374,9 +374,9 @@ def _build_action_entries(world, person: str, state: Dict[str, Any]) -> List[Dic
                 available = True
                 defaults = {"c": person, "i": items_here[0], "l": loc}
                 fields = [
-                    _field("c", "Person", value=person, readonly=True, label="角色"),
-                    _field("i", "Item", value=items_here[0], options=items_here, label="物品"),
-                    _field("l", "Location", value=loc, readonly=True, label="位置"),
+                    _field("c", "Person", value=person, readonly=True, label="Character"),
+                    _field("i", "Item", value=items_here[0], options=items_here, label="Item"),
+                    _field("l", "Location", value=loc, readonly=True, label="Location"),
                 ]
 
         elif action.name == "drop":
@@ -384,9 +384,9 @@ def _build_action_entries(world, person: str, state: Dict[str, Any]) -> List[Dic
                 available = True
                 defaults = {"c": person, "i": held[0], "l": loc}
                 fields = [
-                    _field("c", "Person", value=person, readonly=True, label="角色"),
-                    _field("i", "Item", value=held[0], options=held, label="物品"),
-                    _field("l", "Location", value=loc, readonly=True, label="位置"),
+                    _field("c", "Person", value=person, readonly=True, label="Character"),
+                    _field("i", "Item", value=held[0], options=held, label="Item"),
+                    _field("l", "Location", value=loc, readonly=True, label="Location"),
                 ]
 
         elif action.name == "give":
@@ -394,10 +394,10 @@ def _build_action_entries(world, person: str, state: Dict[str, Any]) -> List[Dic
                 available = True
                 defaults = {"giver": person, "i": held[0], "receiver": alive_here[0], "l": loc}
                 fields = [
-                    _field("giver", "Person", value=person, readonly=True, label="给予者"),
-                    _field("i", "Item", value=held[0], options=held, label="物品"),
-                    _field("receiver", "Person", value=alive_here[0], options=alive_here, label="接收者"),
-                    _field("l", "Location", value=loc, readonly=True, label="位置"),
+                    _field("giver", "Person", value=person, readonly=True, label="Giver"),
+                    _field("i", "Item", value=held[0], options=held, label="Item"),
+                    _field("receiver", "Person", value=alive_here[0], options=alive_here, label="Receiver"),
+                    _field("l", "Location", value=loc, readonly=True, label="Location"),
                 ]
 
         elif action.name == "talk":
@@ -405,9 +405,9 @@ def _build_action_entries(world, person: str, state: Dict[str, Any]) -> List[Dic
                 available = True
                 defaults = {"a": person, "b": alive_here[0], "l": loc}
                 fields = [
-                    _field("a", "Person", value=person, readonly=True, label="角色 A"),
-                    _field("b", "Person", value=alive_here[0], options=alive_here, label="对话对象"),
-                    _field("l", "Location", value=loc, readonly=True, label="位置"),
+                    _field("a", "Person", value=person, readonly=True, label="Character A"),
+                    _field("b", "Person", value=alive_here[0], options=alive_here, label="Talk to"),
+                    _field("l", "Location", value=loc, readonly=True, label="Location"),
                 ]
 
         elif action.name == "attack":
@@ -415,9 +415,9 @@ def _build_action_entries(world, person: str, state: Dict[str, Any]) -> List[Dic
                 available = True
                 defaults = {"attacker": person, "target": alive_here[0], "l": loc}
                 fields = [
-                    _field("attacker", "Person", value=person, readonly=True, label="攻击者"),
-                    _field("target", "Person", value=alive_here[0], options=alive_here, label="目标"),
-                    _field("l", "Location", value=loc, readonly=True, label="位置"),
+                    _field("attacker", "Person", value=person, readonly=True, label="Attacker"),
+                    _field("target", "Person", value=alive_here[0], options=alive_here, label="Target"),
+                    _field("l", "Location", value=loc, readonly=True, label="Location"),
                 ]
 
         elif action.name == "use_item":
@@ -425,12 +425,12 @@ def _build_action_entries(world, person: str, state: Dict[str, Any]) -> List[Dic
                 available = True
                 defaults = {"c": person, "i": held[0]}
                 fields = [
-                    _field("c", "Person", value=person, readonly=True, label="角色"),
-                    _field("i", "Item", value=held[0], options=held, label="物品"),
+                    _field("c", "Person", value=person, readonly=True, label="Character"),
+                    _field("i", "Item", value=held[0], options=held, label="Item"),
                 ]
 
         elif action.name == "use_on":
-            # 有背包 + 同地有人或物：可点「对目标使用」，具体是否可行看世界交互表
+            # Has inventory + someone/something nearby: can "use on target"; feasibility from world interaction table
             matching = interact_matches
             if alive and loc and held and target_opts:
                 available = True
@@ -455,16 +455,19 @@ def _build_action_entries(world, person: str, state: Dict[str, Any]) -> List[Dic
                     "to": to,
                 }
                 fields = [
-                    _field("c", "Person", value=person, readonly=True, label="角色"),
-                    _field("i", "Item", value=tool, options=tool_opts, label="使用物"),
-                    _field("target", "Item", value=tgt, options=tgt_opts, label="目标"),
-                    _field("from", "Location", value=loc, readonly=True, label="当前位置"),
-                    _field("to", "Location", value=to, readonly=True, label="参考地点"),
+                    _field("c", "Person", value=person, readonly=True, label="Character"),
+                    _field("i", "Item", value=tool, options=tool_opts, label="Tool"),
+                    _field("target", "Item", value=tgt, options=tgt_opts, label="Target"),
+                    _field("from", "Location", value=loc, readonly=True, label="Current location"),
+                    _field("to", "Location", value=to, readonly=True, label="Ref location"),
                 ]
 
         elif action.name == "interact":
             scripted = []
-            for it in context.get("interactables_here") or []:
+            _, interactables_here = _split_ground_items(
+                _items_at_location(world, loc) if loc else []
+            )
+            for it in interactables_here:
                 sc = it.get("script") if isinstance(it, dict) else None
                 if isinstance(sc, dict) and (sc.get("interactive") or sc.get("behavior")):
                     scripted.append(it["name"])
@@ -474,19 +477,19 @@ def _build_action_entries(world, person: str, state: Dict[str, Any]) -> List[Dic
                 available = True
                 defaults = {"c": person, "target": scripted[0], "option": "auto"}
                 fields = [
-                    _field("c", "Person", value=person, readonly=True, label="角色"),
-                    _field("target", "Item", value=scripted[0], options=scripted, label="机关"),
+                    _field("c", "Person", value=person, readonly=True, label="Character"),
+                    _field("target", "Item", value=scripted[0], options=scripted, label="Device"),
                     _field(
                         "option",
                         "Item",
                         value="auto",
                         options=["auto"],
-                        label="选项(auto=LLM选择)",
+                        label="Choice (auto=LLM)",
                     ),
                 ]
 
         if available:
-            # 用 check 标注首个默认组合是否可行
+            # Mark whether the first default combination is feasible via check
             feasible, reason = action.check(world, **defaults)
             entries.append({
                 "name": action.name,
@@ -494,12 +497,12 @@ def _build_action_entries(world, person: str, state: Dict[str, Any]) -> List[Dic
                 "category": action.category,
                 "available": True,
                 "feasible": feasible,
-                "feasible_hint": reason if not feasible else "可执行",
+                "feasible_hint": reason if not feasible else "Feasible",
                 "defaults": defaults,
                 "fields": fields,
             })
 
-    # 不可用的动作也列出（灰色），方便用户理解
+    # Also list unavailable actions (grayed out) so users understand constraints
     available_names = {e["name"] for e in entries}
     for action in reg.all():
         if action.name not in available_names:
@@ -517,7 +520,7 @@ def _build_action_entries(world, person: str, state: Dict[str, Any]) -> List[Dic
                 "fields": [],
             })
 
-    # 可用动作排前面
+    # Available actions first
     entries.sort(key=lambda x: (not x["available"], x["name"]))
     return entries
 
@@ -533,27 +536,27 @@ def _unavailable_reason(
     locked_doors: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
     if not loc:
-        return "角色没有当前位置"
+        return "Character has no current location"
     locked_doors = locked_doors or []
     use_on_hint = ""
     if action_name == "use_on":
         if not held:
-            use_on_hint = "没有持有物品"
+            use_on_hint = "Not holding any items"
         elif not alive:
-            use_on_hint = "角色已死亡"
+            use_on_hint = "Character is dead"
         else:
-            use_on_hint = "同地点没有可选目标"
+            use_on_hint = "No selectable targets at this location"
     reasons = {
-        "move": "没有相邻地点可去" if not adjacent else "",
-        "pick_up": "当前位置没有可拾取物品" if not items_here else "",
-        "drop": "没有持有物品" if not held else "",
-        "give": "需要持有物品且同位置有其他角色" if not (held and alive_here) else "",
-        "talk": "同位置没有其他存活角色" if not alive_here else ("角色已死亡" if not alive else ""),
-        "attack": "同位置没有其他存活角色" if not alive_here else ("角色已死亡" if not alive else ""),
-        "use_item": "没有持有物品" if not held else ("角色已死亡" if not alive else ""),
-        "use_on": use_on_hint or "当前不可用",
+        "move": "No adjacent locations to go to" if not adjacent else "",
+        "pick_up": "No pickable items at current location" if not items_here else "",
+        "drop": "Not holding any items" if not held else "",
+        "give": "Must hold an item and have another character at the same location" if not (held and alive_here) else "",
+        "talk": "No other living characters at this location" if not alive_here else ("Character is dead" if not alive else ""),
+        "attack": "No other living characters at this location" if not alive_here else ("Character is dead" if not alive else ""),
+        "use_item": "Not holding any items" if not held else ("Character is dead" if not alive else ""),
+        "use_on": use_on_hint or "Not available",
     }
-    return reasons.get(action_name, "当前不可用")
+    return reasons.get(action_name, "Not available")
 
 
 def list_characters(world) -> List[Dict[str, Any]]:
@@ -576,7 +579,7 @@ def list_characters(world) -> List[Dict[str, Any]]:
 
 
 def get_player(world) -> Optional[Dict[str, Any]]:
-    """返回 is_player / role=player 的角色；若多个取第一个。"""
+    """Return is_player / role=player character; first match if multiple."""
     rows = world.run_query(
         """
         MATCH (p:Person)
@@ -588,7 +591,7 @@ def get_player(world) -> Optional[Dict[str, Any]]:
     )
     if rows and rows[0].get("name"):
         return _person_state(world, rows[0]["name"])
-    # 兜底：名为 Traveler
+    # Fallback: character named Traveler
     for name in world.list_entities("Person") or []:
         if name == "Traveler":
             return _person_state(world, name)
@@ -616,12 +619,12 @@ def get_location_info(world, loc: str) -> Optional[Dict[str, Any]]:
 
 
 def list_locations_graph(world) -> Dict[str, Any]:
-    """全图地点 + 邻接边，供房间地图布局。
+    """All locations + adjacency edges for room map layout.
 
-    每个地点分开返回：
-      - persons: 在场人物
-      - items: 可拾取地上物品
-      - interactables: 门等可交互物
+    Each location returns separately:
+      - persons: characters present
+      - items: pickable ground items
+      - interactables: doors and other interactables
     """
     loc_rows = world.run_query(
         """
@@ -699,7 +702,7 @@ def get_character_actions(world, person: str) -> Dict[str, Any]:
             "items_here": [x["name"] for x in pickable],
             "items_here_detail": pickable,
             "interactables_here": interactables,
-            # 兼容：全部地上实体（含门）
+            # Compatibility: all ground entities (including doors)
             "ground_all_detail": all_ground,
         },
         "actions": actions,
@@ -708,12 +711,12 @@ def get_character_actions(world, person: str) -> Dict[str, Any]:
 
 
 def get_play_state(world) -> Dict[str, Any]:
-    """一次拉齐游玩状态。"""
+    """Fetch full play state in one call."""
     player = get_player(world)
     if player is None:
         return {
             "found": False,
-            "message": "当前世界没有玩家角色。请加载模板世界，或用导演创建事件。",
+            "message": "No player character in the current world. Load a template world, or create an event with the Director.",
             "map": list_locations_graph(world),
         }
 
@@ -778,7 +781,7 @@ def get_play_state(world) -> Dict[str, Any]:
 
 
 def _player_known_clues(world, person: str) -> List[Dict[str, Any]]:
-    """主角已知 Fact / 相信的 Rumor，供玩法页线索栏。"""
+    """Known Facts and believed Rumors for the player, for the clues panel."""
     out: List[Dict[str, Any]] = []
     try:
         facts = world.run_query(
@@ -831,7 +834,7 @@ def _use_on_catalog_safe() -> Dict[str, Any]:
 
 
 def _play_simulation_snapshot(world) -> Dict[str, Any]:
-    """玩法页 NPC 活动摘要。"""
+    """NPC activity summary for the play page."""
     try:
         from world_simulator import get_world_simulator
 

@@ -1,5 +1,5 @@
 """
-角色设定（Neo4j Person 属性）供 Web API 与前端展示。
+Character profiles (Neo4j Person properties) for Web API and frontend display.
 """
 
 from __future__ import annotations
@@ -7,11 +7,11 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 
 PROFILE_FIELDS: Tuple[Tuple[str, str], ...] = (
-    ("goal", "当前目标"),
-    ("personality", "性格"),
-    ("background", "背景"),
-    ("values", "价值观"),
-    ("mood", "情绪"),
+    ("goal", "Current goal"),
+    ("personality", "Personality"),
+    ("background", "Background"),
+    ("values", "Values"),
+    ("mood", "Mood"),
 )
 
 
@@ -34,7 +34,7 @@ def _format_goal_dict(goal: Any) -> str:
 
 
 def get_character_profile(world, name: str, *, live_goal: Optional[str] = None) -> Dict[str, Any]:
-    """从 Neo4j 加载角色设定；live_goal 可覆盖展示用的当前目标。"""
+    """Load character profile from Neo4j; live_goal may override the displayed current goal."""
     rows = world.run_query(
         "MATCH (p:Person {name: $name}) RETURN p.name AS name LIMIT 1",
         name=name,
@@ -73,7 +73,7 @@ def get_character_profile(world, name: str, *, live_goal: Optional[str] = None) 
         if text:
             fields.append({"key": key, "label": label, "value": text})
         elif key == "goal":
-            fields.append({"key": key, "label": label, "value": "（暂无）"})
+            fields.append({"key": key, "label": label, "value": "(none)"})
 
     return {
         "found": True,
@@ -89,7 +89,7 @@ def get_character_profile(world, name: str, *, live_goal: Optional[str] = None) 
 
 
 def get_character_dossier(world, name: str, *, memory_limit: int = 40) -> Dict[str, Any]:
-    """角色一览：状态 + 设定 + 计划 + 记忆日志。"""
+    """Character dossier: state + profile + plan + memory log."""
     from character_actions import _person_state
     from world_simulator import get_world_simulator
 
@@ -108,7 +108,7 @@ def get_character_dossier(world, name: str, *, memory_limit: int = 40) -> Dict[s
     if not live_goal:
         live_goal = _format_goal_dict(plan.get("goal"))
     if not live_goal:
-        # Neo4j 上的初值 / 已写回值
+        # Initial / persisted values from Neo4j
         try:
             rows = world.run_query(
                 """

@@ -1,31 +1,31 @@
 {
   "id": "town_daily_life",
-  "title": "篝火营地",
-  "premise": "生产消费型营地：伐木添柴、采集浆果、维持永不熄灭的篝火；午饭/晚饭在火边烤食。昼夜交替，火会慢慢熄灭——活下去的过程里会生出故事。",
+  "title": "Campfire Camp",
+  "premise": "A production-and-consumption camp: chop wood, gather berries, and keep the eternal campfire burning; lunch and dinner are roasted by the fire. Day and night pass, and the fire slowly dies down—stories emerge in the struggle to survive.",
   "locations": [
     {
       "name": "CampfireClearing",
-      "description": "营地中央。篝火昼夜燃烧，吃饭、闲聊、守夜都在这里。",
+      "description": "The heart of the camp. The campfire burns day and night; meals, chatter, and night watch all happen here.",
       "tags": "hub,fire,social,meal"
     },
     {
       "name": "Forest",
-      "description": "营地西侧密林。倒木与干枝适合当柴火。",
+      "description": "Dense woods west of camp. Fallen logs and dry branches make good firewood.",
       "tags": "work,wood"
     },
     {
       "name": "BerryGrove",
-      "description": "向阳灌木丛。浆果成熟时可采，适合拿去火边烤。",
+      "description": "Sunlit thickets. Ripe berries can be picked and roasted at the fire.",
       "tags": "work,food"
     },
     {
       "name": "RiverBank",
-      "description": "浅滩河岸。打水、歇脚、说悄悄话的地方。",
+      "description": "A shallow riverbank. A place to fetch water, rest, and whisper secrets.",
       "tags": "social,water"
     },
     {
       "name": "Shelter",
-      "description": "简陋木棚。夜里大家挤在这里睡觉。",
+      "description": "A rough wooden lean-to. Everyone sleeps packed together here at night.",
       "tags": "home,rest"
     }
   ],

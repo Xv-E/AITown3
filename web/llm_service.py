@@ -1,5 +1,5 @@
 """
-Web 端 LLM 决策服务 — 封装 MultiStepDecider + Chroma 记忆。
+Web LLM decision service — wraps MultiStepDecider + Chroma memory.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ def get_web_memory():
 
 
 def get_llm_status(*, refresh: bool = False) -> Dict[str, Any]:
-    """探测主模型（Qwen）配置与本地 GBNF 兜底是否就绪。"""
+    """Check whether the primary model (Qwen) and local GBNF fallback are ready."""
     global _llm_checked, _llm_available, _model_hint
     if refresh or not _llm_checked:
         _llm_checked = True
@@ -58,7 +58,7 @@ def get_llm_status(*, refresh: bool = False) -> Dict[str, Any]:
                 _llm_available = True
                 _model_hint = primary_model_name()
             else:
-                _model_hint = "OPENAI_API_KEY 未配置"
+                _model_hint = "OPENAI_API_KEY not configured"
         except Exception as e:
             _model_hint = str(e)
 
@@ -86,11 +86,11 @@ def get_llm_status(*, refresh: bool = False) -> Dict[str, Any]:
         "gbnf_model": local_path if gbnf_ready else None,
         "message": (
             (
-                f"主模型就绪（{_model_hint}）"
-                + ("；本地 GBNF 兜底可用" if gbnf_ready else "；本地 GBNF 未就绪")
+                f"Primary model ready ({_model_hint})"
+                + ("; local GBNF fallback available" if gbnf_ready else "; local GBNF not ready")
             )
             if _llm_available
-            else f"知识回复模式（{_model_hint}）"
+            else f"Knowledge-reply mode ({_model_hint})"
         ),
         "memory": get_web_memory() is not None,
         "loaded": _llm_available,
@@ -190,55 +190,55 @@ def run_llm_decision(
 
 
 def format_decision_steps(process: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """将 decision_process 转为前端可渲染的步骤列表。"""
-    # 单次决策：只有一条综合结果
+    """Convert decision_process into a frontend-renderable step list."""
+    # Single-shot decision: one combined result only
     if process.get("planner") == "single_shot" or (
         process.get("synthesis_result") and not process.get("values")
     ):
         syn = process.get("synthesis_result") or {}
         items = []
         for f, label in (
-            ("final_goal", "最终目标"),
-            ("target_entity", "目标实体"),
-            ("reasoning", "推理"),
-            ("confidence", "信心"),
-            ("contributing_factors", "因素权重"),
+            ("final_goal", "Final goal"),
+            ("target_entity", "Target entity"),
+            ("reasoning", "Reasoning"),
+            ("confidence", "Confidence"),
+            ("contributing_factors", "Contributing factors"),
         ):
             val = syn.get(f)
             if val is None or val == "" or val == []:
                 continue
             items.append({"key": f, "label": label, "value": val})
-        return [{"index": 1, "id": "decide", "title": "单次决策", "items": items}]
+        return [{"index": 1, "id": "decide", "title": "Single decision", "items": items}]
 
     defs = [
-        ("values", "价值观评估", ["relevant_values", "value_conflicts", "value_alignment", "reasoning", "recommended_actions"]),
-        ("emotion", "情绪分析", ["current_emotion", "emotion_intensity", "emotion_cause", "emotion_impact", "recommended_actions"]),
-        ("background", "背景考虑", ["relevant_background", "past_experiences", "learned_lessons", "background_influence", "recommended_actions"]),
-        ("environment", "环境分析", ["opportunities", "threats", "available_resources", "constraints", "recommended_actions"]),
-        ("synthesis", "综合决定", ["final_goal", "target_entity", "reasoning", "confidence", "contributing_factors"]),
+        ("values", "Values assessment", ["relevant_values", "value_conflicts", "value_alignment", "reasoning", "recommended_actions"]),
+        ("emotion", "Emotion analysis", ["current_emotion", "emotion_intensity", "emotion_cause", "emotion_impact", "recommended_actions"]),
+        ("background", "Background consideration", ["relevant_background", "past_experiences", "learned_lessons", "background_influence", "recommended_actions"]),
+        ("environment", "Environment analysis", ["opportunities", "threats", "available_resources", "constraints", "recommended_actions"]),
+        ("synthesis", "Final synthesis", ["final_goal", "target_entity", "reasoning", "confidence", "contributing_factors"]),
     ]
     labels = {
-        "relevant_values": "相关价值观",
-        "value_conflicts": "价值冲突",
-        "value_alignment": "价值对齐度",
-        "reasoning": "推理",
-        "recommended_actions": "推荐行动",
-        "current_emotion": "当前情绪",
-        "emotion_intensity": "情绪强度",
-        "emotion_cause": "情绪原因",
-        "emotion_impact": "对决策影响",
-        "relevant_background": "相关背景",
-        "past_experiences": "过往经历",
-        "learned_lessons": "经验教训",
-        "background_influence": "背景影响",
-        "opportunities": "机会",
-        "threats": "威胁",
-        "available_resources": "可用资源",
-        "constraints": "约束",
-        "final_goal": "最终目标",
-        "target_entity": "目标实体",
-        "confidence": "信心",
-        "contributing_factors": "因素权重",
+        "relevant_values": "Relevant values",
+        "value_conflicts": "Value conflicts",
+        "value_alignment": "Value alignment",
+        "reasoning": "Reasoning",
+        "recommended_actions": "Recommended actions",
+        "current_emotion": "Current emotion",
+        "emotion_intensity": "Emotion intensity",
+        "emotion_cause": "Emotion cause",
+        "emotion_impact": "Impact on decision",
+        "relevant_background": "Relevant background",
+        "past_experiences": "Past experiences",
+        "learned_lessons": "Lessons learned",
+        "background_influence": "Background influence",
+        "opportunities": "Opportunities",
+        "threats": "Threats",
+        "available_resources": "Available resources",
+        "constraints": "Constraints",
+        "final_goal": "Final goal",
+        "target_entity": "Target entity",
+        "confidence": "Confidence",
+        "contributing_factors": "Contributing factors",
     }
     steps = []
     for i, (key, title, fields) in enumerate(defs, start=1):
@@ -276,7 +276,7 @@ def get_character_memories(
     limit: int = 50,
     query: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """列出或语义检索某角色的 Chroma 记忆。"""
+    """List or semantically search a character's Chroma memories."""
     memory = get_web_memory()
     if memory is None:
         return {
@@ -287,7 +287,7 @@ def get_character_memories(
             "count": 0,
             "total": 0,
             "memories": [],
-            "message": "Chroma 记忆未启用或加载失败",
+            "message": "Chroma memory not enabled or failed to load",
         }
 
     total = memory.count(character)
@@ -316,14 +316,14 @@ def get_character_memories(
 
 
 def clear_character_memories(character: str) -> Dict[str, Any]:
-    """清空某角色的全部 Chroma 记忆。"""
+    """Clear all Chroma memories for a character."""
     memory = get_web_memory()
     if memory is None:
         return {
             "ok": False,
             "available": False,
             "character": character,
-            "message": "Chroma 记忆未启用或加载失败",
+            "message": "Chroma memory not enabled or failed to load",
         }
     before = memory.count(character)
     memory.clear(character)
@@ -332,22 +332,22 @@ def clear_character_memories(character: str) -> Dict[str, Any]:
         "available": True,
         "character": character,
         "cleared": before,
-        "message": f"已清空 {character} 的 {before} 条记忆",
+        "message": f"Cleared {before} memories for {character}",
     }
 
 
 def clear_all_memories() -> Dict[str, Any]:
-    """清空所有角色的 Chroma 记忆。"""
+    """Clear Chroma memories for all characters."""
     memory = get_web_memory()
     if memory is None:
         return {
             "ok": False,
             "available": False,
-            "message": "Chroma 记忆未启用或加载失败",
+            "message": "Chroma memory not enabled or failed to load",
         }
     memory.clear_all()
     return {
         "ok": True,
         "available": True,
-        "message": "已清空全部 Chroma 记忆",
+        "message": "Cleared all Chroma memories",
     }

@@ -1,12 +1,12 @@
 """
-将 Neo4j 查询结果转为 vis-network 可用的 nodes/edges JSON。
+Convert Neo4j query results to vis-network nodes/edges JSON.
 """
 
 from __future__ import annotations
 
 from typing import Any, Dict, List, Set, Tuple
 
-# 节点类型配色（vis-network group）
+# Node type colors (vis-network group)
 # Dark chalk doodle fills (chalk outline via vis border)
 LABEL_COLORS: Dict[str, str] = {
     "Person": "#1e2e38",
@@ -70,7 +70,7 @@ def _node_from_record(labels: List[str], name: str, props: Dict[str, Any]) -> Di
 
 
 def fetch_graph(world, limit: int = 800) -> Dict[str, Any]:
-    """读取图数据，返回 {nodes, edges, stats}。"""
+    """Fetch graph data; returns {nodes, edges, stats}."""
     rows = world.run_query(
         """
         MATCH (a)-[r]->(b)
@@ -123,7 +123,7 @@ def fetch_graph(world, limit: int = 800) -> Dict[str, Any]:
             }
         )
 
-    # 孤立节点
+    # Isolated nodes
     isolated = world.run_query(
         """
         MATCH (n)
@@ -144,7 +144,7 @@ def fetch_graph(world, limit: int = 800) -> Dict[str, Any]:
             nodes_map[nid] = _node_from_record(row.get("labels") or [label], name, props)
 
     nodes = list(nodes_map.values())
-    # vis-network 不需要 _meta 在客户端展示，但 inspect API 会单独查
+    # vis-network does not need _meta on the client; inspect API queries it separately
     for n in nodes:
         n.pop("_meta", None)
 
@@ -159,7 +159,7 @@ def fetch_graph(world, limit: int = 800) -> Dict[str, Any]:
 
 
 def inspect_entity(world, label: str, name: str) -> Dict[str, Any]:
-    """返回实体详情 + 邻接关系文本。"""
+    """Return entity details plus adjacent relationship text."""
     entity = world.get_entity_by_name(name, label=label)
     if entity is None:
         return {"found": False, "label": label, "name": name}

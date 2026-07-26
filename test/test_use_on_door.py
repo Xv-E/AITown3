@@ -54,7 +54,7 @@ class TestUseOnDoor(unittest.TestCase):
             self.world, "pick_up", c="Traveler", i="VaultDoor", l="Hall"
         )
         self.assertFalse(ok)
-        self.assertIn("不可拾取", reason)
+        self.assertIn("not pickable", reason)
 
     def test_collect_then_use_on_unlocks_vault(self):
         if self.world is None:

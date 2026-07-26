@@ -39,7 +39,7 @@ def test_day_night_and_meals():
     assert is_night(22)
     assert is_night(3)
     assert not is_night(10)
-    assert "昼" in format_clock(0.0) or "夜" in format_clock(0.0)
+    assert "Day" in format_clock(0.0) or "Night" in format_clock(0.0)
 
 
 def test_parse_and_current_slot_cross_midnight():

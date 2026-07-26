@@ -1,10 +1,10 @@
 """
-AITown3 可玩客户端 Web 服务
+AITown3 playable client web server
 
-启动：
+Start:
     python AITown3/web/server.py --host 127.0.0.1 --port 8765
 
-浏览器打开：
+Open in browser:
     http://127.0.0.1:8765
 """
 
@@ -67,7 +67,7 @@ def get_world() -> Neo4jWorld:
 class ExecuteActionRequest(BaseModel):
     action: str
     params: Dict[str, str] = Field(default_factory=dict)
-    message: str = ""  # talk 时玩家输入的台词
+    message: str = ""  # Player dialogue line for talk actions
 
 
 class SetPlanRequest(BaseModel):
@@ -94,14 +94,14 @@ class TurnRequest(BaseModel):
 
 
 class SimulationStartRequest(BaseModel):
-    # 真实时间两次 tick 的间隔；默认高频持续仿真
+    # Real-time interval between ticks; default is high-frequency continuous simulation
     interval_seconds: float = Field(default=0.25, ge=0.1, le=120.0)
-    # 每次 tick 推进的仿真秒数；默认与 interval 一致（1:1）
+    # Simulation seconds advanced per tick; default matches interval (1:1)
     sim_dt: Optional[float] = Field(default=None, ge=0.05, le=10.0)
     use_llm: bool = False
     force_mock: bool = False
     include_player: bool = False
-    # 仅仿真这些人；None/空 = 全部（玩家仍受 include_player 约束）
+    # Simulate only these characters; None/empty = all (player still gated by include_player)
     characters: Optional[List[str]] = None
 
 
@@ -112,7 +112,7 @@ class DirectorPlanRequest(BaseModel):
     )
     force_mock: bool = False
     template_id: Optional[str] = None
-    # 用户已写的部分蓝图（可选）；AI 在此基础上补全
+    # Optional partial blueprint from the user; AI completes it
     draft: Optional[Dict[str, Any]] = None
 
 
@@ -139,7 +139,7 @@ _sim_include_player = False
 _sim_characters: Optional[List[str]] = None
 _sim_started_at: Optional[str] = None
 _sim_last_result: Optional[Dict[str, Any]] = None
-# 仿真 tick 与对话/规划可能并行占用；过少会导致 move 完成被堵住
+# Simulation ticks may overlap with dialogue/planning; too few workers can block move completion
 _executor = ThreadPoolExecutor(max_workers=4)
 
 
@@ -228,11 +228,11 @@ def api_inspect(label: str, name: str):
 
 @app.get("/api/player")
 def api_player():
-    """当前玩家角色摘要。"""
+    """Current player character summary."""
     try:
         player = get_player(get_world())
         if player is None:
-            raise HTTPException(status_code=404, detail="当前世界没有玩家角色")
+            raise HTTPException(status_code=404, detail="No player character in the current world")
         return {"player": player}
     except HTTPException:
         raise
@@ -242,7 +242,7 @@ def api_player():
 
 @app.get("/api/play/state")
 def api_play_state():
-    """一次拉齐游玩状态（玩家、现场、动作、地图）。"""
+    """Fetch full play state (player, scene, actions, map) in one call."""
     try:
         return get_play_state(get_world())
     except Exception as e:
@@ -251,7 +251,7 @@ def api_play_state():
 
 @app.get("/api/locations")
 def api_locations():
-    """全图地点与邻接边，供房间地图布局。"""
+    """All locations and adjacency edges for room map layout."""
     try:
         return list_locations_graph(get_world())
     except Exception as e:
@@ -281,7 +281,7 @@ def api_character_profile(name: str):
 
 @app.get("/api/characters/{name}/dossier")
 def api_character_dossier(name: str, memory_limit: int = 40):
-    """角色一览：状态、设定、当前规划、记忆日志。"""
+    """Character overview: status, profile, current plan, memory log."""
     try:
         data = get_character_dossier(
             get_world(),
@@ -302,7 +302,7 @@ def api_character_actions(name: str):
     try:
         data = get_character_actions(get_world(), name)
         if not data.get("found"):
-            raise HTTPException(status_code=404, detail=f"角色不存在: {name}")
+            raise HTTPException(status_code=404, detail=f"Character not found: {name}")
         return data
     except HTTPException:
         raise
@@ -333,14 +333,14 @@ async def api_execute(req: ExecuteActionRequest):
     reg = get_registry()
     action = reg.get(req.action)
     if action is None:
-        raise HTTPException(status_code=400, detail=f"未知动作: {req.action}")
+        raise HTTPException(status_code=400, detail=f"Unknown action: {req.action}")
 
     kwargs = {}
     for p in action.parameters:
         if p.name not in req.params or not req.params[p.name].strip():
             raise HTTPException(
                 status_code=400,
-                detail=f"缺少参数: {p.name} ({p.type})",
+                detail=f"Missing parameter: {p.name} ({p.type})",
             )
         kwargs[p.name] = req.params[p.name].strip()
 
@@ -371,7 +371,7 @@ async def api_execute(req: ExecuteActionRequest):
                         player_message=msg,
                     )
 
-                # 对话 LLM 放到线程池，避免卡住事件循环 / 连累连接池
+                # Run dialogue LLM in thread pool to avoid blocking the event loop / connection pool
                 loop = asyncio.get_running_loop()
                 dialogue = await loop.run_in_executor(_executor, _talk)
             except Exception as e:
@@ -381,7 +381,7 @@ async def api_execute(req: ExecuteActionRequest):
                     "error": str(e),
                 }
         elif ok and req.action == "give":
-            # 送礼提升接收者对玩家的信任
+            # Giving gifts increases receiver trust toward the player
             try:
                 import sys as _sys
                 agent_path = str(_AITOWN3 / "agent")
@@ -391,7 +391,7 @@ async def api_execute(req: ExecuteActionRequest):
 
                 receiver = kwargs.get("receiver", "")
                 giver = kwargs.get("giver", "")
-                # 仅当给予者是玩家时提升信任
+                # Only increase trust when the giver is the player
                 rows = world.run_query(
                     """
                     MATCH (p:Person {name: $n})
@@ -405,7 +405,7 @@ async def api_execute(req: ExecuteActionRequest):
                     is_player = bool(rows[0].get("is_player")) or rows[0].get("role") == "player"
                 if is_player and receiver:
                     adjust_trust(world, receiver, 2)
-                    reason = f"{reason}（{receiver} 信任度 → {get_trust(world, receiver)}）"
+                    reason = f"{reason} ({receiver} trust → {get_trust(world, receiver)})"
             except Exception:
                 pass
         interaction = None
@@ -438,7 +438,7 @@ async def api_execute(req: ExecuteActionRequest):
 async def api_interact_options(
     name: str, actor: Optional[str] = None, refresh: bool = False
 ):
-    """发现/刷新物品上的临时 Action（Cypher）。"""
+    """Discover/refresh temporary Actions (Cypher) on an item."""
     try:
         import sys as _sys
         agent_path = str(_AITOWN3 / "agent")
@@ -454,7 +454,7 @@ async def api_interact_options(
             player = next((c["name"] for c in chars if c.get("is_player")), None)
             who = player or (chars[0]["name"] if chars else "")
         if not who:
-            raise HTTPException(status_code=400, detail="需要 actor")
+            raise HTTPException(status_code=400, detail="actor required")
 
         def _gen():
             return generate_interaction_options(
@@ -501,7 +501,7 @@ def api_character_memories(name: str, limit: int = 50, query: Optional[str] = No
     try:
         chars = {c["name"] for c in list_characters(get_world())}
         if name not in chars:
-            raise HTTPException(status_code=404, detail=f"角色不存在: {name}")
+            raise HTTPException(status_code=404, detail=f"Character not found: {name}")
         return get_character_memories(name, limit=limit, query=query)
     except HTTPException:
         raise
@@ -511,11 +511,11 @@ def api_character_memories(name: str, limit: int = 50, query: Optional[str] = No
 
 @app.delete("/api/characters/{name}/memories")
 def api_clear_character_memories(name: str):
-    """清空指定角色的 Chroma 记忆。"""
+    """Clear Chroma memories for the specified character."""
     try:
         result = clear_character_memories(name.strip())
         if not result.get("ok"):
-            raise HTTPException(status_code=503, detail=result.get("message", "记忆不可用"))
+            raise HTTPException(status_code=503, detail=result.get("message", "Memory unavailable"))
         return result
     except HTTPException:
         raise
@@ -525,11 +525,11 @@ def api_clear_character_memories(name: str):
 
 @app.post("/api/memories/clear")
 def api_clear_all_memories():
-    """清空全部 Chroma 记忆。"""
+    """Clear all Chroma memories."""
     try:
         result = clear_all_memories()
         if not result.get("ok"):
-            raise HTTPException(status_code=503, detail=result.get("message", "记忆不可用"))
+            raise HTTPException(status_code=503, detail=result.get("message", "Memory unavailable"))
         return result
     except HTTPException:
         raise
@@ -555,7 +555,7 @@ def api_plan_targets(name: str, goal: str):
     try:
         world = get_world()
         if name not in world.list_entities("Person"):
-            raise HTTPException(status_code=404, detail=f"角色不存在: {name}")
+            raise HTTPException(status_code=404, detail=f"Character not found: {name}")
         return get_goal_target_options(world, name, goal)
     except HTTPException:
         raise
@@ -568,7 +568,7 @@ def api_set_plan(name: str, req: SetPlanRequest):
     try:
         world = get_world()
         if name not in world.list_entities("Person"):
-            raise HTTPException(status_code=404, detail=f"角色不存在: {name}")
+            raise HTTPException(status_code=404, detail=f"Character not found: {name}")
         mgr = get_plan_manager()
         if req.auto:
             return mgr.auto_plan(
@@ -578,7 +578,7 @@ def api_set_plan(name: str, req: SetPlanRequest):
                 force_mock=req.force_mock,
             )
         if not req.goal.strip():
-            raise HTTPException(status_code=400, detail="请指定 goal，或设置 auto=true")
+            raise HTTPException(status_code=400, detail="Specify goal, or set auto=true")
         return mgr.set_goal_and_plan(
             world,
             name,
@@ -597,7 +597,7 @@ def api_decide(name: str, req: DecideRequest):
     try:
         world = get_world()
         if name not in world.list_entities("Person"):
-            raise HTTPException(status_code=404, detail=f"角色不存在: {name}")
+            raise HTTPException(status_code=404, detail=f"Character not found: {name}")
         mgr = get_plan_manager()
         if req.plan:
             return mgr.llm_decide_and_plan(
@@ -669,9 +669,9 @@ async def _simulation_loop() -> None:
                     **result,
                     "stopped_reason": "missions_complete",
                     "message": (
-                        f"{', '.join(_sim_characters)} 已达成长期目标，仿真停止"
+                        f"{', '.join(_sim_characters)} reached long-term goals; simulation stopped"
                         if _sim_characters
-                        else "全部自动角色已达成长期目标，仿真停止"
+                        else "All auto characters reached long-term goals; simulation stopped"
                     ),
                 }
                 _sim_running = False
@@ -705,7 +705,7 @@ async def api_simulation_start(req: SimulationStartRequest):
         _sim_force_mock = req.force_mock
         chars = [c.strip() for c in (req.characters or []) if c and str(c).strip()]
         _sim_characters = chars or None
-        # 指定角色名单时：名单内的人一律自动规划（含玩家）
+        # When a character list is given: everyone on the list auto-plans (including player)
         _sim_include_player = True if _sim_characters else bool(req.include_player)
         _sim_started_at = datetime.now(timezone.utc).isoformat()
         _sim_last_result = None
@@ -756,7 +756,7 @@ def api_simulation_status():
 
 
 def _clear_memories_on_rebuild() -> Dict[str, Any]:
-    """重建/清空世界时同步清空 Chroma 记忆。"""
+    """Clear Chroma memories when rebuilding/clearing the world."""
     try:
         result = clear_all_memories()
         return {
@@ -774,7 +774,7 @@ def _clear_memories_on_rebuild() -> Dict[str, Any]:
 
 @app.get("/api/worlds")
 def api_list_worlds():
-    """列出 worlds/*.json 模板世界。"""
+    """List template worlds from worlds/*.json."""
     from director import default_world_id, list_worlds
 
     return {"worlds": list_worlds(), "default": default_world_id()}
@@ -782,7 +782,7 @@ def api_list_worlds():
 
 @app.post("/api/worlds/{world_id}/load")
 async def api_load_world(world_id: str, clear: bool = True):
-    """加载文本配置的模板世界到 Neo4j。"""
+    """Load a text-configured template world into Neo4j."""
     try:
         await _stop_simulation()
         from director import build_from_blueprint, load_world
@@ -800,12 +800,12 @@ async def api_load_world(world_id: str, clear: bool = True):
         mem = _clear_memories_on_rebuild() if clear else {
             "memory_cleared": False,
             "memory_available": True,
-            "memory_message": "未清空世界，记忆保留",
+            "memory_message": "World not cleared; memories retained",
         }
         return {
             "ok": True,
-            "message": f"已加载模板世界：{result.get('title', world_id)}"
-            + ("（记忆已清空）" if clear else ""),
+            "message": f"Loaded template world: {result.get('title', world_id)}"
+            + (" (memories cleared)" if clear else ""),
             "world_id": world_id,
             "title": result.get("title"),
             "counts": result.get("counts"),
@@ -820,7 +820,7 @@ async def api_load_world(world_id: str, clear: bool = True):
 
 @app.post("/api/director/plan")
 async def api_director_plan(body: DirectorPlanRequest):
-    """根据用户草稿规划/补全事件蓝图（不写入世界）。"""
+    """Plan/complete an event blueprint from user draft (does not write to world)."""
     try:
         from director import plan_event
 
@@ -832,9 +832,9 @@ async def api_director_plan(body: DirectorPlanRequest):
             ).to_dict()
 
         loop = asyncio.get_running_loop()
-        # 四步 LLM（skeleton/world/cast/mechanics），默认 110s
+        # Four-step LLM (skeleton/world/cast/mechanics), default 110s
         deadline = float(os.getenv("DIRECTOR_PLAN_TIMEOUT", "110"))
-        # 每次独立线程池，避免上一次卡住的 OpenAI 调用堵死下一次点击
+        # Fresh thread pool each time so a stuck OpenAI call does not block the next click
         pool = ThreadPoolExecutor(max_workers=1)
         try:
             try:
@@ -847,7 +847,7 @@ async def api_director_plan(body: DirectorPlanRequest):
                 return {
                     "ok": False,
                     "blueprint": None,
-                    "warning": f"AI 超过 {int(deadline)}s 未完成。可简化草稿后重试，或改用顶部「模板世界」。",
+                    "warning": f"AI did not finish within {int(deadline)}s. Simplify the draft and retry, or use a template world from the top bar.",
                 }
         finally:
             pool.shutdown(wait=False, cancel_futures=True)
@@ -859,7 +859,7 @@ async def api_director_plan(body: DirectorPlanRequest):
 
 @app.post("/api/director/build")
 async def api_director_build(body: DirectorBuildRequest):
-    """确认后的蓝图（或重新规划）并物化到 Neo4j。"""
+    """Materialize confirmed blueprint (or replan) into Neo4j."""
     try:
         await _stop_simulation()
         from director import EventBlueprint, build_from_blueprint, plan_and_build
@@ -885,12 +885,12 @@ async def api_director_build(body: DirectorBuildRequest):
         mem = _clear_memories_on_rebuild() if body.clear else {
             "memory_cleared": False,
             "memory_available": True,
-            "memory_message": "未清空世界，记忆保留",
+            "memory_message": "World not cleared; memories retained",
         }
-        msg_suffix = "（记忆已清空）" if body.clear else ""
+        msg_suffix = " (memories cleared)" if body.clear else ""
         return {
             "ok": True,
-            "message": f"导演已构建事件：{result.get('title', '')}{msg_suffix}",
+            "message": f"Director built event: {result.get('title', '')}{msg_suffix}",
             **result,
             **mem,
         }
@@ -902,7 +902,7 @@ async def api_director_build(body: DirectorBuildRequest):
 
 @app.post("/api/world/rebuild")
 async def api_rebuild(clear: bool = True, world_id: Optional[str] = None):
-    """兼容旧接口：加载默认或指定模板世界。"""
+    """Legacy endpoint: load default or specified template world."""
     from director import default_world_id
 
     wid = (world_id or "").strip() or default_world_id()
@@ -911,7 +911,7 @@ async def api_rebuild(clear: bool = True, world_id: Optional[str] = None):
 
 @app.post("/api/world/rebuild-solo")
 async def api_rebuild_solo(character: str = "Alice"):
-    """构建单角色最小世界，用于隔离测试规划能力。"""
+    """Build a minimal single-character world for isolated planning tests."""
     try:
         await _stop_simulation()
         import build_solo_world as solo_builder
@@ -924,7 +924,7 @@ async def api_rebuild_solo(character: str = "Alice"):
         mem = _clear_memories_on_rebuild()
         return {
             "ok": True,
-            "message": f"单角色世界已重建（角色: {character}，记忆已清空）",
+            "message": f"Solo world rebuilt (character: {character}, memories cleared)",
             "character": character,
             "locations": ["TownSquare", "Tavern", "Forest", "Castle"],
             **mem,
@@ -941,7 +941,7 @@ async def api_clear():
         get_plan_manager().reset_all()
         get_world_simulator().reset()
         mem = _clear_memories_on_rebuild()
-        return {"ok": True, "message": "数据库与记忆已清空", **mem}
+        return {"ok": True, "message": "Database and memories cleared", **mem}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
@@ -956,8 +956,8 @@ def main():
     args = parser.parse_args()
     print(f"AITown3 Play: http://{args.host}:{args.port}")
     if args.reload:
-        # 只监视 web/，避免改 agent/actions 时反复杀进程；
-        # 且 debugpy 下 --reload 会因 sys.exit 触发「Raised Exceptions」停住。
+        # Watch only web/ to avoid killing the process on agent/actions edits;
+        # under debugpy, --reload stops on sys.exit from "Raised Exceptions".
         os.chdir(_WEB_DIR)
         uvicorn.run(
             "server:app",

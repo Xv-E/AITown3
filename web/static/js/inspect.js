@@ -43,9 +43,9 @@
   }
 
   function kindLabel(kind) {
-    if (kind === "goal_decision") return "决策";
-    if (kind === "pddl_plan") return "规划";
-    if (kind === "dialogue") return "对话";
+    if (kind === "goal_decision") return "Decision";
+    if (kind === "pddl_plan") return "Planning";
+    if (kind === "dialogue") return "Dialogue";
     return kind || "?";
   }
 
@@ -115,10 +115,10 @@
     $("local-count").textContent = String(local.length);
     const pddlCount = $("pddl-count");
     if (pddlCount) pddlCount.textContent = String(pddl.length);
-    fillList($("trace-list-qwen"), qwen, "暂无 Qwen 记录");
-    fillList($("trace-list-local"), local, "暂无本地 GBNF 记录");
+    fillList($("trace-list-qwen"), qwen, "No Qwen traces yet");
+    fillList($("trace-list-local"), local, "No local GBNF traces yet");
     const pddlList = $("trace-list-pddl");
-    if (pddlList) fillList(pddlList, pddl, "暂无 PDDL/规划记录");
+    if (pddlList) fillList(pddlList, pddl, "No PDDL/planning traces yet");
   }
 
   function showPanel() {
@@ -221,7 +221,7 @@
     refresh().catch((e) => alert(e.message))
   );
   $("btn-clear").addEventListener("click", async () => {
-    if (!confirm("清空全部追踪（对话 / 决策 / PDDL）？")) return;
+    if (!confirm("Clear all traces (dialogue / decisions / PDDL)?")) return;
     await api("/api/llm/traces", { method: "DELETE" });
     current = null;
     await refresh();

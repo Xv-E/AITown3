@@ -1,21 +1,21 @@
 {
   "id": "key_and_door",
-  "title": "钥匙与门",
-  "premise": "走到储藏室拿钥匙，回到大厅对金库门使用钥匙打开通路。",
+  "title": "Key and Door",
+  "premise": "Walk to the storage room for the key, return to the hall, and use the key on the vault door to open the way.",
   "locations": [
     {
       "name": "Hall",
-      "description": "石砌大厅。北面有一扇紧闭的金库门。",
+      "description": "A stone hall. A sealed vault door stands to the north.",
       "tags": "hub"
     },
     {
       "name": "Storage",
-      "description": "尘土味的储藏室，架子上可能藏着东西。",
+      "description": "A dusty storeroom; something may be hidden on the shelves.",
       "tags": "item"
     },
     {
       "name": "Vault",
-      "description": "金库内室。门打开后才能进入。",
+      "description": "The vault inner chamber. Enter only after the door is open.",
       "tags": "secret,goal"
     }
   ],

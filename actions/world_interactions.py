@@ -251,7 +251,7 @@ def refresh_interactions_from_world(world) -> List[WorldInteraction]:
 def can_use_on(world, actor: str, tool: str, target: str) -> Tuple[bool, str, Optional[WorldInteraction]]:
     inter = find_interaction(tool, target)
     if inter is None:
-        return False, f"{tool} 不能对 {target} 使用（无世界交互配置）", None
+        return False, f"{tool} cannot be used on {target} (no world interaction configured)", None
     target_loc = target_location(world, target) or ""
     ctx = make_ctx(actor=actor, tool=tool, target=target, target_loc=target_loc)
     ok, reason = check_all(world, inter.preconditions, ctx)
@@ -269,7 +269,7 @@ def execute_use_on(world, actor: str, tool: str, target: str) -> Tuple[bool, str
     try:
         apply_all(world, inter.ops, ctx)
     except Exception as e:
-        return False, f"执行图操作失败: {e}"
+        return False, f"Graph operation failed: {e}"
     # 生成物 / 删除物后刷新交互表
     try:
         refresh_interactions_from_world(world)
