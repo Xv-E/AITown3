@@ -30,13 +30,27 @@ class LocationSpec:
     name: str
     description: str = ""
     tags: str = ""
+    # 大地图坐标 [x, y]；区域格子尺寸 [w, h]
+    map: Optional[List[float]] = None
+    grid: Optional[List[int]] = None
 
     def normalized(self) -> "LocationSpec":
         return LocationSpec(
             name=_clean_name(self.name, "Place"),
             description=(self.description or "").strip(),
             tags=(self.tags or "").strip(),
+            map=_num_pair(self.map, float),
+            grid=_num_pair(self.grid, int),
         )
+
+
+def _num_pair(raw: Any, cast) -> Optional[List[Any]]:
+    if isinstance(raw, (list, tuple)) and len(raw) >= 2:
+        try:
+            return [cast(raw[0]), cast(raw[1])]
+        except (TypeError, ValueError):
+            return None
+    return None
 
 
 @dataclass
@@ -77,6 +91,8 @@ class PersonSpec:
     accepts_from: List[str] = field(default_factory=list)  # 可被哪些工具 use_on
     # 日常日程槽位：[{start,end,location,activity,goal,social,target_entity}, ...]
     routine: List[Dict[str, Any]] = field(default_factory=list)
+    # 开局知识：{"all": true} 全知；{"places": [...], "items": [...]} 额外知道的地点 / 物品
+    knows: Dict[str, Any] = field(default_factory=dict)
 
     def normalized(self) -> "PersonSpec":
         routine_out: List[Dict[str, Any]] = []
@@ -96,7 +112,17 @@ class PersonSpec:
             }
             te = str(slot.get("target_entity") or "").strip()
             if te:
-                entry["target_entity"] = _clean_name(te)
+                entry["target_entity"] = te if te.startswith("kind:") else _clean_name(te)
+            if slot.get("once"):
+                entry["once"] = True
+            if slot.get("craft"):
+                entry["craft"] = True
+            if isinstance(slot.get("conditions"), list):
+                entry["conditions"] = [dict(c) for c in slot["conditions"] if isinstance(c, dict)]
+            if slot.get("action"):
+                entry["action"] = str(slot["action"]).strip()
+            if slot.get("item_kind"):
+                entry["item_kind"] = str(slot["item_kind"]).strip().lower()
             routine_out.append(entry)
         return PersonSpec(
             name=_clean_name(self.name, "Someone"),
@@ -116,6 +142,7 @@ class PersonSpec:
             trust_toward_player=int(self.trust_toward_player or 0),
             accepts_from=[_clean_name(str(x)) for x in (self.accepts_from or []) if x],
             routine=routine_out,
+            knows=dict(self.knows or {}),
         )
 
 
@@ -141,6 +168,10 @@ class ItemSpec:
     respawn_at: str = ""
     # 行为脚本：lore 给 LLM；on_tick/alerts 给通用解释器
     script: Optional[Dict[str, Any]] = None
+    # 区域格子坐标 [x, y]（左上角）与占地 [w, h]；archetype 名用于统计
+    pos: Optional[List[int]] = None
+    footprint: Optional[List[int]] = None
+    archetype: str = ""
 
     def normalized(self) -> "ItemSpec":
         kind = (self.item_kind or "").strip().lower()
@@ -149,7 +180,7 @@ class ItemSpec:
         if kind == "door":
             portable = False
             locked = bool(self.locked)
-        elif kind in ("campfire", "source", "fixture"):
+        elif kind in ("source", "fixture"):
             portable = False if self.portable is None else bool(self.portable)
             locked = False
         else:
@@ -161,8 +192,9 @@ class ItemSpec:
             if not isinstance(eff, dict):
                 continue
             e = dict(eff)
-            if e.get("target"):
-                e["target"] = _clean_name(str(e["target"]))
+            target = str(e.get("target") or "").strip()
+            if target:
+                e["target"] = target.lower() if target.lower().startswith("kind:") else _clean_name(target)
             if "consume" in e and e["consume"] is not None:
                 e["consume"] = bool(e["consume"])
             effects.append(e)
@@ -203,6 +235,9 @@ class ItemSpec:
             lit=lit,
             respawn_at=_clean_name(self.respawn_at) if self.respawn_at else "",
             script=script,
+            pos=_num_pair(self.pos, int),
+            footprint=_num_pair(self.footprint, int),
+            archetype=(self.archetype or "").strip(),
         )
 
 
@@ -580,6 +615,7 @@ class EventBlueprint:
                     trust_toward_player=p.trust_toward_player,
                     accepts_from=list(p.accepts_from or []),
                     routine=routine_fixed,
+                    knows=dict(p.knows or {}),
                 )
             )
         person_names = {p.name for p in fixed_persons}
@@ -593,7 +629,7 @@ class EventBlueprint:
                 located = default_loc
             connects = it.connects_to if it.connects_to in loc_names else ""
             # 门 / 固定物不可被持有
-            if it.item_kind in ("door", "campfire", "source", "fixture"):
+            if it.item_kind == "door" or it.portable is False:
                 held = None
                 if not located:
                     located = default_loc
@@ -619,6 +655,9 @@ class EventBlueprint:
                     lit=it.lit,
                     respawn_at=respawn,
                     script=dict(it.script) if isinstance(getattr(it, "script", None), dict) else None,
+                    pos=it.pos,
+                    footprint=it.footprint,
+                    archetype=it.archetype,
                 )
             )
         item_names_set = {i.name for i in fixed_items}
@@ -716,6 +755,8 @@ class EventBlueprint:
                 name=str(x.get("name", "")),
                 description=str(x.get("description", "")),
                 tags=str(x.get("tags", "")),
+                map=x.get("map"),
+                grid=x.get("grid"),
             )
             for x in (data.get("locations") or [])
             if isinstance(x, dict)
@@ -739,10 +780,20 @@ class EventBlueprint:
                 trust_toward_player=int(x.get("trust_toward_player", 0) or 0),
                 accepts_from=list(x.get("accepts_from") or []),
                 routine=[dict(s) for s in (x.get("routine") or []) if isinstance(s, dict)],
+                knows=dict(x.get("knows") or {}) if isinstance(x.get("knows"), dict) else {},
             )
             for x in (data.get("persons") or [])
             if isinstance(x, dict)
         ]
+        import sys
+        from pathlib import Path
+
+        actions_path = str(Path(__file__).resolve().parent.parent / "actions")
+        if actions_path not in sys.path:
+            sys.path.insert(0, actions_path)
+        from content import apply_archetype
+
+        raw_items = [apply_archetype(dict(x)) for x in (data.get("items") or []) if isinstance(x, dict)]
         items = [
             ItemSpec(
                 name=str(x.get("name", "")),
@@ -764,9 +815,11 @@ class EventBlueprint:
                 lit=x.get("lit"),
                 respawn_at=str(x.get("respawn_at") or ""),
                 script=dict(x["script"]) if isinstance(x.get("script"), dict) else None,
+                pos=x.get("pos"),
+                footprint=x.get("footprint"),
+                archetype=str(x.get("archetype") or ""),
             )
-            for x in (data.get("items") or [])
-            if isinstance(x, dict)
+            for x in raw_items
         ]
         quests = [
             QuestSpec(

@@ -1,0 +1,42 @@
+{
+  "archetype": "village_plan",
+  "name": "VillagePlan",
+  "item_kind": "board",
+  "portable": false,
+  "value": 0,
+  "description": "Oren's plan for the village, pinned to a post: Workshop, then Bakery, then the Village Hall.",
+  "script": {
+    "lore": "The settlers follow this plan. Whenever the next step becomes possible, they stake out its site next to the board.",
+    "on_tick": [
+      {
+        "op": "rule",
+        "id": "plan_workshop",
+        "when": [
+          { "op": "count", "archetype": ["workshop_site", "workbench"], "lte": 0 }
+        ],
+        "do": [ { "op": "spawn_item", "archetype": "workshop_site", "located_at": "@here", "near": "@self" } ],
+        "announce": "The settlers stake out a Workshop in @here."
+      },
+      {
+        "op": "rule",
+        "id": "plan_bakery",
+        "when": [
+          { "op": "count", "archetype": "workbench", "gte": 1 },
+          { "op": "count", "archetype": ["bakery_site", "oven"], "lte": 0 }
+        ],
+        "do": [ { "op": "spawn_item", "archetype": "bakery_site", "located_at": "@here", "near": "@self" } ],
+        "announce": "With the Workshop done, the settlers stake out a Bakery."
+      },
+      {
+        "op": "rule",
+        "id": "plan_hall",
+        "when": [
+          { "op": "count", "archetype": "oven", "gte": 1 },
+          { "op": "count", "archetype": ["hall_site", "village_bell"], "lte": 0 }
+        ],
+        "do": [ { "op": "spawn_item", "archetype": "hall_site", "located_at": "@here", "near": "@self" } ],
+        "announce": "Bread at last! The settlers stake out the great Village Hall."
+      }
+    ]
+  }
+}

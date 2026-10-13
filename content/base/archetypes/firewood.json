@@ -1,0 +1,18 @@
+{
+  "archetype": "firewood",
+  "name": "Wood",
+  "item_kind": "wood",
+  "portable": true,
+  "value": 8,
+  "description": "A dry log for a fire.",
+  "effects_on": [
+    {
+      "target": "kind:campfire",
+      "consume": true,
+      "ops": [
+        { "op": "add_prop", "entity": "@target", "label": "Item", "prop": "fuel", "delta": 28 },
+        { "op": "set_prop", "entity": "@target", "label": "Item", "prop": "lit", "value": true }
+      ]
+    }
+  ]
+}

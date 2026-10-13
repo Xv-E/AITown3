@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 if TYPE_CHECKING:
@@ -82,6 +82,16 @@ class RoutineSlot:
     goal: str = "Go to location"
     social: bool = False
     target_entity: str = ""
+    # 到达 location 后执行的内容动作（如 sleep）；设置后 goal 视为 "Perform action"
+    action: str = ""
+    # 目标需要的物品类别（Use item on / Use item）
+    item_kind: str = ""
+    # 每天该槽位目标完成一次后不再重复
+    once: bool = False
+    # Use item：手边没有该 kind 时允许自己按配方合成（否则只拿现成的）
+    craft: bool = False
+    # goal = "Achieve"：要达到的世界状态（条件写法同动作 requires），交给编译 PDDL
+    conditions: List[Dict[str, Any]] = field(default_factory=list, hash=False, compare=False)
 
     @property
     def key(self) -> str:
@@ -123,23 +133,14 @@ def describe_routine_context(
     sim_time: float,
     *,
     day_length: float = DAY_LENGTH_SECONDS,
-    campfire: Optional[Dict[str, Any]] = None,
 ) -> str:
     clock = format_clock(sim_time, day_length=day_length)
     hour = hour_of_day(sim_time, day_length=day_length)
     lines = [f"Time: {clock}."]
     if is_meal_time(hour):
-        lines.append("It is mealtime — gather at the campfire to roast food and eat together.")
+        lines.append("It is mealtime.")
     if is_night(hour):
-        lines.append("Night has fallen — keep the campfire lit or rest in the shelter.")
-    if campfire:
-        fuel = campfire.get("fuel", 0)
-        if campfire.get("out"):
-            lines.append("CRITICAL: The campfire is out! Someone must fetch wood and relight it.")
-        elif campfire.get("low"):
-            lines.append(f"WARNING: Campfire fuel is low ({fuel:.0f}). Add wood soon.")
-        else:
-            lines.append(f"Campfire is burning (fuel≈{float(fuel):.0f}).")
+        lines.append("Night has fallen — most people rest unless something urgent needs them.")
     if not slot:
         lines.append("No personal routine for this hour.")
     else:
@@ -150,7 +151,7 @@ def describe_routine_context(
             f"(hours {slot.start:g}-{slot.end:g}, social={social})."
         )
         lines.append(
-            "Prefer following work/meal/rest routine unless the fire needs fuel, "
+            "Prefer following your work/meal/rest routine unless something in the world needs you, "
             "someone is here to talk, or new information starts a personal story."
         )
     return " ".join(lines)
@@ -199,6 +200,11 @@ def parse_routine(raw: Any) -> List[RoutineSlot]:
                 goal=goal,
                 social=bool(item.get("social", False)),
                 target_entity=str(item.get("target_entity") or "").strip(),
+                action=str(item.get("action") or "").strip(),
+                item_kind=str(item.get("item_kind") or "").strip().lower(),
+                once=bool(item.get("once", False)),
+                craft=bool(item.get("craft", False)),
+                conditions=[dict(c) for c in item.get("conditions") or [] if isinstance(c, dict)],
             )
         )
     return slots
@@ -243,6 +249,20 @@ def routine_goal_candidate(
     goal = slot.goal or "Go to location"
     target = slot.target_entity or slot.location
 
+    if slot.action:
+        return {
+            "goal": "Perform action",
+            "target_entity": slot.action,
+            "at_location": slot.location,
+            "reason": f"Routine: {slot.activity or slot.action} at {slot.location}",
+            "priority": ROUTINE_GOAL_PRIORITY,
+            "confidence": 0.8,
+            "source": "routine",
+            "routine_key": slot.key,
+            "routine_activity": slot.activity,
+            "routine_social": slot.social,
+        }
+
     if goal == "Go to location":
         target = slot.location
         reason = f"Routine: go to {slot.location}"
@@ -261,7 +281,7 @@ def routine_goal_candidate(
     else:
         reason = f"Routine: {slot.activity or goal}"
 
-    return {
+    out = {
         "goal": goal,
         "target_entity": target,
         "reason": reason,
@@ -272,6 +292,34 @@ def routine_goal_candidate(
         "routine_activity": slot.activity,
         "routine_social": slot.social,
     }
+    if slot.item_kind:
+        out["item_kind"] = slot.item_kind
+        if goal == "Use item" and not slot.target_entity:
+            out["target_entity"] = f"kind:{slot.item_kind}"
+    if slot.craft:
+        out["craft"] = True
+    if slot.conditions:
+        out["conditions"] = [dict(c) for c in slot.conditions]
+    return out
+
+
+def day_index(sim_time: float, *, day_length: float = DAY_LENGTH_SECONDS) -> int:
+    absolute_hours = max(0.0, float(sim_time)) / max(1.0, float(day_length)) * 24.0 + DAY_HOUR_OFFSET
+    return int(absolute_hours // 24.0) + 1
+
+
+def clock_info(sim_time: float, *, day_length: float = DAY_LENGTH_SECONDS) -> Dict[str, Any]:
+    h = hour_of_day(sim_time, day_length=day_length)
+    phase = day_phase(h)
+    return {
+        "text": format_clock(sim_time, day_length=day_length),
+        "day": day_index(sim_time, day_length=day_length),
+        "hour": round(h, 3),
+        "phase": phase,
+        "phase_label": phase_label(phase),
+        "is_night": is_night(h),
+        "day_length_seconds": day_length,
+    }
 
 
 def people_at_location(
@@ -280,13 +328,17 @@ def people_at_location(
     *,
     exclude: Optional[str] = None,
 ) -> List[str]:
+    from content import get_content
+
     rows = world.run_query(
         """
         MATCH (p:Person)-[:LOCATED_AT]->(l:Location {name: $loc})
         WHERE coalesce(p.dead, false) = false AND coalesce(p.hp, 0) > 0
+          AND NOT coalesce(p.state, '') IN $hidden
         RETURN p.name AS name
         """,
         loc=location,
+        hidden=get_content().hidden_states(),
     )
     names = [str(r["name"]) for r in (rows or []) if r.get("name")]
     if exclude:

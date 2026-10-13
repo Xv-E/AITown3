@@ -354,7 +354,7 @@ About {speaker_b}: {partner_brief}
 What you know (do not invent beyond this):
 {facts_block}
 Memory hints: {hints}
-Write one short in-character utterance (ask, greet, share, or press for info). Prefer advancing your goal. Match your language. Max {max_chars} chars.
+Write one short in-character utterance (ask, greet, share, or press for info). Prefer advancing your goal. Speak in English only. Max {max_chars} chars.
 Return ONLY JSON: {{"text":"..."}}
 JSON:"""
 
@@ -520,7 +520,7 @@ def _build_dialogue_prompt(
     clue = (clue_block or "").strip()
     if len(clue) > 600:
         clue = clue[:600] + "…"
-    return f"""{retry}You are {speaker_b} at {location}. Stay in character. Match player language.
+    return f"""{retry}You are {speaker_b} at {location}. Stay in character. Reply in English only.
 Player ({speaker_a}): "{safe_msg or '(greets you)'}"
 Profile: {agent_b.personality}; {agent_b.background}; mood={agent_b.mood}; style={style}
 Knowledge (do not invent beyond this):
@@ -1141,6 +1141,20 @@ def handle_talk_dialogue(
                     location=location,
                     actor=speaker_b,
                     facts=gained,
+                )
+    except Exception:
+        pass
+    try:
+        from knowledge import share_from_dialogue
+
+        for listener, notes in share_from_dialogue(world, lines, speaker_a, speaker_b).items():
+            dialogue.setdefault("knowledge_gained", {})[listener] = notes
+            if memory is not None:
+                memory.add(
+                    listener,
+                    f"Heard at {location}: {'; '.join(notes)}",
+                    type="fact",
+                    location=location,
                 )
     except Exception:
         pass

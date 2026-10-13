@@ -1,0 +1,28 @@
+{
+  "name": "use_item",
+  "capability": "consume",
+  "description": "Use up a held item yourself (food and potions restore HP by their value)",
+  "duration": 1.0,
+  "params": [
+    { "name": "c", "type": "Person", "source": "self" },
+    { "name": "i", "type": "Item", "source": "held" }
+  ],
+  "requires": [
+    { "op": "has_item", "person": "@c", "item": "@i" },
+    { "op": "prop_gte", "entity": "@c", "label": "Person", "prop": "hp", "value": 1, "message": "@c is dead" },
+    { "op": "prop_neq", "entity": "@i", "prop": "item_kind", "value": "key",
+      "message": "@i should be used on a door (use_on), not use_item" }
+  ],
+  "effects": [
+    { "op": "add_prop", "entity": "@c", "label": "Person", "prop": "hp", "delta": "@i.value", "max": 120,
+      "when": [ { "op": "any", "of": [
+        { "op": "prop_in", "entity": "@i", "prop": "item_kind", "values": ["food", "meal", "cooked", "potion"] },
+        { "op": "prop_in", "entity": "@i", "prop": "name", "values": ["potion"], "prefix": true }
+      ] } ] },
+    { "op": "set_prop", "entity": "@c", "label": "Person", "prop": "mood", "value": "content",
+      "when": [ { "op": "prop_in", "entity": "@i", "prop": "item_kind", "values": ["food", "meal", "cooked"] } ] },
+    { "op": "delete_entity", "entity": "@i", "label": "Item" }
+  ],
+  "pddl_preconditions": ["(has-item ?c ?i)", "(alive ?c)"],
+  "pddl_effects": ["(not (has-item ?c ?i))"]
+}

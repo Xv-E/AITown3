@@ -1,0 +1,9 @@
+{
+  "name": "asleep",
+  "label": "Zzz",
+  "description": "is asleep",
+  "targetable": false,
+  "wake_priority": 1.0,
+  "ends_on_routine_change": true,
+  "on_exit": []
+}

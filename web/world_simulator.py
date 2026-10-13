@@ -52,6 +52,11 @@ def _derive_status(state: AgentState, overlay: AgentUIOverlay) -> str:
     return "idle"
 
 
+def _state_label(content, name: Optional[str]) -> Optional[str]:
+    sdef = content.state(name)
+    return (sdef.label or sdef.name) if sdef else name
+
+
 def agent_state_to_dict(state: AgentState, overlay: AgentUIOverlay, *, sim_time: float = 0.0) -> Dict[str, Any]:
     plan = state.current_plan or []
     status = _derive_status(state, overlay)
@@ -112,6 +117,8 @@ def agent_state_to_dict(state: AgentState, overlay: AgentUIOverlay, *, sim_time:
         "decision_process": decision_process,
         "candidate_goals": candidate_goals,
         "decision_steps": decision_steps,
+        "last_triggers": list(state.last_triggers or []),
+        "pending_triggers": [t.to_dict() for t in (state.pending_triggers or [])],
         "pending_action": pending,
         "busy_remaining": busy_remaining,
         "sim_busy_until": state.sim_busy_until,
@@ -316,12 +323,26 @@ class WorldSimulator:
     def npc_activity_summary(self, world) -> List[Dict[str, Any]]:
         """Character activity summary for the play page (includes auto-planning players)."""
         plans = self.list_plan_dicts(world)
+        from content import get_content
+
+        content = get_content()
+        try:
+            states = {
+                r["name"]: r["state"]
+                for r in world.run_query(
+                    "MATCH (p:Person) WHERE p.state IS NOT NULL RETURN p.name AS name, p.state AS state"
+                ) or []
+                if r.get("name")
+            }
+        except Exception:
+            states = {}
         out = []
         for p in plans:
             name = p.get("character")
             if not name:
                 continue
             goal = p.get("goal") or {}
+            trig = (p.get("last_triggers") or [None])[0]
             pending = p.get("pending_action")
             last = p.get("last_action") or {}
             pending_label = None
@@ -340,6 +361,7 @@ class WorldSimulator:
                     or (goal.get("reason") if isinstance(goal, dict) else None)
                 ),
                 "pending_action": pending.get("name") if isinstance(pending, dict) else None,
+                "pending_args": [str(a) for a in (pending.get("args") or [])] if isinstance(pending, dict) else [],
                 "pending_label": pending_label,
                 "busy_remaining": p.get("busy_remaining", 0),
                 "plan_remaining": p.get("plan_remaining", 0),
@@ -348,8 +370,55 @@ class WorldSimulator:
                 "last_message": last.get("message"),
                 "decision_mode": p.get("decision_mode"),
                 "mission_complete": bool(p.get("mission_complete")),
+                "state": states.get(name),
+                "state_label": _state_label(content, states.get(name)),
+                "trigger": trig.get("text") if isinstance(trig, dict) else None,
             })
         return out
+
+    def chronicle(self, limit: int = 12) -> List[Dict[str, Any]]:
+        """世界大事记（新的在前）。"""
+        loop = self._game_loop
+        if loop is None:
+            return []
+        return list(reversed(loop.chronicle[-max(1, int(limit)):]))
+
+    def announce(self, text: str) -> None:
+        """玩家等外部来源的新闻：进大事记并作为 news trigger 推给 NPC（模拟未启动时忽略）。"""
+        loop = self._game_loop
+        if loop is not None and text:
+            loop._record_announcements({"events": [{"type": "announce", "text": text}]})
+
+    def history(self, name: str, limit: int = 60) -> Dict[str, Any]:
+        """角色行为日志（新的在前）+ 当前目标 / 剩余计划。"""
+        loop = self._game_loop
+        state = loop.get_agent_state(name) if loop else None
+        if state is None:
+            return {"name": name, "entries": [], "goal": None, "plan": []}
+        from game_loop import _goal_text, _step_text
+
+        plan = [_step_text(s) for s in (state.current_plan or [])[state.plan_index:]]
+        goal = state.last_goal or {}
+        return {
+            "name": name,
+            "goal": _goal_text(goal) if goal else None,
+            "goal_reason": goal.get("reason") or goal.get("reasoning"),
+            "plan": plan,
+            "status": state.status,
+            "entries": list(reversed(state.history[-max(1, int(limit)):])),
+        }
+
+    def advance_time(self, world, hours: float) -> float:
+        """跳过一段仿真时间（测试日程用）；进行中的动作会在下一 tick 到期完成。"""
+        from routine import DAY_LENGTH_SECONDS
+
+        loop = self._ensure_loop(world)
+        loop.sim_time += max(0.0, float(hours)) * DAY_LENGTH_SECONDS / 24.0
+        for state in loop.agents:
+            state.decision_cooldown_until = 0.0
+            state.replan_backoff_until = 0.0
+        self.sim_time = loop.sim_time
+        return self.sim_time
 
     def _tick_result_to_agent_entry(self, entry: Dict[str, Any]) -> Dict[str, Any]:
         name = entry.get("agent") or entry.get("character", "")

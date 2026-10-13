@@ -61,6 +61,10 @@ def build_from_blueprint(
         props: Dict[str, Any] = {"description": loc.description}
         if loc.tags:
             props["tags"] = loc.tags
+        if loc.map:
+            props["map_x"], props["map_y"] = loc.map
+        if loc.grid:
+            props["grid_w"], props["grid_h"] = loc.grid
         world.add_entity(loc.name, entity_type="Location", **props)
 
     for edge in bp.adjacencies:
@@ -142,6 +146,12 @@ def build_from_blueprint(
             props["respawn_at"] = item.respawn_at
         if getattr(item, "script", None):
             props["script"] = json.dumps(item.script, ensure_ascii=False)
+        if item.archetype:
+            props["archetype"] = item.archetype
+        if item.footprint:
+            props["footprint_w"], props["footprint_h"] = item.footprint
+        if item.pos:
+            props["x"], props["y"] = item.pos
         world.add_entity(item.name, entity_type="Item", **props)
         # script.initial_state → 物品属性（facing/steps/solved 等）
         init = {}
@@ -159,7 +169,7 @@ def build_from_blueprint(
                     )
                 except Exception:
                     pass
-        if item.held_by and item.item_kind not in ("door", "campfire", "source", "fixture", "puzzle", "mechanism"):
+        if item.held_by and item.item_kind != "door" and item.portable is not False:
             world.link_entities(item.held_by, "Person", item.name, "Item", "HAS_ITEM")
         elif item.located_at:
             world.link_entities(item.name, "Item", item.located_at, "Location", "LOCATED_AT")
@@ -214,6 +224,33 @@ def build_from_blueprint(
             world.link_entities(a, "Person", b, "Person", rel)
             if rel == "FRIENDS_WITH":
                 world.link_entities(b, "Person", a, "Person", "FRIENDS_WITH")
+
+    try:
+        import sys
+        from pathlib import Path
+
+        actions_path = str(Path(__file__).resolve().parent.parent / "actions")
+        if actions_path not in sys.path:
+            sys.path.insert(0, actions_path)
+        from spatial import place_unplaced
+
+        place_unplaced(world)
+    except Exception as e:
+        logger.warning("格子布局失败: %s", e)
+
+    try:
+        import sys
+        from pathlib import Path
+
+        agent_path = str(Path(__file__).resolve().parent.parent / "agent")
+        if agent_path not in sys.path:
+            sys.path.insert(0, agent_path)
+        from knowledge import seed
+
+        for person in bp.persons:
+            seed(world, person.name, person.knows)
+    except Exception as e:
+        logger.warning("开局知识失败: %s", e)
 
     summary = {
         "ok": True,

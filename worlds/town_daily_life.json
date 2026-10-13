@@ -30,10 +30,22 @@
     }
   ],
   "adjacencies": [
-    { "a": "CampfireClearing", "b": "Forest" },
-    { "a": "CampfireClearing", "b": "BerryGrove" },
-    { "a": "CampfireClearing", "b": "RiverBank" },
-    { "a": "CampfireClearing", "b": "Shelter" }
+    {
+      "a": "CampfireClearing",
+      "b": "Forest"
+    },
+    {
+      "a": "CampfireClearing",
+      "b": "BerryGrove"
+    },
+    {
+      "a": "CampfireClearing",
+      "b": "RiverBank"
+    },
+    {
+      "a": "CampfireClearing",
+      "b": "Shelter"
+    }
   ],
   "persons": [
     {
@@ -49,11 +61,45 @@
       "power_level": 5,
       "speech_style": "soft and brief",
       "routine": [
-        { "start": 6, "end": 12, "location": "CampfireClearing", "activity": "watch morning work and the fire", "goal": "Go to location", "social": true },
-        { "start": 12, "end": 14, "location": "CampfireClearing", "activity": "share lunch by the fire", "goal": "Gain information", "social": true },
-        { "start": 14, "end": 18, "location": "RiverBank", "activity": "walk the river and listen", "goal": "Go to location", "social": true },
-        { "start": 18.5, "end": 21, "location": "CampfireClearing", "activity": "dinner stories", "goal": "Gain information", "social": true },
-        { "start": 21, "end": 6, "location": "Shelter", "activity": "sleep", "goal": "Go to location", "social": false }
+        {
+          "start": 6,
+          "end": 12,
+          "location": "CampfireClearing",
+          "activity": "watch morning work and the fire",
+          "goal": "Go to location",
+          "social": true
+        },
+        {
+          "start": 12,
+          "end": 14,
+          "location": "CampfireClearing",
+          "activity": "share lunch by the fire",
+          "goal": "Gain information",
+          "social": true
+        },
+        {
+          "start": 14,
+          "end": 18,
+          "location": "RiverBank",
+          "activity": "walk the river and listen",
+          "goal": "Go to location",
+          "social": true
+        },
+        {
+          "start": 18.5,
+          "end": 21,
+          "location": "CampfireClearing",
+          "activity": "dinner stories",
+          "goal": "Gain information",
+          "social": true
+        },
+        {
+          "start": 21,
+          "end": 6,
+          "location": "Shelter",
+          "activity": "sleep",
+          "action": "sleep"
+        }
       ]
     },
     {
@@ -72,13 +118,65 @@
       "trust_toward_player": 3,
       "works_at": "Forest",
       "routine": [
-        { "start": 6, "end": 8, "location": "CampfireClearing", "activity": "check fire then head to forest", "goal": "Go to location", "social": true },
-        { "start": 8, "end": 12, "location": "Forest", "activity": "chop and collect wood", "goal": "Collect item", "target_entity": "Wood1", "social": false },
-        { "start": 12, "end": 14, "location": "CampfireClearing", "activity": "lunch — add wood and eat", "goal": "Use item on", "target_entity": "Campfire", "social": true },
-        { "start": 14, "end": 18, "location": "Forest", "activity": "afternoon lumber", "goal": "Collect item", "target_entity": "Wood2", "social": false },
-        { "start": 18, "end": 18.5, "location": "CampfireClearing", "activity": "haul wood to fire before dinner", "goal": "Use item on", "target_entity": "Campfire", "social": false },
-        { "start": 18.5, "end": 21, "location": "CampfireClearing", "activity": "dinner and talk about the thinning woods", "goal": "Gain information", "social": true },
-        { "start": 21, "end": 6, "location": "Shelter", "activity": "sleep hard", "goal": "Go to location", "social": false }
+        {
+          "start": 6,
+          "end": 8,
+          "location": "CampfireClearing",
+          "activity": "check fire then head to forest",
+          "goal": "Go to location",
+          "social": true
+        },
+        {
+          "start": 8,
+          "end": 12,
+          "location": "Forest",
+          "activity": "chop and collect wood",
+          "goal": "Collect item",
+          "target_entity": "Wood1",
+          "social": false
+        },
+        {
+          "start": 12,
+          "end": 14,
+          "location": "CampfireClearing",
+          "activity": "lunch — add wood and eat",
+          "goal": "Use item on",
+          "target_entity": "Campfire",
+          "social": true
+        },
+        {
+          "start": 14,
+          "end": 18,
+          "location": "Forest",
+          "activity": "afternoon lumber",
+          "goal": "Collect item",
+          "target_entity": "Wood2",
+          "social": false
+        },
+        {
+          "start": 18,
+          "end": 18.5,
+          "location": "CampfireClearing",
+          "activity": "haul wood to fire before dinner",
+          "goal": "Use item on",
+          "target_entity": "Campfire",
+          "social": false
+        },
+        {
+          "start": 18.5,
+          "end": 21,
+          "location": "CampfireClearing",
+          "activity": "dinner and talk about the thinning woods",
+          "goal": "Gain information",
+          "social": true
+        },
+        {
+          "start": 21,
+          "end": 6,
+          "location": "Shelter",
+          "activity": "sleep hard",
+          "action": "sleep"
+        }
       ]
     },
     {
@@ -97,13 +195,66 @@
       "trust_toward_player": 5,
       "works_at": "BerryGrove",
       "routine": [
-        { "start": 6, "end": 8, "location": "BerryGrove", "activity": "early berry picking", "goal": "Collect item", "target_entity": "Berry1", "social": false },
-        { "start": 8, "end": 12, "location": "BerryGrove", "activity": "morning gathering", "goal": "Collect item", "target_entity": "Berry2", "social": false },
-        { "start": 12, "end": 14, "location": "CampfireClearing", "activity": "roast berries for lunch", "goal": "Use item on", "target_entity": "Campfire", "social": true },
-        { "start": 14, "end": 17, "location": "BerryGrove", "activity": "afternoon gathering", "goal": "Collect item", "target_entity": "Berry3", "social": false },
-        { "start": 17, "end": 18.5, "location": "RiverBank", "activity": "wash berries / quiet talk", "goal": "Gain information", "social": true },
-        { "start": 18.5, "end": 21, "location": "CampfireClearing", "activity": "roast dinner and share food", "goal": "Use item on", "target_entity": "Campfire", "social": true },
-        { "start": 21, "end": 6, "location": "Shelter", "activity": "sleep", "goal": "Go to location", "social": false }
+        {
+          "start": 6,
+          "end": 8,
+          "location": "BerryGrove",
+          "activity": "early berry picking",
+          "goal": "Collect item",
+          "target_entity": "Berry1",
+          "social": false
+        },
+        {
+          "start": 8,
+          "end": 12,
+          "location": "BerryGrove",
+          "activity": "morning gathering",
+          "goal": "Collect item",
+          "target_entity": "Berry2",
+          "social": false
+        },
+        {
+          "start": 12,
+          "end": 14,
+          "location": "CampfireClearing",
+          "activity": "roast berries for lunch",
+          "goal": "Use item on",
+          "target_entity": "Campfire",
+          "social": true
+        },
+        {
+          "start": 14,
+          "end": 17,
+          "location": "BerryGrove",
+          "activity": "afternoon gathering",
+          "goal": "Collect item",
+          "target_entity": "Berry3",
+          "social": false
+        },
+        {
+          "start": 17,
+          "end": 18.5,
+          "location": "RiverBank",
+          "activity": "wash berries / quiet talk",
+          "goal": "Gain information",
+          "social": true
+        },
+        {
+          "start": 18.5,
+          "end": 21,
+          "location": "CampfireClearing",
+          "activity": "roast dinner and share food",
+          "goal": "Use item on",
+          "target_entity": "Campfire",
+          "social": true
+        },
+        {
+          "start": 21,
+          "end": 6,
+          "location": "Shelter",
+          "activity": "sleep",
+          "action": "sleep"
+        }
       ]
     },
     {
@@ -122,13 +273,67 @@
       "trust_toward_player": 4,
       "works_at": "CampfireClearing",
       "routine": [
-        { "start": 6, "end": 12, "location": "CampfireClearing", "activity": "tend fire and greet workers", "goal": "Use item on", "target_entity": "Campfire", "social": true },
-        { "start": 12, "end": 14, "location": "CampfireClearing", "activity": "cook lunch on the fire", "goal": "Use item on", "target_entity": "Campfire", "social": true },
-        { "start": 14, "end": 17, "location": "Forest", "activity": "fetch spare wood if piles look thin", "goal": "Collect item", "target_entity": "Wood3", "social": false },
-        { "start": 17, "end": 18.5, "location": "CampfireClearing", "activity": "stoke fire before night", "goal": "Use item on", "target_entity": "Campfire", "social": false },
-        { "start": 18.5, "end": 21, "location": "CampfireClearing", "activity": "cook dinner and listen", "goal": "Gain information", "social": true },
-        { "start": 21, "end": 24, "location": "CampfireClearing", "activity": "night watch — guard the flame", "goal": "Use item on", "target_entity": "Campfire", "social": true },
-        { "start": 0, "end": 6, "location": "CampfireClearing", "activity": "late night watch by the embers", "goal": "Gain information", "social": true }
+        {
+          "start": 6,
+          "end": 12,
+          "location": "CampfireClearing",
+          "activity": "tend fire and greet workers",
+          "goal": "Use item on",
+          "target_entity": "Campfire",
+          "social": true
+        },
+        {
+          "start": 12,
+          "end": 14,
+          "location": "CampfireClearing",
+          "activity": "cook lunch on the fire",
+          "goal": "Use item on",
+          "target_entity": "Campfire",
+          "social": true
+        },
+        {
+          "start": 14,
+          "end": 17,
+          "location": "Forest",
+          "activity": "fetch spare wood if piles look thin",
+          "goal": "Collect item",
+          "target_entity": "Wood3",
+          "social": false
+        },
+        {
+          "start": 17,
+          "end": 18.5,
+          "location": "CampfireClearing",
+          "activity": "stoke fire before night",
+          "goal": "Use item on",
+          "target_entity": "Campfire",
+          "social": false
+        },
+        {
+          "start": 18.5,
+          "end": 21,
+          "location": "CampfireClearing",
+          "activity": "cook dinner and listen",
+          "goal": "Gain information",
+          "social": true
+        },
+        {
+          "start": 21,
+          "end": 24,
+          "location": "CampfireClearing",
+          "activity": "night watch — guard the flame",
+          "goal": "Use item on",
+          "target_entity": "Campfire",
+          "social": true
+        },
+        {
+          "start": 0,
+          "end": 6,
+          "location": "CampfireClearing",
+          "activity": "late night watch by the embers",
+          "goal": "Gain information",
+          "social": true
+        }
       ]
     },
     {
@@ -146,49 +351,102 @@
       "secret_policy": "guarded",
       "trust_toward_player": 2,
       "routine": [
-        { "start": 6, "end": 9, "location": "Forest", "activity": "help Rowan move early wood", "goal": "Gain information", "social": true, "target_entity": "Rowan" },
-        { "start": 9, "end": 12, "location": "BerryGrove", "activity": "help Sage with baskets", "goal": "Gain information", "social": true, "target_entity": "Sage" },
-        { "start": 12, "end": 14, "location": "CampfireClearing", "activity": "lunch gossip", "goal": "Gain information", "social": true },
-        { "start": 14, "end": 17, "location": "RiverBank", "activity": "rest and trade news", "goal": "Gain information", "social": true },
-        { "start": 17, "end": 18.5, "location": "CampfireClearing", "activity": "bring late wood/berries to Ash", "goal": "Go to location", "social": true },
-        { "start": 18.5, "end": 21, "location": "CampfireClearing", "activity": "dinner stories", "goal": "Gain information", "social": true },
-        { "start": 21, "end": 6, "location": "Shelter", "activity": "sleep — unless the fire calls", "goal": "Go to location", "social": false }
+        {
+          "start": 6,
+          "end": 9,
+          "location": "Forest",
+          "activity": "help Rowan move early wood",
+          "goal": "Gain information",
+          "social": true,
+          "target_entity": "Rowan"
+        },
+        {
+          "start": 9,
+          "end": 12,
+          "location": "BerryGrove",
+          "activity": "help Sage with baskets",
+          "goal": "Gain information",
+          "social": true,
+          "target_entity": "Sage"
+        },
+        {
+          "start": 12,
+          "end": 14,
+          "location": "CampfireClearing",
+          "activity": "lunch gossip",
+          "goal": "Gain information",
+          "social": true
+        },
+        {
+          "start": 14,
+          "end": 17,
+          "location": "RiverBank",
+          "activity": "rest and trade news",
+          "goal": "Gain information",
+          "social": true
+        },
+        {
+          "start": 17,
+          "end": 18.5,
+          "location": "CampfireClearing",
+          "activity": "bring late wood/berries to Ash",
+          "goal": "Go to location",
+          "social": true
+        },
+        {
+          "start": 18.5,
+          "end": 21,
+          "location": "CampfireClearing",
+          "activity": "dinner stories",
+          "goal": "Gain information",
+          "social": true
+        },
+        {
+          "start": 21,
+          "end": 6,
+          "location": "Shelter",
+          "activity": "sleep — unless the fire calls",
+          "action": "sleep"
+        }
       ]
     }
   ],
   "items": [
     {
       "name": "Campfire",
-      "value": 0,
+      "archetype": "campfire",
       "located_at": "CampfireClearing",
-      "item_kind": "campfire",
-      "portable": false,
-      "fuel": 70,
-      "lit": true,
       "description": "The camp's shared fire.",
-      "accepts_from": ["kind:wood", "kind:berry"],
       "script": {
         "lore": "This is the heart of the camp. It burns down slowly; people must feed it wood or night will be cold and fearful. Berries can be roasted on it when lit. Whoever lets it die will be blamed in stories told the next day.",
-        "on_tick": [
-          { "op": "add_prop", "prop": "fuel", "delta_per_sec": -0.35, "min": 0 },
-          { "op": "derive_bool", "prop": "lit", "from_prop": "fuel", "gt": 0.05 }
-        ],
         "alerts": [
           {
-            "when": { "prop_lte": ["fuel", 0] },
+            "when": {
+              "prop_lte": [
+                "fuel",
+                0
+              ]
+            },
             "signal": "critical",
             "message": "The campfire is out — fetch wood and relight it before fear spreads.",
             "prefer_kind": "wood",
-            "use_on": true,
-            "seek_location": "Forest"
+            "use_on": true
           },
           {
-            "when": { "prop_lt": ["fuel", 18] },
+            "when": {
+              "prop_lt": [
+                "fuel",
+                18
+              ]
+            },
             "signal": "urgent",
             "message": "Campfire fuel is low — someone should bring wood soon.",
             "prefer_kind": "wood",
             "use_on": true,
-            "seek_location": "Forest"
+            "audience": [
+              "Ash",
+              "Rowan"
+            ]
           }
         ]
       }
@@ -210,19 +468,7 @@
             "at": "Forest",
             "prefix": "Wood",
             "spawn": {
-              "value": 8,
-              "portable": true,
-              "description": "A dry log for the campfire.",
-              "effects_on": [
-                {
-                  "target": "Campfire",
-                  "consume": true,
-                  "ops": [
-                    { "op": "add_prop", "entity": "@target", "label": "Item", "prop": "fuel", "delta": 28 },
-                    { "op": "set_prop", "entity": "@target", "label": "Item", "prop": "lit", "value": true }
-                  ]
-                }
-              ]
+              "archetype": "firewood"
             }
           }
         ]
@@ -245,30 +491,7 @@
             "at": "BerryGrove",
             "prefix": "Berry",
             "spawn": {
-              "value": 5,
-              "portable": true,
-              "description": "Wild berries — roast them on the campfire.",
-              "effects_on": [
-                {
-                  "target": "Campfire",
-                  "consume": true,
-                  "preconditions": [
-                    { "op": "prop_gte", "entity": "@target", "label": "Item", "prop": "fuel", "value": 1 }
-                  ],
-                  "ops": [
-                    { "op": "add_prop", "entity": "@target", "label": "Item", "prop": "fuel", "delta": -2 },
-                    {
-                      "op": "spawn_item",
-                      "name": "Roast",
-                      "held_by": "@actor",
-                      "item_kind": "food",
-                      "portable": true,
-                      "value": 18,
-                      "description": "Roasted berries — warm and filling."
-                    }
-                  ]
-                }
-              ]
+              "archetype": "berry"
             }
           }
         ]
@@ -298,157 +521,59 @@
         "interactive": true,
         "lore": "Elders say the dial remembers the wind.",
         "behavior": "Rotatable stone dial puzzle. Can turn clockwise/counterclockwise changing facing among north/east/south/west. May be examined. When facing east after enough turns, mark solved=true.",
-        "state_props": ["facing", "steps", "solved"],
-        "initial_state": { "facing": "north", "steps": 0, "solved": false },
-        "success_when": { "prop_eq": ["solved", true] }
+        "state_props": [
+          "facing",
+          "steps",
+          "solved"
+        ],
+        "initial_state": {
+          "facing": "north",
+          "steps": 0,
+          "solved": false
+        },
+        "success_when": {
+          "prop_eq": [
+            "solved",
+            true
+          ]
+        }
       }
     },
     {
       "name": "Wood1",
-      "value": 8,
+      "archetype": "firewood",
       "located_at": "Forest",
-      "item_kind": "wood",
-      "portable": true,
-      "respawn_at": "Forest",
-      "description": "A dry log for the campfire.",
-      "effects_on": [
-        {
-          "target": "Campfire",
-          "consume": true,
-          "ops": [
-            { "op": "add_prop", "entity": "@target", "label": "Item", "prop": "fuel", "delta": 28 },
-            { "op": "set_prop", "entity": "@target", "label": "Item", "prop": "lit", "value": true }
-          ]
-        }
-      ]
+      "respawn_at": "Forest"
     },
     {
       "name": "Wood2",
-      "value": 8,
+      "archetype": "firewood",
       "located_at": "Forest",
-      "item_kind": "wood",
-      "portable": true,
-      "respawn_at": "Forest",
-      "description": "A dry log for the campfire.",
-      "effects_on": [
-        {
-          "target": "Campfire",
-          "consume": true,
-          "ops": [
-            { "op": "add_prop", "entity": "@target", "label": "Item", "prop": "fuel", "delta": 28 },
-            { "op": "set_prop", "entity": "@target", "label": "Item", "prop": "lit", "value": true }
-          ]
-        }
-      ]
+      "respawn_at": "Forest"
     },
     {
       "name": "Wood3",
-      "value": 8,
+      "archetype": "firewood",
       "located_at": "Forest",
-      "item_kind": "wood",
-      "portable": true,
-      "respawn_at": "Forest",
-      "description": "A dry log for the campfire.",
-      "effects_on": [
-        {
-          "target": "Campfire",
-          "consume": true,
-          "ops": [
-            { "op": "add_prop", "entity": "@target", "label": "Item", "prop": "fuel", "delta": 28 },
-            { "op": "set_prop", "entity": "@target", "label": "Item", "prop": "lit", "value": true }
-          ]
-        }
-      ]
+      "respawn_at": "Forest"
     },
     {
       "name": "Berry1",
-      "value": 5,
+      "archetype": "berry",
       "located_at": "BerryGrove",
-      "item_kind": "berry",
-      "portable": true,
-      "respawn_at": "BerryGrove",
-      "description": "Wild berries — roast them on the campfire.",
-      "effects_on": [
-        {
-          "target": "Campfire",
-          "consume": true,
-          "preconditions": [
-            { "op": "prop_gte", "entity": "@target", "label": "Item", "prop": "fuel", "value": 1 }
-          ],
-          "ops": [
-            { "op": "add_prop", "entity": "@target", "label": "Item", "prop": "fuel", "delta": -2 },
-            {
-              "op": "spawn_item",
-              "name": "Roast",
-              "held_by": "@actor",
-              "item_kind": "food",
-              "portable": true,
-              "value": 18,
-              "description": "Roasted berries — warm and filling."
-            }
-          ]
-        }
-      ]
+      "respawn_at": "BerryGrove"
     },
     {
       "name": "Berry2",
-      "value": 5,
+      "archetype": "berry",
       "located_at": "BerryGrove",
-      "item_kind": "berry",
-      "portable": true,
-      "respawn_at": "BerryGrove",
-      "description": "Wild berries — roast them on the campfire.",
-      "effects_on": [
-        {
-          "target": "Campfire",
-          "consume": true,
-          "preconditions": [
-            { "op": "prop_gte", "entity": "@target", "label": "Item", "prop": "fuel", "value": 1 }
-          ],
-          "ops": [
-            { "op": "add_prop", "entity": "@target", "label": "Item", "prop": "fuel", "delta": -2 },
-            {
-              "op": "spawn_item",
-              "name": "Roast",
-              "held_by": "@actor",
-              "item_kind": "food",
-              "portable": true,
-              "value": 18,
-              "description": "Roasted berries — warm and filling."
-            }
-          ]
-        }
-      ]
+      "respawn_at": "BerryGrove"
     },
     {
       "name": "Berry3",
-      "value": 5,
+      "archetype": "berry",
       "located_at": "BerryGrove",
-      "item_kind": "berry",
-      "portable": true,
-      "respawn_at": "BerryGrove",
-      "description": "Wild berries — roast them on the campfire.",
-      "effects_on": [
-        {
-          "target": "Campfire",
-          "consume": true,
-          "preconditions": [
-            { "op": "prop_gte", "entity": "@target", "label": "Item", "prop": "fuel", "value": 1 }
-          ],
-          "ops": [
-            { "op": "add_prop", "entity": "@target", "label": "Item", "prop": "fuel", "delta": -2 },
-            {
-              "op": "spawn_item",
-              "name": "Roast",
-              "held_by": "@actor",
-              "item_kind": "food",
-              "portable": true,
-              "value": 18,
-              "description": "Roasted berries — warm and filling."
-            }
-          ]
-        }
-      ]
+      "respawn_at": "BerryGrove"
     }
   ],
   "quests": [
@@ -458,7 +583,15 @@
       "stage": "living",
       "state": "active",
       "objective": "Chop wood, gather berries, feed the campfire, roast meals, and let stories emerge.",
-      "involves": ["Campfire", "Rowan", "Sage", "Ash", "Reed", "Forest", "BerryGrove"],
+      "involves": [
+        "Campfire",
+        "Rowan",
+        "Sage",
+        "Ash",
+        "Reed",
+        "Forest",
+        "BerryGrove"
+      ],
       "giver": "Ash"
     }
   ],
@@ -467,31 +600,48 @@
       "name": "FireMustNeverDie",
       "text": "If the campfire dies at night, the cold and dark will scatter the camp. Ash is responsible for watching it.",
       "secret_level": 0,
-      "known_by": ["Ash", "Rowan", "Sage", "Reed"]
+      "known_by": [
+        "Ash",
+        "Rowan",
+        "Sage",
+        "Reed"
+      ]
     },
     {
       "name": "ForestThinning",
       "text": "Rowan thinks the nearby forest is thinning; good logs are farther each week.",
       "secret_level": 0,
-      "known_by": ["Rowan"]
+      "known_by": [
+        "Rowan"
+      ]
     },
     {
       "name": "SecretBerryPatch",
       "text": "Sage found a second berry patch past the RiverBank after rain, but has not told everyone yet.",
       "secret_level": 1,
-      "known_by": ["Sage"]
+      "known_by": [
+        "Sage"
+      ]
     },
     {
       "name": "AshNightFear",
       "text": "Ash is afraid of the dark more than they admit; that is why they insist on night watch.",
       "secret_level": 1,
-      "known_by": ["Reed"]
+      "known_by": [
+        "Reed"
+      ]
     },
     {
       "name": "MealAtFire",
       "text": "Lunch and dinner happen at the CampfireClearing: roast berries on the fire, then eat together.",
       "secret_level": 0,
-      "known_by": ["Ash", "Sage", "Rowan", "Reed", "Observer"]
+      "known_by": [
+        "Ash",
+        "Sage",
+        "Rowan",
+        "Reed",
+        "Observer"
+      ]
     }
   ],
   "rumors": [
@@ -499,16 +649,47 @@
       "name": "SomeoneLetFireDie",
       "text": "A rumor says last month someone fell asleep on watch and the fire almost died.",
       "secret_level": 1,
-      "believed_by": ["Reed", "Ash"]
+      "believed_by": [
+        "Reed",
+        "Ash"
+      ]
     }
   ],
   "social": [
-    { "a": "Ash", "rel": "KNOWS", "b": "Rowan" },
-    { "a": "Ash", "rel": "KNOWS", "b": "Sage" },
-    { "a": "Ash", "rel": "KNOWS", "b": "Reed" },
-    { "a": "Rowan", "rel": "KNOWS", "b": "Reed" },
-    { "a": "Sage", "rel": "KNOWS", "b": "Reed" },
-    { "a": "Sage", "rel": "FRIENDS_WITH", "b": "Ash" },
-    { "a": "Rowan", "rel": "FRIENDS_WITH", "b": "Ash" }
+    {
+      "a": "Ash",
+      "rel": "KNOWS",
+      "b": "Rowan"
+    },
+    {
+      "a": "Ash",
+      "rel": "KNOWS",
+      "b": "Sage"
+    },
+    {
+      "a": "Ash",
+      "rel": "KNOWS",
+      "b": "Reed"
+    },
+    {
+      "a": "Rowan",
+      "rel": "KNOWS",
+      "b": "Reed"
+    },
+    {
+      "a": "Sage",
+      "rel": "KNOWS",
+      "b": "Reed"
+    },
+    {
+      "a": "Sage",
+      "rel": "FRIENDS_WITH",
+      "b": "Ash"
+    },
+    {
+      "a": "Rowan",
+      "rel": "FRIENDS_WITH",
+      "b": "Ash"
+    }
   ]
 }

@@ -1,0 +1,33 @@
+{
+  "archetype": "campfire",
+  "item_kind": "campfire",
+  "portable": false,
+  "value": 0,
+  "fuel": 70,
+  "lit": true,
+  "description": "A shared fire. It slowly burns down unless someone feeds it wood.",
+  "accepts_from": ["kind:wood", "kind:berry"],
+  "script": {
+    "lore": "The fire burns down slowly; people must feed it wood or the night will be cold and fearful. Berries can be roasted on it while it is lit.",
+    "on_tick": [
+      { "op": "add_prop", "prop": "fuel", "delta_per_sec": -0.35, "min": 0 },
+      { "op": "derive_bool", "prop": "lit", "from_prop": "fuel", "gt": 0.05 }
+    ],
+    "alerts": [
+      {
+        "when": { "prop_lte": ["fuel", 0] },
+        "signal": "critical",
+        "message": "The fire is out — fetch wood and relight it.",
+        "prefer_kind": "wood",
+        "use_on": true
+      },
+      {
+        "when": { "prop_lt": ["fuel", 18] },
+        "signal": "urgent",
+        "message": "The fire is low — someone should bring wood soon.",
+        "prefer_kind": "wood",
+        "use_on": true
+      }
+    ]
+  }
+}

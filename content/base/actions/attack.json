@@ -1,0 +1,26 @@
+{
+  "name": "attack",
+  "capability": "attack",
+  "description": "Attack someone at the same location; their HP drops by your power level",
+  "duration": 1.5,
+  "params": [
+    { "name": "attacker", "type": "Person", "source": "self" },
+    { "name": "target", "type": "Person", "source": "people_here" },
+    { "name": "l", "type": "Location", "source": "here" }
+  ],
+  "requires": [
+    { "op": "neq", "a": "@attacker", "b": "@target", "message": "Cannot attack yourself" },
+    { "op": "prop_gte", "entity": "@attacker", "label": "Person", "prop": "hp", "value": 1, "message": "@attacker is dead" },
+    { "op": "prop_gte", "entity": "@target", "label": "Person", "prop": "hp", "value": 1, "message": "@target is dead" },
+    { "op": "person_at", "person": "@attacker", "location": "@l" },
+    { "op": "person_at", "person": "@target", "location": "@l" }
+  ],
+  "effects": [
+    { "op": "add_prop", "entity": "@target", "label": "Person", "prop": "hp",
+      "delta": "@attacker.power_level", "scale": -1, "min": 0 },
+    { "op": "set_prop", "entity": "@target", "label": "Person", "prop": "dead", "value": true,
+      "when": [ { "op": "prop_lte", "entity": "@target", "label": "Person", "prop": "hp", "value": 0 } ] }
+  ],
+  "pddl_preconditions": ["(alive ?attacker)", "(alive ?target)", "(at ?attacker ?l)", "(at ?target ?l)"],
+  "pddl_effects": ["(decrease (hp ?target) (power_level ?attacker))"]
+}

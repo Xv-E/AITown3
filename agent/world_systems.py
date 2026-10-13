@@ -25,10 +25,6 @@ def tick_world_systems(world: "Neo4jWorld", dt: float, sim_time: float) -> Dict[
     report["events"].extend(scripts.get("events") or [])
     report["alerts"] = scripts.get("alerts") or []
     report["respawned"] = scripts.get("spawned") or []
-
-    # 兼容旧 UI：若有带 fuel 的物品，摘一条状态
-    report["campfire"] = _legacy_fuel_snapshot(world)
-
     report["clock"] = format_clock(sim_time)
     report["phase"] = phase
     report["night"] = night
@@ -36,16 +32,23 @@ def tick_world_systems(world: "Neo4jWorld", dt: float, sim_time: float) -> Dict[
 
 
 def get_campfire_status(world: "Neo4jWorld") -> Optional[Dict[str, Any]]:
-    """兼容：任意带 fuel 的脚本物品状态（不特判 campfire kind）。"""
+    """item_interact 的离线 mock 用：任意带 fuel 的物品状态。"""
     return _legacy_fuel_snapshot(world)
 
 
-def fire_emergency_goal(world: "Neo4jWorld", character: str) -> Optional[Dict[str, Any]]:
-    """兼容旧名：由物品 script.alerts 驱动，而非硬编码篝火。"""
-    from item_scripts import active_script_alerts, alert_to_goal
+def urgent_alert_goal(
+    world: "Neo4jWorld",
+    character: str,
+    *,
+    sim_time: Optional[float] = None,
+) -> Optional[Dict[str, Any]]:
+    """该角色分内的紧急物品告警 → 目标（由 script.alerts 与 alert.audience 决定）。"""
+    from item_scripts import active_script_alerts, alert_applies_to, alert_to_goal
 
     for alert in active_script_alerts(world):
         if alert.get("signal") not in ("critical", "urgent"):
+            continue
+        if not alert_applies_to(world, character, alert, sim_time=sim_time):
             continue
         goal = alert_to_goal(world, character, alert)
         if goal:

@@ -1,0 +1,17 @@
+{
+  "archetype": "vegetable",
+  "name": "Vegetable",
+  "item_kind": "ingredient",
+  "portable": true,
+  "value": 4,
+  "description": "Fresh vegetables. Cook them on a stove.",
+  "effects_on": [
+    {
+      "target": "kind:stove",
+      "consume": true,
+      "ops": [
+        { "op": "spawn_item", "archetype": "meal", "held_by": "@actor" }
+      ]
+    }
+  ]
+}

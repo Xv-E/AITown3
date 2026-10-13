@@ -1,0 +1,12 @@
+{
+  "archetype": "tents",
+  "name": "Tents",
+  "item_kind": "tent",
+  "portable": false,
+  "value": 0,
+  "footprint": [2, 2],
+  "description": "A ring of patched tents around a fire pit, where the settlers sleep.",
+  "script": {
+    "lore": "The settlers' first shelter. They sleep here until the village has houses."
+  }
+}

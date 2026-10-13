@@ -1,0 +1,11 @@
+{
+  "archetype": "stove",
+  "item_kind": "stove",
+  "portable": false,
+  "value": 0,
+  "description": "An iron stove. Turns ingredients into hot meals.",
+  "accepts_from": ["kind:ingredient"],
+  "script": {
+    "lore": "Put an ingredient on the stove to cook a meal."
+  }
+}

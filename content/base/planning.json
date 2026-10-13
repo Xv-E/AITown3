@@ -1,0 +1,20 @@
+{
+  "exclude_actions": [],
+  "actions": {},
+  "drop_props": [],
+  "drop_relations": [],
+  "exclude_items": [],
+  "exclude_kinds": [],
+  "people": "all",
+  "spawn_pool": 2,
+  "spawn_pool_by": {},
+  "max_variants": 8,
+  "relevance": true,
+  "fallback": [],
+  "narrow_types": true,
+  "negative_needs": "initial",
+  "prune_objects": true,
+  "max_hops": null,
+  "max_per_kind": 12,
+  "knowledge": "belief"
+}

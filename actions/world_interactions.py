@@ -160,37 +160,47 @@ def _item_kind(world, name: str) -> str:
 def compile_interactions_from_world(world) -> List[WorldInteraction]:
     """扫描 Item 节点，编译当前图中的临时交互。"""
     names = world.list_entities("Item") or []
+    kinds = {n: _item_kind(world, n) for n in names}
     out: List[WorldInteraction] = []
     seen = set()
     for tool in names:
-        tool_kind = _item_kind(world, tool)
+        tool_kind = kinds[tool]
         for effect in _item_effects_on(world, tool):
-            target = effect.get("target") or ""
-            if not target:
-                continue
-            label = _entity_label(world, target)
-            if not label:
-                continue
-            accepts = _accepts_from_entity(world, target, label)
-            if not _tool_accepted(tool, accepts, tool_kind=tool_kind):
-                continue
-            key = f"{tool}|{target}"
-            if key in seen:
-                continue
-            seen.add(key)
-            consume = effect.get("consume", None)
-            if consume is not None:
-                consume = bool(consume)
-            out.append(
-                WorldInteraction(
-                    tool=tool,
-                    target=target,
-                    preconditions=list(effect.get("preconditions") or []),
-                    ops=list(effect.get("ops") or []),
-                    consume=consume,
-                )
-            )
+            for target in expand_target(effect.get("target") or "", kinds):
+                label = _entity_label(world, target)
+                if not label:
+                    continue
+                accepts = _accepts_from_entity(world, target, label)
+                if not _tool_accepted(tool, accepts, tool_kind=tool_kind):
+                    continue
+                key = f"{tool}|{target}"
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append(_interaction(tool, target, effect))
     return out
+
+
+def expand_target(target: str, kinds: Dict[str, str]) -> List[str]:
+    """effects_on.target 可写物品名，或 kind:<类别>（匹配世界里所有该类物品）。"""
+    target = (target or "").strip()
+    if not target:
+        return []
+    if target.lower().startswith("kind:"):
+        want = target[len("kind:"):].strip().lower()
+        return sorted(n for n, k in kinds.items() if k == want)
+    return [target]
+
+
+def _interaction(tool: str, target: str, effect: Dict[str, Any]) -> WorldInteraction:
+    consume = effect.get("consume", None)
+    return WorldInteraction(
+        tool=tool,
+        target=target,
+        preconditions=list(effect.get("preconditions") or []),
+        ops=list(effect.get("ops") or []),
+        consume=None if consume is None else bool(consume),
+    )
 
 
 def compile_interactions_from_blueprint(bp) -> List[WorldInteraction]:
@@ -199,46 +209,34 @@ def compile_interactions_from_blueprint(bp) -> List[WorldInteraction]:
     persons = list(getattr(bp, "persons", None) or [])
     by_item = {it.name: it for it in items}
     by_person = {p.name: p for p in persons}
+    kinds = {it.name: str(getattr(it, "item_kind", "") or "").strip().lower() for it in items}
     out: List[WorldInteraction] = []
     seen = set()
     for tool_item in items:
-        tool_kind = str(getattr(tool_item, "item_kind", "") or "").strip().lower()
+        tool_kind = kinds[tool_item.name]
         effects = list(getattr(tool_item, "effects_on", None) or [])
         for raw in effects:
             if not isinstance(raw, dict):
                 continue
             effect = normalize_effect(raw)
-            target = effect.get("target") or ""
-            if not target:
-                continue
-            accepts: List[str] = []
-            if target in by_item:
-                ti = by_item[target]
-                accepts = list(getattr(ti, "accepts_from", None) or [])
-                if not accepts and getattr(ti, "key_item", ""):
-                    accepts = [ti.key_item]
-            elif target in by_person:
-                accepts = list(getattr(by_person[target], "accepts_from", None) or [])
-            else:
-                continue
-            if not _tool_accepted(tool_item.name, accepts, tool_kind=tool_kind):
-                continue
-            key = f"{tool_item.name}|{target}"
-            if key in seen:
-                continue
-            seen.add(key)
-            consume = effect.get("consume", None)
-            if consume is not None:
-                consume = bool(consume)
-            out.append(
-                WorldInteraction(
-                    tool=tool_item.name,
-                    target=target,
-                    preconditions=list(effect.get("preconditions") or []),
-                    ops=list(effect.get("ops") or []),
-                    consume=consume,
-                )
-            )
+            for target in expand_target(effect.get("target") or "", kinds):
+                accepts: List[str] = []
+                if target in by_item:
+                    ti = by_item[target]
+                    accepts = list(getattr(ti, "accepts_from", None) or [])
+                    if not accepts and getattr(ti, "key_item", ""):
+                        accepts = [ti.key_item]
+                elif target in by_person:
+                    accepts = list(getattr(by_person[target], "accepts_from", None) or [])
+                else:
+                    continue
+                if not _tool_accepted(tool_item.name, accepts, tool_kind=tool_kind):
+                    continue
+                key = f"{tool_item.name}|{target}"
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append(_interaction(tool_item.name, target, effect))
     return out
 
 
@@ -250,6 +248,9 @@ def refresh_interactions_from_world(world) -> List[WorldInteraction]:
 
 def can_use_on(world, actor: str, tool: str, target: str) -> Tuple[bool, str, Optional[WorldInteraction]]:
     inter = find_interaction(tool, target)
+    if inter is None:
+        refresh_interactions_from_world(world)
+        inter = find_interaction(tool, target)
     if inter is None:
         return False, f"{tool} cannot be used on {target} (no world interaction configured)", None
     target_loc = target_location(world, target) or ""

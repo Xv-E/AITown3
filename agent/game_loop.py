@@ -11,6 +11,7 @@ from action_timing import get_action_duration
 from agent_profile import AgentProfile
 from goal_feasibility import assess_goal, pick_best_feasible, sanitize_goal_target
 from goal_planner import plan_for_goal, wait_plan
+from registry import act
 
 if TYPE_CHECKING:
     from neo4j_world import Neo4jWorld
@@ -20,6 +21,8 @@ PlanStep = Tuple[str, List[str]]
 HARD_INTERRUPT_HP = 20
 DECISION_COOLDOWN = 5.0
 REPLAN_BACKOFF = 3.0
+# LLM 模式下闲置多久（游戏小时）没有任何触发，就主动想一次
+IDLE_REDECIDE_HOURS = 2.0
 
 
 @dataclass
@@ -82,6 +85,43 @@ class AgentState:
     routine_slot_key: Optional[str] = None
     last_social_at: float = -1e9
     recent_talk_targets: List[str] = field(default_factory=list)
+    # once 槽位已完成："<day>:<slot key>"
+    routine_done: List[str] = field(default_factory=list)
+    # 持续状态（内容包 states/，如 asleep）：名字 / 进入时的日程段 / 进入时刻
+    held_state: Optional[str] = None
+    state_slot: Optional[str] = None
+    state_since: float = 0.0
+    # 决策触发器（日程换段 / 突发事件）
+    observation: Optional[Any] = None
+    pending_triggers: List[Any] = field(default_factory=list)
+    last_triggers: List[Dict[str, Any]] = field(default_factory=list)
+    next_scan_at: float = 0.0
+    last_decision_at: float = -1e9
+    # 上次观察（knowledge.observe）时所在地点；换地点时才更新「知道的地点」
+    seen_loc: Optional[str] = None
+    # 行为日志：决策 / 动作开始与结果 / 打断（最近 HISTORY_LIMIT 条）
+    history: List[Dict[str, Any]] = field(default_factory=list)
+
+
+HISTORY_LIMIT = 120
+
+
+def _goal_text(goal_data: Optional[Dict[str, Any]]) -> str:
+    if not goal_data:
+        return "(no goal)"
+    goal = goal_data.get("goal") or goal_data.get("final_goal") or "?"
+    target = goal_data.get("target_entity")
+    ia = goal_data.get("interact_action") or (goal_data.get("metadata") or {}).get("interact_action")
+    text = f"{goal} -> {target}" if target else str(goal)
+    return f"{text} [{ia}]" if ia else text
+
+
+def _step_text(step: Any) -> str:
+    try:
+        name, args = step
+        return f"{name}({', '.join(str(a) for a in args)})"
+    except (TypeError, ValueError):
+        return str(step)
 
 
 def _goal_key(goal_data: Optional[Dict[str, Any]]) -> str:
@@ -121,6 +161,26 @@ class GameLoop:
         self.force_mock = False
         self.decision_cooldown = decision_cooldown
         self.replan_backoff = replan_backoff
+        # 世界大事记：物品脚本 rule 的 announce（建成、解锁……）
+        self.chronicle: List[Dict[str, Any]] = []
+
+    def _record_announcements(self, world_report: Dict[str, Any]) -> None:
+        from routine import format_clock
+        from triggers import Trigger
+
+        for ev in world_report.get("events") or []:
+            if not isinstance(ev, dict) or ev.get("type") != "announce" or not ev.get("text"):
+                continue
+            clock = format_clock(self.sim_time)
+            self.chronicle.append({"t": round(self.sim_time, 2), "clock": clock, "text": ev["text"]})
+            del self.chronicle[:-HISTORY_LIMIT]
+            if self.verbose:
+                print(f"[NEWS] {ev['text']}")
+            for state in self.agents:
+                self._log(state, "news", ev["text"])
+                self._push_triggers(state, [Trigger(
+                    "event", "news", f"{clock}: {ev['text']}", 0.5, self.sim_time,
+                )])
 
     def _default_decider_factory(self, world, memory=None, force_mock=False):
         from multi_step_decider import MultiStepDecider
@@ -215,16 +275,11 @@ class GameLoop:
         except Exception as e:
             if self.verbose:
                 print(f"[WARN] world_systems: {e}")
+        self._record_announcements(world_report)
         if self.verbose:
             print(f"\n{'=' * 60}")
             clock = world_report.get("clock") or f"t={self.sim_time:.2f}"
             print(f"[TICK] #{self.tick_count} {clock} dt={dt}")
-            fire = world_report.get("campfire") or {}
-            if fire.get("name") is not None:
-                print(
-                    f"   Item {fire.get('name')}: fuel={float(fire.get('fuel') or 0):.1f} "
-                    f"lit={fire.get('lit')}"
-                )
             alerts = world_report.get("alerts") or []
             if alerts:
                 a0 = alerts[0]
@@ -242,6 +297,16 @@ class GameLoop:
         if characters is not None:
             char_set = set(characters)
             targets = [s for s in self.agents if s.agent.name in char_set]
+
+        if auto_plan:
+            for state in targets:
+                if not self._may_auto_plan(state, include_player=include_player):
+                    continue
+                try:
+                    self._scan_triggers(state, world_report.get("alerts") or [])
+                except Exception as e:
+                    if self.verbose:
+                        print(f"[WARN] trigger scan {state.agent.name}: {e}")
 
         # 两阶段：先推进所有到期动作/计划步骤，再做决策。
         # 避免某个角色的 LLM/PDDL 卡住整拍，导致其他人的 move 永远完不成。
@@ -275,13 +340,22 @@ class GameLoop:
                     break
                 if state.pending_action:
                     continue
-                if state.current_plan and state.plan_index < len(state.current_plan):
+                in_plan = bool(state.current_plan and state.plan_index < len(state.current_plan))
+                # 第一轮里下一步预检失败（status=failed）的计划也要在这一轮重规划
+                if in_plan and not self._wants_interrupt(state) and state.status != "failed":
+                    continue
+                if not in_plan and not self._wants_decision(state):
                     continue
                 if not self._may_auto_plan(state, include_player=include_player):
                     continue
-                if self.sim_time < state.replan_backoff_until:
+                urgent = self._wants_interrupt(state) or in_plan
+                if self.sim_time < state.replan_backoff_until and not urgent:
                     continue
-                if self.sim_time < state.decision_cooldown_until and not state.is_interrupted:
+                if (
+                    self.sim_time < state.decision_cooldown_until
+                    and not state.is_interrupted
+                    and not urgent
+                ):
                     continue
                 try:
                     by_name[state.agent.name] = self._process_agent_tick(
@@ -363,6 +437,13 @@ class GameLoop:
         }
         can_plan = auto_plan and self._may_auto_plan(state, include_player=include_player)
 
+        if not state.pending_action and self._state_gate(state):
+            state.status = state.held_state or "idle"
+            result["skipped"] = True
+            result["reason"] = f"state:{state.held_state}"
+            result["status"] = state.status
+            return result
+
         if not auto_plan and not state.current_plan and not state.pending_action:
             result["skipped"] = True
             result["reason"] = "idle"
@@ -381,9 +462,11 @@ class GameLoop:
             result["status"] = state.status
             return result
 
-        # 软打断：日程换段 / 同地遇见他人 → 改计划（不取消进行中动作）
+        # 软打断（规则模式）：日程换段 / 同地遇见他人 → 改计划（不取消进行中动作）
+        # LLM 模式下这些都是触发器，交给 LLM 决策
         if (
             can_plan
+            and self.force_mock
             and not state.pending_action
             and not self._is_dead(state)
             and self._soft_opportunity_interrupt(state, instant=instant)
@@ -439,6 +522,23 @@ class GameLoop:
             result["busy_remaining"] = max(0.0, state.sim_busy_until - self.sim_time)
             result["status"] = state.status
             return result
+
+        # 有剩余计划：步骤间隙若有紧急事件，先让 LLM 决定要不要改主意
+        if (
+            state.current_plan
+            and state.plan_index < len(state.current_plan)
+            and self._wants_interrupt(state)
+        ):
+            if not can_plan:
+                state.status = "deciding"
+                result["skipped"] = True
+                result["reason"] = "awaiting_decision"
+                result["status"] = state.status
+                return result
+            decided = self._decide_and_plan(state, instant=instant)
+            result["decided"] = True
+            result["interrupted"] = not decided.get("kept")
+            result["goal"] = state.last_goal
 
         # 有剩余计划：启动下一步
         if state.current_plan and state.plan_index < len(state.current_plan):
@@ -503,14 +603,22 @@ class GameLoop:
         # 任务节点仅软同步 UI；不因「任务完成」硬停自动规划
         self._sync_quest_ui(state)
 
-        if self.sim_time < state.replan_backoff_until:
+        if not self._wants_decision(state):
+            state.status = "idle"
+            result["skipped"] = True
+            result["reason"] = "awaiting_trigger"
+            result["status"] = state.status
+            return result
+
+        urgent = self._wants_interrupt(state)
+        if self.sim_time < state.replan_backoff_until and not urgent:
             state.status = "idle"
             result["skipped"] = True
             result["reason"] = "backoff"
             result["status"] = state.status
             return result
 
-        if self.sim_time < state.decision_cooldown_until and not state.is_interrupted:
+        if self.sim_time < state.decision_cooldown_until and not state.is_interrupted and not urgent:
             state.status = "idle"
             result["skipped"] = True
             result["reason"] = "decision_cooldown"
@@ -577,6 +685,11 @@ class GameLoop:
         if not state.current_plan or state.plan_index >= len(state.current_plan):
             return None
         action_name, args = state.current_plan[state.plan_index]
+        if any(str(a).startswith("kind:") for a in args):
+            from item_chain import resolve_step_args
+
+            args = resolve_step_args(self.world, state.agent.name, list(args))
+            state.current_plan[state.plan_index] = (action_name, args)
         ok, reason = self._check_plan_step(state.agent, action_name, args)
         if not ok:
             state.replan_reason = reason
@@ -586,7 +699,9 @@ class GameLoop:
                 print(f"[WARN] [{state.agent.name}] precheck failed: {reason}")
             return None
 
-        duration = get_action_duration(action_name, instant=instant)
+        duration = get_action_duration(
+            action_name, instant=instant, args=list(args), world=self.world
+        )
         pending = PendingAction(
             name=action_name,
             args=list(args),
@@ -597,6 +712,14 @@ class GameLoop:
         state.pending_action = pending
         state.sim_busy_until = pending.completes_at
         state.status = "acting"
+        if action_name != act("idle"):
+            self._log(
+                state,
+                "start",
+                _step_text((action_name, args)),
+                goal=_goal_text(state.last_goal) if state.last_goal else None,
+                step=f"{state.plan_index + 1}/{len(state.current_plan)}",
+            )
         if self.verbose:
             print(
                 f"[START] [{state.agent.name}] {action_name}({', '.join(args)}) "
@@ -622,6 +745,11 @@ class GameLoop:
                 f"[EXEC] [{agent.name}] completed {state.plan_index + 1}/"
                 f"{len(state.current_plan or [])}: {action_name}({', '.join(args)})"
             )
+        inventory_before = None
+        if state.observation is not None:
+            from triggers import held_items
+
+            inventory_before = held_items(self.world, agent.name)
         try:
             action_result = self._execute_plan_step(agent, action_name, args)
         except Exception as e:
@@ -635,6 +763,11 @@ class GameLoop:
             # 无论 apply 是否抛错，都必须清掉 pending，否则会永远卡在「执行 move」
             state.pending_action = None
             state.sim_busy_until = 0.0
+        try:
+            self._absorb_own_changes(state, inventory_before)
+        except Exception:
+            pass
+        self._observe(state, places=True)
 
         state.last_action_result = action_result
         state.plan_index += 1
@@ -653,8 +786,22 @@ class GameLoop:
             entry["dialogue"] = action_result.metadata["dialogue"]
         if action_result.metadata.get("interaction"):
             entry["interaction"] = action_result.metadata["interaction"]
+        dialogue = action_result.metadata.get("dialogue")
+        lines = dialogue.get("lines") if isinstance(dialogue, dict) else None
+        if action_name != act("idle") or not action_result.success:
+            self._log(
+                state,
+                "done" if action_result.success else "failed",
+                _step_text((action_name, args)),
+                message=action_result.message,
+                dialogue=[
+                    f"{ln.get('speaker')}: {ln.get('text')}"
+                    for ln in lines or []
+                    if isinstance(ln, dict) and ln.get("text")
+                ],
+            )
 
-        if action_name == "talk" and action_result.success and len(args) >= 2:
+        if action_name == act("converse") and action_result.success and len(args) >= 2:
             other = args[1] if args[0] == agent.name else args[0]
             if other and other != agent.name:
                 state.recent_talk_targets = [
@@ -670,7 +817,18 @@ class GameLoop:
         if action_result.success and state.current_plan and state.plan_index >= len(state.current_plan):
             if self.verbose:
                 print(f"[DONE] [{agent.name}] plan complete")
+            self._mark_routine_done(state)
             agent.complete_current_goal()
+            last_actions = {a for a, _ in state.current_plan}
+            if self.trigger_driven and last_actions != {"wait"}:
+                from triggers import Trigger
+
+                goal = state.last_goal or {}
+                self._push_triggers(state, [Trigger(
+                    "event", "plan_done",
+                    f"You finished: {goal.get('goal')} -> {goal.get('target_entity')}.",
+                    0.4, self.sim_time,
+                )])
             state.current_plan = None
             state.plan_index = 0
             state.status = "idle"
@@ -742,49 +900,36 @@ class GameLoop:
         """篝火告急 / 日程换段 / 同地遇见 → 清空当前计划并立刻采纳新目标。"""
         from routine import (
             current_slot,
-            hour_of_day,
-            is_night,
             load_person_routine,
             pick_social_target,
             routine_goal_candidate,
             should_social_interrupt,
             social_interrupt_goal,
         )
-        from world_systems import fire_emergency_goal
+        from world_systems import urgent_alert_goal
 
         agent = state.agent
 
-        # 0) 物品脚本告警（燃料不足等）
-        fire_goal = fire_emergency_goal(self.world, agent.name)
+        # 0) 物品脚本告警（缺货 / 有订单 / 燃料不足…）；是否分内事由 alert.audience 决定
+        fire_goal = urgent_alert_goal(self.world, agent.name, sim_time=self.sim_time)
         if fire_goal:
-            role_bg = f"{agent.background or ''} {agent.personality or ''} {agent.name}".lower()
-            cares = any(
-                k in role_bg
-                for k in ("fire", "campfire", "篝火", "lumber", "wood", "伐木", "ash", "rowan")
+            same = (
+                state.last_goal
+                and state.last_goal.get("goal") == fire_goal.get("goal")
+                and state.last_goal.get("target_entity") == fire_goal.get("target_entity")
+                and state.current_plan
             )
-            respond = bool(
-                fire_goal.get("tool_hint")
-                or cares
-                or is_night(hour_of_day(self.sim_time))
-                or fire_goal.get("script_signal") == "critical"
-            )
-            if respond:
-                same = (
-                    state.last_goal
-                    and state.last_goal.get("goal") == fire_goal.get("goal")
-                    and state.last_goal.get("target_entity") == fire_goal.get("target_entity")
+            if not same:
+                assessed = assess_goal(
+                    self.world, agent.name, fire_goal, engines=self.plan_engines
                 )
-                if not same:
-                    assessed = assess_goal(
-                        self.world, agent.name, fire_goal, engines=self.plan_engines
+                if assessed.ok and not assessed.already_satisfied and assessed.plan:
+                    if self.verbose:
+                        print(f"[SCRIPT] [{agent.name}] {fire_goal.get('reason')}")
+                    self._adopt_planned_goal(
+                        state, assessed, reason=fire_goal.get("reason") or "Item script alert"
                     )
-                    if assessed.ok and not assessed.already_satisfied and assessed.plan:
-                        if self.verbose:
-                            print(f"[SCRIPT] [{agent.name}] {fire_goal.get('reason')}")
-                        self._adopt_planned_goal(
-                            state, assessed, reason=fire_goal.get("reason") or "Item script alert"
-                        )
-                        return True
+                    return True
 
         slots = load_person_routine(self.world, agent.name)
         if not slots:
@@ -823,6 +968,8 @@ class GameLoop:
         if not slot_changed:
             return False
         if not state.current_plan and not state.last_goal:
+            return False
+        if self._routine_slot_done(state, slot):
             return False
 
         cand = routine_goal_candidate(
@@ -875,6 +1022,207 @@ class GameLoop:
         )
         return True
 
+    # ----- 决策触发器 -----
+
+    @property
+    def trigger_driven(self) -> bool:
+        """LLM 模式：只在触发器出现时决策；规则模式沿用每拍规则判断。"""
+        return not self.force_mock
+
+    def _wants_decision(self, state: AgentState) -> bool:
+        if not self.trigger_driven:
+            return True
+        return bool(state.pending_triggers)
+
+    def _wants_interrupt(self, state: AgentState) -> bool:
+        if not self.trigger_driven:
+            return False
+        from triggers import INTERRUPT_PRIORITY
+
+        return any(t.priority >= INTERRUPT_PRIORITY for t in state.pending_triggers)
+
+    def _push_triggers(self, state: AgentState, new: List[Any]) -> None:
+        from triggers import MAX_QUEUE
+
+        if not new:
+            return
+        queue = {t.key(): t for t in state.pending_triggers}
+        for t in new:
+            queue[t.key()] = t
+            if self.verbose:
+                print(f"[TRIGGER] [{state.agent.name}] ({t.source}/{t.kind}) {t.text}")
+        state.pending_triggers = sorted(queue.values(), key=lambda t: (-t.priority, -t.at))[:MAX_QUEUE]
+
+    def _scan_triggers(self, state: AgentState, alerts: List[Dict[str, Any]]) -> None:
+        from routine import DAY_LENGTH_SECONDS, format_clock
+        from triggers import SCAN_INTERVAL, Trigger, diff_triggers, observe
+
+        if self.sim_time < state.next_scan_at:
+            return
+        state.next_scan_at = self.sim_time + SCAN_INTERVAL
+        agent = state.agent
+        agent.refresh_from_world()
+        self._observe(state, agent.location)
+        clock = format_clock(self.sim_time)
+        obs, mine, slot = observe(
+            self.world,
+            agent.name,
+            location=agent.location,
+            hp=agent.hp,
+            sim_time=self.sim_time,
+            alerts=alerts,
+        )
+        new = diff_triggers(
+            state.observation, obs, alerts=mine, slot=slot, clock=clock, sim_time=self.sim_time
+        )
+        held = self._held_state_def(state)
+        if held is not None and state.observation is not None:
+            from dataclasses import replace
+
+            new = [t for t in new if t.priority >= held.wake_priority]
+            # 状态中错过的换段 / 信号，结束后再触发
+            obs = replace(obs, slot=state.observation.slot, alerts=state.observation.alerts)
+        state.observation = obs
+        idle_for = self.sim_time - state.last_decision_at
+        if (
+            self.trigger_driven
+            and not new
+            and not state.pending_triggers
+            and not state.current_plan
+            and not state.pending_action
+            and held is None
+            and idle_for > IDLE_REDECIDE_HOURS * DAY_LENGTH_SECONDS / 24.0
+        ):
+            new = [Trigger("event", "idle", f"{clock}: nothing has happened for a while.",
+                           0.3, self.sim_time)]
+        self._push_triggers(state, new)
+
+    def _observe(self, state: AgentState, location: Optional[str] = None, *, places: bool = False) -> None:
+        """更新人物对当前地点的信念；有变化时写一条 observation 记忆。
+
+        places：顺带刷新「知道的地点」（换了地点，或刚做完动作，可能打开了新通路）。
+        """
+        from knowledge import current_location, describe_sighting, knowledge_mode, observe
+
+        if knowledge_mode() == "omniscient":
+            return
+        name = state.agent.name
+        try:
+            loc = location or current_location(self.world, name)
+            new, gone, kinds = observe(
+                self.world, name, loc, t=self.sim_time, places=places or loc != state.seen_loc
+            )
+            state.seen_loc = loc
+        except Exception as e:
+            if self.verbose:
+                print(f"[KNOW] [{name}] observe failed: {e}")
+            return
+        if (new or gone) and self.memory:
+            self.memory.add(
+                name,
+                describe_sighting(loc, new, gone, kinds),
+                type="observation",
+                location=loc or "",
+            )
+
+    def _absorb_own_changes(self, state: AgentState, before: Optional[frozenset]) -> None:
+        """自己动作造成的背包变化不算「收到」事件；别人给的仍会被下次扫描发现。"""
+        if state.observation is None or before is None:
+            return
+        from dataclasses import replace
+
+        from triggers import held_items
+
+        after = held_items(self.world, state.agent.name)
+        inv = (state.observation.inventory - (before - after)) | (after - before)
+        state.observation = replace(state.observation, inventory=frozenset(inv))
+
+    def _has_routine(self, state: AgentState) -> bool:
+        from routine import load_person_routine
+
+        return bool(load_person_routine(self.world, state.agent.name))
+
+    def _routine_done_key(self, slot_key: str) -> str:
+        from routine import day_index
+
+        return f"{day_index(self.sim_time)}:{slot_key}"
+
+    def _routine_slot_done(self, state: AgentState, slot) -> bool:
+        return bool(slot.once) and self._routine_done_key(slot.key) in state.routine_done
+
+    def _mark_routine_done(self, state: AgentState) -> None:
+        goal = state.last_goal or {}
+        key = goal.get("routine_key")
+        if goal.get("source") != "routine" or not key:
+            return
+        done = self._routine_done_key(str(key))
+        if done not in state.routine_done:
+            state.routine_done = (state.routine_done + [done])[-32:]
+
+    # ----- 持续状态（内容包 states/） -----
+
+    def _current_slot_key(self, state: AgentState) -> Optional[str]:
+        from routine import current_slot, load_person_routine
+
+        slots = load_person_routine(self.world, state.agent.name)
+        slot = current_slot(slots, self.sim_time) if slots else None
+        return slot.key if slot else None
+
+    def _held_state_def(self, state: AgentState):
+        from content import get_content
+
+        return get_content().state(state.held_state)
+
+    def _state_gate(self, state: AgentState) -> bool:
+        """角色处于持续状态时暂停决策；日程换段 / 足够紧急的触发器会结束状态。返回是否仍被挡住。"""
+        from action import get_property
+        from content import get_content
+
+        name = get_property(self.world, state.agent.name, "Person", "state")
+        sdef = get_content().state(name)
+        if sdef is None:
+            state.held_state = None
+            return False
+        if state.held_state != name:
+            state.held_state = name
+            state.state_slot = self._current_slot_key(state)
+            state.state_since = self.sim_time
+            state.pending_triggers = []
+            if self.verbose:
+                print(f"[STATE] [{state.agent.name}] enters '{name}'")
+        reason = None
+        if sdef.ends_on_routine_change and self._current_slot_key(state) != state.state_slot:
+            reason = "the routine moved on"
+        else:
+            urgent = [t for t in state.pending_triggers if t.priority >= sdef.wake_priority]
+            if urgent:
+                reason = urgent[0].text
+        if reason is None:
+            return True
+        self._exit_state(state, sdef, reason)
+        return False
+
+    def _exit_state(self, state: AgentState, sdef, reason: str) -> None:
+        from graph_ops import apply_all
+        from routine import format_clock
+        from triggers import Trigger
+
+        agent = state.agent
+        ctx = {"actor": agent.name}
+        apply_all(self.world, [{"op": "set_state", "entity": "@actor", "state": None}] + sdef.on_exit, ctx)
+        state.held_state = None
+        state.state_slot = None
+        state.decision_cooldown_until = 0.0
+        state.replan_backoff_until = 0.0
+        self._log(state, "state", f"No longer {sdef.name}", reason=reason)
+        if self.verbose:
+            print(f"[STATE] [{agent.name}] leaves '{sdef.name}': {reason}")
+        self._push_triggers(state, [Trigger(
+            "routine", "state_end",
+            f"{format_clock(self.sim_time)}: you are no longer {sdef.name} ({reason}).",
+            0.6, self.sim_time,
+        )])
+
     def _adopt_planned_goal(
         self,
         state: AgentState,
@@ -893,6 +1241,15 @@ class GameLoop:
         state.agent.set_current_goal(state.last_goal)
         state.status = "ready" if state.current_plan else "idle"
         state.decision_cooldown_until = 0.0
+        self._log(
+            state,
+            "decision",
+            _goal_text(state.last_goal),
+            reason=reason,
+            source=state.last_goal.get("source"),
+            mode="interrupt",
+            plan=self._remaining_plan(state),
+        )
 
     def _routine_candidates(self, state: AgentState) -> List[Dict[str, Any]]:
         from routine import (
@@ -902,10 +1259,10 @@ class GameLoop:
             routine_goal_candidate,
             social_interrupt_goal,
         )
-        from world_systems import fire_emergency_goal
+        from world_systems import urgent_alert_goal
 
         out: List[Dict[str, Any]] = []
-        fire_goal = fire_emergency_goal(self.world, state.agent.name)
+        fire_goal = urgent_alert_goal(self.world, state.agent.name, sim_time=self.sim_time)
         if fire_goal:
             out.append(fire_goal)
 
@@ -916,6 +1273,17 @@ class GameLoop:
         if slot is None:
             return out
         state.routine_slot_key = slot.key
+        if self._routine_slot_done(state, slot):
+            if state.agent.location != slot.location:
+                out.append({
+                    "goal": "Go to location",
+                    "target_entity": slot.location,
+                    "reason": f"Routine: stay at {slot.location} ({slot.activity})",
+                    "priority": 0.72,
+                    "confidence": 0.8,
+                    "source": "routine",
+                })
+            return out
         cand = routine_goal_candidate(
             slot,
             character=state.agent.name,
@@ -943,6 +1311,16 @@ class GameLoop:
                 )
             return out
         out.append(cand)
+        if cand.get("goal") != "Go to location" and state.agent.location != slot.location:
+            # 目标暂时做不成时，至少先去日程地点
+            out.append({
+                "goal": "Go to location",
+                "target_entity": slot.location,
+                "reason": f"Routine: head to {slot.location} ({slot.activity})",
+                "priority": 0.7,
+                "confidence": 0.8,
+                "source": "routine",
+            })
         return out
 
     def _ephemeral_action_candidates(self, state: AgentState) -> List[Dict[str, Any]]:
@@ -972,7 +1350,59 @@ class GameLoop:
                 print(f"[WARN] ephemeral candidates: {e}")
             return []
 
+    def _log(self, state: AgentState, kind: str, text: str, **detail: Any) -> None:
+        from routine import format_clock
+
+        entry: Dict[str, Any] = {
+            "t": round(self.sim_time, 2),
+            "clock": format_clock(self.sim_time),
+            "kind": kind,
+            "text": text,
+        }
+        entry.update({k: v for k, v in detail.items() if v not in (None, "", [], {})})
+        state.history.append(entry)
+        if len(state.history) > HISTORY_LIMIT:
+            del state.history[:-HISTORY_LIMIT]
+
+    def _remaining_plan(self, state: AgentState) -> List[str]:
+        if not state.current_plan:
+            return []
+        return [_step_text(s) for s in state.current_plan[state.plan_index:]]
+
     def _decide_and_plan(
+        self,
+        state: AgentState,
+        *,
+        instant: bool = False,
+    ) -> Dict[str, Any]:
+        out = self._decide_and_plan_core(state, instant=instant)
+        triggers = [t.get("text") for t in state.last_triggers if isinstance(t, dict) and t.get("text")]
+        goal = state.last_goal or {}
+        if out.get("kept"):
+            text, reason = f"Keeps current plan: {_goal_text(goal)}", None
+        elif out.get("fallback") == "wait":
+            text, reason = "Nothing actionable — waits", goal.get("reason")
+        elif out.get("goal"):
+            g = out["goal"]
+            text = _goal_text(g)
+            if not state.current_plan:
+                text += " (already satisfied)"
+            reason = g.get("reason") or g.get("reasoning")
+        else:
+            text, reason = "Could not decide", state.plan_error
+        self._log(
+            state,
+            "decision",
+            text,
+            reason=reason,
+            source=(out.get("goal") or {}).get("source"),
+            mode=state.decision_mode,
+            triggers=triggers,
+            plan=self._remaining_plan(state),
+        )
+        return out
+
+    def _decide_and_plan_core(
         self,
         state: AgentState,
         *,
@@ -989,15 +1419,29 @@ class GameLoop:
         # 供 PromptBuilder 显示正确的一日时段
         agent._sim_time = self.sim_time  # noqa: SLF001
 
+        # 消费触发器：告诉 LLM「为什么现在要做决定」
+        from triggers import describe_triggers
+
+        triggers = list(state.pending_triggers)
+        state.pending_triggers = []
+        state.last_triggers = [t.to_dict() for t in triggers]
+        state.last_decision_at = self.sim_time
+        agent._trigger_context = describe_triggers(triggers)  # noqa: SLF001
+        in_plan = bool(state.current_plan and state.plan_index < len(state.current_plan))
+        if self.verbose and triggers:
+            print(f"   triggered by: {', '.join(t.kind for t in triggers)}")
+
         # 清空旧候选，重新生成
         agent.goal_manager.clear_all()
         routine_cands = self._routine_candidates(state)
         ephemeral_cands = self._ephemeral_action_candidates(state)
+        has_routine = self._has_routine(state)
         if self.force_mock:
             from profile_planner import profile_aware_pick_goal
 
-            fallback = profile_aware_pick_goal(self.world, agent)
-            candidates = list(routine_cands) + list(ephemeral_cands) + [fallback]
+            # 有日程的人：日程满足后就待在原地，不随机找事做
+            fallback = [] if has_routine else [profile_aware_pick_goal(self.world, agent)]
+            candidates = list(routine_cands) + list(ephemeral_cands) + fallback
             state.decision_mode = "mock"
             state.decision_process = {
                 "planner": "profile_aware",
@@ -1024,17 +1468,18 @@ class GameLoop:
                 num_candidates=1,
                 verbose=self.verbose,
             )
-            # 日程 + 临时 actions 插到前面；可行性按分数排序
+            llm_cands = [dict(c or {}, source=(c or {}).get("source") or "llm") for c in candidates or []]
             candidates = (
                 list(routine_cands)
                 + list(ephemeral_cands)
-                + list(candidates or [])
+                + llm_cands
             )
             state.decision_mode = "llm"
             state.decision_process = {
                 "force_mock": False,
                 "settings": agent.get_settings_summary(),
-                "note": "Routine + ephemeral interact actions + LLM, filtered by feasibility",
+                "note": "Triggered LLM decision; routine / item signals are fallbacks",
+                "triggers": state.last_triggers,
                 "routine": routine_cands[0] if routine_cands else None,
                 "ephemeral_n": len(ephemeral_cands),
             }
@@ -1064,9 +1509,35 @@ class GameLoop:
                 }
                 break
 
-        # 物品脚本告警 / 日程优先
         picked = None
-        for rc in routine_cands:
+        if not self.force_mock:
+            # LLM 自己的选择优先；与当前目标相同则继续原计划
+            for c in candidates:
+                if (c or {}).get("source") != "llm":
+                    continue
+                c0 = dict(c)
+                if not c0.get("goal") and c0.get("final_goal"):
+                    c0["goal"] = c0.get("final_goal")
+                if in_plan and _goal_key(c0) == _goal_key(state.last_goal):
+                    state.status = "ready"
+                    out.update({"decided": True, "kept": True})
+                    if self.verbose:
+                        print(f"[GOAL] [{agent.name}] keeps current plan")
+                    return out
+                assessed = assess_goal(self.world, agent.name, c0, engines=self.plan_engines)
+                if _goal_key(assessed.goal_data) in exclude:
+                    continue
+                if assessed.ok and not assessed.already_satisfied and assessed.plan:
+                    picked = assessed
+                    break
+            if picked is None and in_plan:
+                # 被打断但 LLM 没给出更好的可行目标：继续原计划
+                state.status = "ready"
+                out.update({"decided": True, "kept": True})
+                return out
+
+        # 物品脚本告警 / 日程优先（规则模式，或 LLM 目标不可行时的兜底）
+        for rc in ([] if picked is not None else routine_cands):
             if rc.get("source") not in ("item_script", "fire_emergency"):
                 continue
             assessed = assess_goal(
@@ -1115,7 +1586,7 @@ class GameLoop:
                 exclude_goals=exclude,
             )
 
-        if picked is None:
+        if picked is None and not has_routine:
             # profile 兜底
             try:
                 from profile_planner import profile_aware_pick_goal
@@ -1241,6 +1712,7 @@ class GameLoop:
         instant: bool = False,
     ) -> None:
         agent = state.agent
+        self._log(state, "replan", f"Plan broke: {_goal_text(state.last_goal)}", reason=reason)
         state.replan_reason = reason
         state.interrupt_count += 1
         state.is_interrupted = True
@@ -1281,6 +1753,15 @@ class GameLoop:
 
         # 2) 换次优候选 / 重新决策
         state.decision_cooldown_until = 0.0  # 允许立即决策
+        if self.trigger_driven:
+            from triggers import Trigger
+
+            goal = state.last_goal or {}
+            self._push_triggers(state, [Trigger(
+                "event", "plan_failed",
+                f"Your plan ({goal.get('goal')} -> {goal.get('target_entity')}) failed: {reason}",
+                0.8, self.sim_time,
+            )])
         decided = self._decide_and_plan(state, instant=instant)
         if state.current_plan:
             state.is_interrupted = False
@@ -1334,7 +1815,7 @@ class GameLoop:
         ok, reason = registry.execute(self.world, action_name, **kwargs)
         target = args[-1] if args else None
         metadata: Dict[str, Any] = {}
-        if ok and action_name == "talk" and len(args) >= 3:
+        if ok and action_name == act("converse") and len(args) >= 3:
             try:
                 from dialogue_service import handle_talk_dialogue
 

@@ -1,0 +1,29 @@
+{
+  "archetype": "coin",
+  "name": "Coin",
+  "item_kind": "coin",
+  "portable": true,
+  "value": 1,
+  "description": "A copper coin.",
+  "effects_on": [
+    {
+      "target": "kind:order_board",
+      "consume": true,
+      "ops": [
+        { "op": "add_prop", "entity": "@target", "label": "Item", "prop": "orders", "delta": 1 },
+        { "op": "set_prop", "entity": "@target", "label": "Item", "prop": "last_customer", "value": "@actor" }
+      ]
+    },
+    {
+      "target": "kind:stall",
+      "consume": true,
+      "preconditions": [
+        { "op": "prop_gte", "entity": "@target", "label": "Item", "prop": "stock", "value": 1 }
+      ],
+      "ops": [
+        { "op": "add_prop", "entity": "@target", "label": "Item", "prop": "stock", "delta": -1 },
+        { "op": "spawn_item", "archetype": "bread", "held_by": "@actor" }
+      ]
+    }
+  ]
+}

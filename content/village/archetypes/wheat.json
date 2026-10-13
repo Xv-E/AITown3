@@ -1,0 +1,17 @@
+{
+  "archetype": "wheat",
+  "name": "Wheat",
+  "item_kind": "grain",
+  "portable": true,
+  "value": 2,
+  "description": "A sheaf of wheat. An oven bakes it into bread.",
+  "effects_on": [
+    {
+      "target": "kind:oven",
+      "consume": true,
+      "ops": [
+        { "op": "spawn_item", "archetype": "loaf", "held_by": "@actor" }
+      ]
+    }
+  ]
+}

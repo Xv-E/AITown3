@@ -40,12 +40,13 @@ def _sanitize_goal_target(
 
 
 def _validate_plan_step(character: str, action_name: str, args: List[str]) -> Optional[str]:
-    if action_name == "talk" and len(args) >= 2 and args[0] == args[1]:
-        return f"Cannot talk to self: talk({args[0]}, {args[1]})"
-    if action_name == "attack" and len(args) >= 2 and args[0] == args[1]:
-        return f"Cannot attack self: attack({args[0]}, {args[1]})"
-    if action_name == "talk" and len(args) >= 2 and args[0] != character and args[1] != character:
-        return f"talk must include character {character}"
+    from content import get_content
+
+    cap = get_content().capability_of(action_name)
+    if cap in ("converse", "attack") and len(args) >= 2 and args[0] == args[1]:
+        return f"Cannot target self: {action_name}({args[0]}, {args[1]})"
+    if cap == "converse" and len(args) >= 2 and character not in args[:2]:
+        return f"{action_name} must include character {character}"
     return None
 
 

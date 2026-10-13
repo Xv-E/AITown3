@@ -1,0 +1,25 @@
+{
+  "archetype": "construction_site",
+  "item_kind": "site",
+  "portable": false,
+  "value": 0,
+  "description": "A marked-out construction site. Bring the materials it still needs.",
+  "accepts_from": ["kind:log", "kind:stone", "kind:plank", "kind:food"],
+  "script": {
+    "lore": "A building is going up here. Each delivered material brings it closer; when nothing more is needed it is finished.",
+    "alerts": [
+      { "when": { "prop_gt": ["need_log", 0] }, "signal": "urgent",
+        "message": "The construction site still needs logs from the forest.",
+        "prefer_kind": "log", "use_on": true },
+      { "when": { "prop_gt": ["need_stone", 0] }, "signal": "urgent",
+        "message": "The construction site still needs stone from the quarry.",
+        "prefer_kind": "stone", "use_on": true },
+      { "when": { "prop_gt": ["need_plank", 0] }, "signal": "urgent",
+        "message": "The construction site still needs planks (saw logs at the workbench).",
+        "prefer_kind": "plank", "use_on": true },
+      { "when": { "prop_gt": ["need_bread", 0] }, "signal": "urgent",
+        "message": "The construction site needs bread for the builders' feast (bake wheat in the oven).",
+        "prefer_kind": "food", "use_on": true }
+    ]
+  }
+}

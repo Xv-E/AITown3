@@ -1,0 +1,21 @@
+{
+  "name": "drop",
+  "capability": "drop",
+  "description": "Put a held item down at the current location",
+  "duration": 1.0,
+  "params": [
+    { "name": "c", "type": "Person", "source": "self" },
+    { "name": "i", "type": "Item", "source": "held" },
+    { "name": "l", "type": "Location", "source": "here" }
+  ],
+  "requires": [
+    { "op": "has_item", "person": "@c", "item": "@i" },
+    { "op": "person_at", "person": "@c", "location": "@l" }
+  ],
+  "effects": [
+    { "op": "unlink", "a": "@c", "a_label": "Person", "b": "@i", "b_label": "Item", "rel": "HAS_ITEM" },
+    { "op": "link", "a": "@i", "a_label": "Item", "b": "@l", "b_label": "Location", "rel": "LOCATED_AT" }
+  ],
+  "pddl_preconditions": ["(has-item ?c ?i)", "(at ?c ?l)"],
+  "pddl_effects": ["(not (has-item ?c ?i))", "(item-at ?i ?l)"]
+}

@@ -1,0 +1,26 @@
+{
+  "name": "pick_up",
+  "capability": "take",
+  "description": "Pick up an item at the current location",
+  "duration": 1.0,
+  "params": [
+    { "name": "c", "type": "Person", "source": "self" },
+    { "name": "i", "type": "Item", "source": "ground" },
+    { "name": "l", "type": "Location", "source": "here" }
+  ],
+  "requires": [
+    { "op": "person_at", "person": "@c", "location": "@l" },
+    { "op": "item_at", "entity": "@i", "location": "@l" },
+    { "op": "not_held", "item": "@i" },
+    { "op": "prop_neq", "entity": "@i", "prop": "portable", "value": false, "strict": true,
+      "message": "@i is not pickable" },
+    { "op": "prop_neq", "entity": "@i", "prop": "item_kind", "value": "door",
+      "message": "@i is not pickable" }
+  ],
+  "effects": [
+    { "op": "unlink", "a": "@i", "a_label": "Item", "b": "@l", "b_label": "Location", "rel": "LOCATED_AT" },
+    { "op": "link", "a": "@c", "a_label": "Person", "b": "@i", "b_label": "Item", "rel": "HAS_ITEM" }
+  ],
+  "pddl_preconditions": ["(at ?c ?l)", "(item-at ?i ?l)", "(not (has-item ?c ?i))"],
+  "pddl_effects": ["(has-item ?c ?i)", "(not (item-at ?i ?l))"]
+}

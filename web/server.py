@@ -45,6 +45,7 @@ from character_plans import (  # noqa: E402
     get_goal_target_options,
 )
 from llm_service import get_llm_status, get_character_memories, clear_character_memories, clear_all_memories  # noqa: E402
+from content import get_content  # noqa: E402
 from registry import get_registry  # noqa: E402
 from world_simulator import get_world_simulator  # noqa: E402
 
@@ -103,6 +104,10 @@ class SimulationStartRequest(BaseModel):
     include_player: bool = False
     # Simulate only these characters; None/empty = all (player still gated by include_player)
     characters: Optional[List[str]] = None
+
+
+class TimeAdvanceRequest(BaseModel):
+    hours: float = Field(default=1.0, gt=0.0, le=48.0)
 
 
 class DirectorPlanRequest(BaseModel):
@@ -348,7 +353,10 @@ async def api_execute(req: ExecuteActionRequest):
         world = get_world()
         ok, reason = reg.execute(world, req.action, **kwargs)
         dialogue = None
-        if ok and req.action == "talk":
+        capability = get_content().capability_of(req.action)
+        # 按能力签名的参数位置取值（内容包可自由命名参数）
+        positional = [kwargs.get(p.name, "") for p in reg.get(req.action).parameters] if ok else []
+        if ok and capability == "converse":
             try:
                 import sys as _sys
                 agent_path = str(_AITOWN3 / "agent")
@@ -357,9 +365,7 @@ async def api_execute(req: ExecuteActionRequest):
                 from dialogue_service import handle_talk_dialogue
                 from llm_service import get_web_memory
 
-                a = kwargs.get("a", "")
-                b = kwargs.get("b", "")
-                loc = kwargs.get("l", "")
+                a, b, loc = positional[:3]
                 mem = get_web_memory()
                 msg = (req.message or "").strip()
 
@@ -380,7 +386,7 @@ async def api_execute(req: ExecuteActionRequest):
                     "lines": [],
                     "error": str(e),
                 }
-        elif ok and req.action == "give":
+        elif ok and capability == "give":
             # Giving gifts increases receiver trust toward the player
             try:
                 import sys as _sys
@@ -389,8 +395,7 @@ async def api_execute(req: ExecuteActionRequest):
                     _sys.path.insert(0, agent_path)
                 from npc_knowledge import adjust_trust, get_trust
 
-                receiver = kwargs.get("receiver", "")
-                giver = kwargs.get("giver", "")
+                giver, _item, receiver = positional[:3]
                 # Only increase trust when the giver is the player
                 rows = world.run_query(
                     """
@@ -548,6 +553,12 @@ def api_get_plan(name: str):
         return state.to_dict()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/api/characters/{name}/history")
+def api_character_history(name: str, limit: int = 60):
+    """Behaviour log: decisions (with reasons / triggers), actions and results."""
+    return get_world_simulator().history(name, limit=limit)
 
 
 @app.get("/api/characters/{name}/plan/targets")
@@ -721,6 +732,61 @@ async def api_simulation_start(req: SimulationStartRequest):
         "include_player": _sim_include_player,
         "characters": _sim_characters,
     }
+
+
+@app.post("/api/time/advance")
+async def api_time_advance(req: TimeAdvanceRequest):
+    """Skip simulated time forward (for testing routines / day-night)."""
+    try:
+        from routine import clock_info
+
+        async with _sim_lock:
+            sim_time = get_world_simulator().advance_time(get_world(), req.hours)
+        return {"ok": True, "sim_time": sim_time, "clock": clock_info(sim_time)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+class BuildRequest(BaseModel):
+    archetype: str
+    x: int
+    y: int
+    actor: str = ""
+
+
+def _player_name(world) -> str:
+    player = get_player(world)
+    if player is None:
+        raise HTTPException(status_code=404, detail="No player character in the current world")
+    return player["name"]
+
+
+@app.get("/api/build/blueprints")
+def api_build_blueprints(actor: str = ""):
+    """Blueprints the actor could place in their current zone (with availability / reason)."""
+    from action import get_person_location
+    from building import list_blueprints
+
+    world = get_world()
+    who = actor.strip() or _player_name(world)
+    loc = get_person_location(world, who)
+    if not loc:
+        raise HTTPException(status_code=404, detail=f"{who} has no location")
+    return {"actor": who, "location": loc, "blueprints": list_blueprints(world, who, loc)}
+
+
+@app.post("/api/build")
+async def api_build(req: BuildRequest):
+    """Place a blueprint (construction site) on the actor's current zone grid."""
+    from building import place_blueprint
+
+    async with _sim_lock:
+        world = get_world()
+        who = req.actor.strip() or _player_name(world)
+        result = place_blueprint(world, who, req.archetype.strip(), req.x, req.y)
+        if result.get("success"):
+            get_world_simulator().announce(result["message"])
+    return result
 
 
 @app.post("/api/simulation/stop")

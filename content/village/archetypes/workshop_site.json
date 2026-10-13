@@ -1,0 +1,31 @@
+{
+  "archetype": "workshop_site",
+  "extends": "construction_site",
+  "name": "WorkshopSite",
+  "footprint": [3, 2],
+  "description": "Stakes and string mark where a Workshop will stand. Needs logs and stone.",
+  "blueprint": {
+    "label": "Workshop",
+    "description": "Saws logs into planks. Needs 8 logs, 5 stone.",
+    "zone_tags": ["build"],
+    "order": 10
+  },
+  "script": {
+    "initial_state": { "need_log": 8, "need_stone": 5 },
+    "on_tick": [
+      {
+        "op": "rule",
+        "id": "built",
+        "when": [
+          { "op": "prop_lte", "entity": "@self", "prop": "need_log", "value": 0 },
+          { "op": "prop_lte", "entity": "@self", "prop": "need_stone", "value": 0 }
+        ],
+        "do": [
+          { "op": "spawn_item", "archetype": "workbench", "located_at": "@here", "x": "@self.x", "y": "@self.y" },
+          { "op": "delete_entity", "entity": "@self" }
+        ],
+        "announce": "A Workshop is finished in @here! Its bench saws logs into planks."
+      }
+    ]
+  }
+}

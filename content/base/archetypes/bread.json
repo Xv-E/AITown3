@@ -1,0 +1,8 @@
+{
+  "archetype": "bread",
+  "name": "Bread",
+  "item_kind": "food",
+  "portable": true,
+  "value": 10,
+  "description": "A loaf of bread."
+}

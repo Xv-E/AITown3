@@ -1,0 +1,13 @@
+{
+  "name": "sleep",
+  "description": "Lie down and sleep until the routine says it is time to get up",
+  "duration": 1.0,
+  "params": [
+    { "name": "c", "type": "Person", "source": "self" }
+  ],
+  "requires": [
+    { "op": "prop_gte", "entity": "@c", "label": "Person", "prop": "hp", "value": 1, "message": "@c is dead" }
+  ],
+  "effects": [],
+  "enter_state": "asleep"
+}

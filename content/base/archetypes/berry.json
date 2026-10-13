@@ -1,0 +1,21 @@
+{
+  "archetype": "berry",
+  "name": "Berry",
+  "item_kind": "berry",
+  "portable": true,
+  "value": 5,
+  "description": "Wild berries — roast them on a fire.",
+  "effects_on": [
+    {
+      "target": "kind:campfire",
+      "consume": true,
+      "preconditions": [
+        { "op": "prop_gte", "entity": "@target", "label": "Item", "prop": "fuel", "value": 1 }
+      ],
+      "ops": [
+        { "op": "add_prop", "entity": "@target", "label": "Item", "prop": "fuel", "delta": -2 },
+        { "op": "spawn_item", "archetype": "roast", "held_by": "@actor" }
+      ]
+    }
+  ]
+}

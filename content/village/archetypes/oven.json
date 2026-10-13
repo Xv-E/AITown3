@@ -1,0 +1,13 @@
+{
+  "archetype": "oven",
+  "name": "Bakery",
+  "item_kind": "oven",
+  "portable": false,
+  "value": 0,
+  "footprint": [3, 2],
+  "description": "A warm bakery around a clay oven. Put wheat in it to bake bread.",
+  "accepts_from": ["kind:grain"],
+  "script": {
+    "lore": "The bakery's oven turns wheat into bread. The villagers no longer have to go hungry."
+  }
+}

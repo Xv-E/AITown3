@@ -1,0 +1,22 @@
+{
+  "name": "move",
+  "capability": "travel",
+  "description": "Walk from the current location to an adjacent one",
+  "duration": 1.0,
+  "params": [
+    { "name": "c", "type": "Person", "source": "self" },
+    { "name": "from", "type": "Location", "source": "here" },
+    { "name": "to", "type": "Location", "source": "adjacent" }
+  ],
+  "requires": [
+    { "op": "person_at", "person": "@c", "location": "@from" },
+    { "op": "has_rel", "a": "@from", "b": "@to", "rel": "ADJACENT_TO", "directed": true,
+      "message": "@from cannot reach @to" }
+  ],
+  "effects": [
+    { "op": "relocate", "entity": "@c", "label": "Person", "to": "@to" },
+    { "op": "link", "a": "@c", "a_label": "Person", "b": "@to", "b_label": "Location", "rel": "VISITED" }
+  ],
+  "pddl_preconditions": ["(at ?c ?from)", "(adjacent ?from ?to)"],
+  "pddl_effects": ["(not (at ?c ?from))", "(at ?c ?to)", "(visited ?c ?to)"]
+}

@@ -1,0 +1,8 @@
+{
+  "exclude_actions": ["attack", "talk", "sleep", "wait"],
+  "actions": {
+    "use_item": { "drop_effects": ["set_prop:mood"] }
+  },
+  "spawn_pool_by": { "plank": 4, "loaf": 2 },
+  "fallback": ["Collect item"]
+}

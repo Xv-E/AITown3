@@ -1,0 +1,216 @@
+{
+  "id": "market_town",
+  "title": "Market Town",
+  "premise": "A small market town with a general stall, a tavern kitchen, a warehouse, and a farm. People work by day and sleep at night. When the stall sells out, someone has to restock it; when customers order food, someone has to cook and serve it.",
+  "locations": [
+    {
+      "name": "TownSquare",
+      "description": "The town's central square. Every road starts here.",
+      "tags": "hub,social"
+    },
+    {
+      "name": "Market",
+      "description": "An open-air market with a general goods stall.",
+      "tags": "work,shop"
+    },
+    {
+      "name": "Tavern",
+      "description": "A warm tavern with a kitchen stove and an order counter.",
+      "tags": "work,food,social"
+    },
+    {
+      "name": "Warehouse",
+      "description": "A dusty warehouse where crates of goods are delivered.",
+      "tags": "work,storage"
+    },
+    {
+      "name": "Farm",
+      "description": "Vegetable fields just outside town.",
+      "tags": "work,food"
+    },
+    {
+      "name": "Cottages",
+      "description": "A row of small cottages where the townsfolk sleep.",
+      "tags": "home,rest"
+    }
+  ],
+  "adjacencies": [
+    { "a": "TownSquare", "b": "Market" },
+    { "a": "TownSquare", "b": "Tavern" },
+    { "a": "TownSquare", "b": "Warehouse" },
+    { "a": "TownSquare", "b": "Cottages" },
+    { "a": "Warehouse", "b": "Farm" }
+  ],
+  "persons": [
+    {
+      "name": "Traveler",
+      "located_at": "TownSquare",
+      "role": "player",
+      "personality": "curious, polite",
+      "background": "A traveler passing through with a few coins.",
+      "goal": "See how the town works",
+      "values": "curiosity",
+      "mood": "curious",
+      "hp": 100,
+      "power_level": 5,
+      "speech_style": "friendly"
+    },
+    {
+      "name": "Mira",
+      "located_at": "Cottages",
+      "role": "npc",
+      "personality": "shrewd, cheerful, organised",
+      "background": "Runs the general goods stall at the Market. Hates an empty shelf.",
+      "goal": "Keep the stall stocked and the customers happy",
+      "values": "diligence,fairness",
+      "mood": "cheerful",
+      "hp": 100,
+      "power_level": 6,
+      "speech_style": "brisk and warm",
+      "secret_policy": "share_gossip",
+      "trust_toward_player": 3,
+      "works_at": "Market",
+      "knows": { "places": ["TownSquare", "Market", "Tavern", "Warehouse", "Farm"] },
+      "routine": [
+        { "start": 6, "end": 7.5, "location": "Cottages", "activity": "wake up and get ready", "goal": "Go to location" },
+        { "start": 7.5, "end": 19, "location": "Market", "activity": "run the stall", "goal": "Go to location", "social": true },
+        { "start": 19, "end": 21.5, "location": "Tavern", "activity": "dinner and gossip", "goal": "Go to location", "social": true },
+        { "start": 21.5, "end": 6, "location": "Cottages", "activity": "sleep", "action": "sleep" }
+      ]
+    },
+    {
+      "name": "Bruno",
+      "located_at": "Cottages",
+      "role": "npc",
+      "personality": "gruff, proud of his cooking, generous",
+      "background": "The tavern cook. Cooks whatever is ordered at the counter.",
+      "goal": "Feed everyone who orders",
+      "values": "craft,hospitality",
+      "mood": "content",
+      "hp": 110,
+      "power_level": 8,
+      "speech_style": "short and gruff",
+      "secret_policy": "share_gossip",
+      "trust_toward_player": 2,
+      "works_at": "Tavern",
+      "knows": { "places": ["TownSquare", "Market", "Tavern", "Warehouse", "Farm"] },
+      "routine": [
+        { "start": 6, "end": 7, "location": "Cottages", "activity": "wake up", "goal": "Go to location" },
+        { "start": 7, "end": 22, "location": "Tavern", "activity": "run the kitchen", "goal": "Go to location", "social": true },
+        { "start": 22, "end": 6, "location": "Cottages", "activity": "sleep", "action": "sleep" }
+      ]
+    },
+    {
+      "name": "Tilda",
+      "located_at": "Cottages",
+      "role": "npc",
+      "personality": "hard-working, talkative, always hungry",
+      "background": "A farmer who works the fields and eats at the tavern.",
+      "goal": "Grow good vegetables and never miss a meal",
+      "values": "hard work,community",
+      "mood": "calm",
+      "hp": 90,
+      "power_level": 7,
+      "speech_style": "chatty",
+      "secret_policy": "share_gossip",
+      "trust_toward_player": 4,
+      "works_at": "Farm",
+      "knows": { "places": ["TownSquare", "Market", "Tavern", "Warehouse", "Farm"] },
+      "routine": [
+        { "start": 6, "end": 12, "location": "Farm", "activity": "tend the fields", "goal": "Go to location" },
+        { "start": 12, "end": 13, "location": "Tavern", "activity": "order lunch", "goal": "Use item on", "target_entity": "OrderBoard", "item_kind": "coin", "once": true, "social": true },
+        { "start": 13, "end": 14, "location": "Tavern", "activity": "eat lunch", "goal": "Use item", "item_kind": "meal", "once": true, "social": true },
+        { "start": 14, "end": 18, "location": "Farm", "activity": "afternoon field work", "goal": "Go to location" },
+        { "start": 18, "end": 19, "location": "Tavern", "activity": "order dinner", "goal": "Use item on", "target_entity": "OrderBoard", "item_kind": "coin", "once": true, "social": true },
+        { "start": 19, "end": 21, "location": "Tavern", "activity": "eat dinner and chat", "goal": "Use item", "item_kind": "meal", "once": true, "social": true },
+        { "start": 21, "end": 6, "location": "Cottages", "activity": "sleep", "action": "sleep" }
+      ]
+    }
+  ],
+  "items": [
+    {
+      "name": "MarketStall",
+      "archetype": "shop_stall",
+      "located_at": "Market",
+      "description": "Mira's general goods stall. Pay a coin to get bread."
+    },
+    {
+      "name": "WarehouseSupply",
+      "value": 0,
+      "located_at": "Warehouse",
+      "item_kind": "source",
+      "portable": false,
+      "description": "Deliveries keep a few crates in the warehouse.",
+      "script": {
+        "lore": "Carts drop off new crates whenever the warehouse runs low.",
+        "on_tick": [
+          { "op": "ensure_kind", "item_kind": "crate", "min": 2, "at": "Warehouse", "prefix": "Crate",
+            "spawn": { "archetype": "crate" } }
+        ]
+      }
+    },
+    {
+      "name": "FarmField",
+      "value": 0,
+      "located_at": "Farm",
+      "item_kind": "source",
+      "portable": false,
+      "description": "Rows of vegetables ready to be picked.",
+      "script": {
+        "lore": "Fresh vegetables keep growing; anyone can pick them for the kitchen.",
+        "on_tick": [
+          { "op": "ensure_kind", "item_kind": "ingredient", "min": 3, "at": "Farm", "prefix": "Vegetable",
+            "spawn": { "archetype": "vegetable" } }
+        ]
+      }
+    },
+    {
+      "name": "Stove",
+      "archetype": "stove",
+      "located_at": "Tavern",
+      "description": "The tavern's iron stove. Turns ingredients into hot meals."
+    },
+    {
+      "name": "OrderBoard",
+      "archetype": "order_board",
+      "located_at": "Tavern"
+    },
+    { "name": "Coin1", "archetype": "coin", "held_by": "Traveler" },
+    { "name": "Coin2", "archetype": "coin", "held_by": "Traveler" },
+    { "name": "Coin3", "archetype": "coin", "held_by": "Traveler" },
+    { "name": "Coin4", "archetype": "coin", "held_by": "Tilda" },
+    { "name": "Coin5", "archetype": "coin", "held_by": "Tilda" }
+  ],
+  "quests": [
+    {
+      "name": "LivingTown",
+      "description": "No single win — watch the town's daily rhythm and poke at it.",
+      "stage": "living",
+      "state": "active",
+      "objective": "Buy out the stall, order food, and watch people react on their own.",
+      "involves": ["Mira", "Bruno", "Tilda", "MarketStall", "OrderBoard"],
+      "giver": "Mira"
+    }
+  ],
+  "facts": [
+    {
+      "name": "BreadForACoin",
+      "text": "Mira's stall sells bread for one coin; crates from the Warehouse restock it.",
+      "secret_level": 0,
+      "known_by": ["Mira", "Bruno", "Tilda", "Traveler"]
+    },
+    {
+      "name": "TavernOrders",
+      "text": "Pay a coin at the tavern OrderBoard and Bruno cooks a meal from farm vegetables.",
+      "secret_level": 0,
+      "known_by": ["Mira", "Bruno", "Tilda", "Traveler"]
+    }
+  ],
+  "rumors": [],
+  "social": [
+    { "a": "Mira", "rel": "KNOWS", "b": "Bruno" },
+    { "a": "Mira", "rel": "KNOWS", "b": "Tilda" },
+    { "a": "Bruno", "rel": "KNOWS", "b": "Tilda" },
+    { "a": "Tilda", "rel": "FRIENDS_WITH", "b": "Bruno" }
+  ]
+}

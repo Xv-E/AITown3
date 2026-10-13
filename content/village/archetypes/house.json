@@ -1,0 +1,12 @@
+{
+  "archetype": "house",
+  "name": "House",
+  "item_kind": "house",
+  "portable": false,
+  "value": 0,
+  "footprint": [2, 2],
+  "description": "A small plank house with a stone hearth.",
+  "script": {
+    "lore": "A home for a settler family. Each new house means the village is growing."
+  }
+}

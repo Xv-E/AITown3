@@ -24,6 +24,45 @@ def resolve_token(token: Any, ctx: Dict[str, str]) -> Any:
     return token
 
 
+class _GraphCtx(dict):
+    """占位符上下文；支持 `@target.prop` / `@actor.prop` 读取实体属性。"""
+
+    def __init__(self, world, base: Dict[str, str]):
+        super().__init__(base)
+        self._world = world
+
+    def _lookup(self, key: str) -> Any:
+        head, _, prop = key.partition(".")
+        if not prop or not dict.__contains__(self, head):
+            raise KeyError(key)
+        entity = dict.__getitem__(self, head)
+        for label in ("Item", "Person", "Location"):
+            if self._world.get_entity_by_name(entity, label=label):
+                value = get_property(self._world, entity, label, prop)
+                if value is None:
+                    raise KeyError(key)
+                return value
+        raise KeyError(key)
+
+    def __contains__(self, key: object) -> bool:
+        if dict.__contains__(self, key):
+            return True
+        try:
+            self._lookup(str(key))
+            return True
+        except KeyError:
+            return False
+
+    def __missing__(self, key: str) -> Any:
+        return self._lookup(key)
+
+
+def _with_world(world, ctx: Dict[str, str]) -> Dict[str, str]:
+    if isinstance(ctx, _GraphCtx) or world is None:
+        return ctx
+    return _GraphCtx(world, ctx)
+
+
 def _ctx(
     *,
     actor: str,
@@ -40,6 +79,27 @@ def _ctx(
 
 
 def check_condition(world, cond: Dict[str, Any], ctx: Dict[str, str]) -> Tuple[bool, str]:
+    """条件可带 "message"（失败时的说明，支持 @占位符）。"""
+    ctx = _with_world(world, ctx)
+    ok, reason = _check_condition(world, cond, ctx)
+    if not ok and cond.get("message"):
+        reason = render_text(str(cond["message"]), ctx)
+    return ok, reason
+
+
+def render_text(text: str, ctx: Dict[str, str]) -> str:
+    import re
+
+    def sub(m: "re.Match[str]") -> str:
+        try:
+            return str(resolve_token(m.group(0), ctx))
+        except Exception:
+            return m.group(0)
+
+    return re.sub(r"@[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?", sub, text)
+
+
+def _check_condition(world, cond: Dict[str, Any], ctx: Dict[str, str]) -> Tuple[bool, str]:
     op = (cond.get("op") or "").strip()
     try:
         if op == "prop_eq":
@@ -61,11 +121,12 @@ def check_condition(world, cond: Dict[str, Any], ctx: Dict[str, str]) -> Tuple[b
             prop = cond["prop"]
             want = cond.get("value")
             got = get_property(world, entity, label, prop)
-            if isinstance(want, bool):
+            # strict：只有真等于 value 才算（未设置的属性不等于 false）
+            if isinstance(want, bool) and not cond.get("strict"):
                 if bool(got) == want:
-                    return False, f"{entity}.{prop} should not be {want}"
+                    return False, cond.get("message") or f"{entity}.{prop} should not be {want}"
             elif got == want:
-                return False, f"{entity}.{prop} should not be {want}"
+                return False, cond.get("message") or f"{entity}.{prop} should not be {want}"
             return True, "ok"
 
         if op == "prop_gte":
@@ -111,8 +172,73 @@ def check_condition(world, cond: Dict[str, Any], ctx: Dict[str, str]) -> Tuple[b
             a_label = cond.get("a_label") or "Location"
             b_label = cond.get("b_label") or "Location"
             rel = cond.get("rel") or "ADJACENT_TO"
-            if not world.has_relationship(a, a_label, b, b_label, rel):
-                return False, f"Missing relationship {a}-[{rel}]->{b}"
+            has = world.has_directed_relationship if cond.get("directed") else world.has_relationship
+            if not has(a, a_label, b, b_label, rel):
+                return False, cond.get("message") or f"Missing relationship {a}-[{rel}]->{b}"
+            return True, "ok"
+
+        if op == "any":
+            reasons = []
+            for sub in cond.get("of") or []:
+                ok, why = check_condition(world, sub, ctx)
+                if ok:
+                    return True, "ok"
+                reasons.append(why)
+            return False, cond.get("message") or " / ".join(reasons) or "no alternative holds"
+
+        if op == "prop_in":
+            # values 里任一匹配；prefix=true 时按前缀匹配（均不区分大小写）
+            entity = resolve_token(cond["entity"], ctx)
+            label = cond.get("label") or "Item"
+            prop = cond["prop"]
+            got = entity if prop == "name" else get_property(world, entity, label, prop)
+            got_s = str(got or "").lower()
+            values = [str(v).lower() for v in cond.get("values") or []]
+            hit = any(got_s.startswith(v) for v in values) if cond.get("prefix") else got_s in values
+            if not hit:
+                return False, cond.get("message") or f"{entity}.{prop}={got} not in {values}"
+            return True, "ok"
+
+        if op == "neq":
+            a = resolve_token(cond["a"], ctx)
+            b = resolve_token(cond["b"], ctx)
+            if a == b:
+                return False, cond.get("message") or f"{a} must differ from {b}"
+            return True, "ok"
+
+        if op == "not_held":
+            item = resolve_token(cond["item"], ctx)
+            holder = get_item_holder(world, item)
+            if holder is not None:
+                return False, f"{item} is already held by {holder}"
+            return True, "ok"
+
+        if op == "prop_lte":
+            entity = resolve_token(cond["entity"], ctx)
+            label = cond.get("label") or "Item"
+            prop = cond["prop"]
+            want = float(cond.get("value") or 0)
+            got = get_property(world, entity, label, prop)
+            try:
+                got_n = float(got if got is not None else 0)
+            except (TypeError, ValueError):
+                return False, f"{entity}.{prop} is not numeric: {got}"
+            if got_n > want:
+                return False, cond.get("message") or f"{entity}.{prop}={got_n} > {want}"
+            return True, "ok"
+
+        if op == "count":
+            # 统计物品数：按 archetype / kind（可多个），可限定 location；gte / lte 比较
+            n = count_items(
+                world,
+                archetypes=_as_list(cond.get("archetype")),
+                kinds=_as_list(cond.get("kind")),
+                location=resolve_token(cond["location"], ctx) if cond.get("location") else None,
+            )
+            if cond.get("gte") is not None and n < int(cond["gte"]):
+                return False, cond.get("message") or f"Need at least {cond['gte']} (have {n})"
+            if cond.get("lte") is not None and n > int(cond["lte"]):
+                return False, cond.get("message") or f"Need at most {cond['lte']} (have {n})"
             return True, "ok"
 
         if op == "not_has_rel":
@@ -130,8 +256,63 @@ def check_condition(world, cond: Dict[str, Any], ctx: Dict[str, str]) -> Tuple[b
         return False, str(e)
 
 
+def _as_list(raw: Any) -> List[str]:
+    if raw is None or raw == "":
+        return []
+    items = raw if isinstance(raw, list) else [raw]
+    return [str(x).strip().lower() for x in items if str(x).strip()]
+
+
+def count_items(
+    world,
+    *,
+    archetypes: Optional[List[str]] = None,
+    kinds: Optional[List[str]] = None,
+    location: Optional[str] = None,
+) -> int:
+    rows = world.run_query(
+        """
+        MATCH (i:Item)
+        OPTIONAL MATCH (i)-[:LOCATED_AT]->(l:Location)
+        WHERE $loc IS NULL OR l.name = $loc
+        WITH i, l
+        WHERE ($loc IS NULL OR l IS NOT NULL)
+          AND (size($arch) = 0 OR toLower(coalesce(i.archetype, '')) IN $arch)
+          AND (size($kinds) = 0 OR toLower(coalesce(i.item_kind, '')) IN $kinds)
+        RETURN count(i) AS n
+        """,
+        loc=location,
+        arch=archetypes or [],
+        kinds=kinds or [],
+    ) or []
+    return int(rows[0]["n"]) if rows else 0
+
+
+def _place_spawned(world, name: str, op_spec: Dict[str, Any], ctx) -> None:
+    """格子坐标：显式 x/y（可用 @self.x）原样写入；否则靠近 near 实体，或找区域中心附近空位。"""
+    import spatial
+
+    if op_spec.get("x") is not None and op_spec.get("y") is not None:
+        try:
+            x = int(float(resolve_token(op_spec["x"], ctx)))
+            y = int(float(resolve_token(op_spec["y"], ctx)))
+        except (TypeError, ValueError, KeyError):
+            x = y = None  # type: ignore[assignment]
+        if x is not None and y is not None:
+            world.run_query("MATCH (i:Item {name: $n}) SET i.x = $x, i.y = $y", n=name, x=x, y=y)
+            return
+    near = None
+    if op_spec.get("near"):
+        try:
+            near = spatial.entity_cell(world, str(resolve_token(op_spec["near"], ctx)))
+        except (KeyError, ValueError):
+            near = None
+    spatial.place_item(world, name, near=near)
+
+
 def apply_op(world, op_spec: Dict[str, Any], ctx: Dict[str, str]) -> None:
     op = (op_spec.get("op") or "").strip()
+    ctx = _with_world(world, ctx)
 
     if op == "set_prop":
         entity = resolve_token(op_spec["entity"], ctx)
@@ -145,9 +326,9 @@ def apply_op(world, op_spec: Dict[str, Any], ctx: Dict[str, str]) -> None:
         entity = resolve_token(op_spec["entity"], ctx)
         label = op_spec.get("label") or "Item"
         prop = op_spec["prop"]
-        delta = op_spec.get("delta", 0)
+        delta = resolve_token(op_spec.get("delta", 0), ctx)
         try:
-            delta_n = float(delta)
+            delta_n = float(delta) * float(op_spec.get("scale", 1))
         except (TypeError, ValueError):
             delta_n = 0.0
         cur = get_property(world, entity, label, prop)
@@ -156,6 +337,10 @@ def apply_op(world, op_spec: Dict[str, Any], ctx: Dict[str, str]) -> None:
         except (TypeError, ValueError):
             cur_n = 0.0
         new_v = cur_n + delta_n
+        if op_spec.get("min") is not None:
+            new_v = max(float(op_spec["min"]), new_v)
+        if op_spec.get("max") is not None:
+            new_v = min(float(op_spec["max"]), new_v)
         # 整数属性保持 int（fuel 等）
         if float(new_v).is_integer():
             new_v = int(new_v)
@@ -163,7 +348,12 @@ def apply_op(world, op_spec: Dict[str, Any], ctx: Dict[str, str]) -> None:
         return
 
     if op == "spawn_item":
-        # 在地点生成或交到角色手上；name 已存在则自动加后缀
+        # 在地点生成或交到角色手上；name 已存在则自动加后缀；可用 "archetype" 套原型
+        archetype = str(op_spec.get("archetype") or "")
+        if archetype:
+            from content import apply_archetype
+
+            op_spec = apply_archetype(dict(op_spec))
         base_name = str(resolve_token(op_spec.get("name") or "Item", ctx))
         name = base_name
         n = 1
@@ -181,14 +371,23 @@ def apply_op(world, op_spec: Dict[str, Any], ctx: Dict[str, str]) -> None:
             props["value"] = int(op_spec.get("value") or 0)
         if op_spec.get("description"):
             props["description"] = str(op_spec.get("description"))
-        if op_spec.get("effects_on") is not None:
-            import json
+        if archetype:
+            props["archetype"] = archetype
+        if op_spec.get("footprint") is not None:
+            import spatial
 
-            props["effects_on"] = (
-                op_spec["effects_on"]
-                if isinstance(op_spec["effects_on"], str)
-                else json.dumps(op_spec["effects_on"], ensure_ascii=False)
-            )
+            props["footprint_w"], props["footprint_h"] = spatial.footprint_of(op_spec)
+        import json
+
+        for key in ("effects_on", "accepts_from", "script"):
+            if op_spec.get(key) is not None:
+                raw = op_spec[key]
+                props[key] = raw if isinstance(raw, str) else json.dumps(raw, ensure_ascii=False)
+        script = op_spec.get("script")
+        init = script.get("initial_state") if isinstance(script, dict) else None
+        for k, v in (init or {}).items():
+            if k not in props and k != "name" and isinstance(v, (str, int, float, bool)):
+                props[k] = v
         world.add_entity(name, entity_type="Item", **props)
         held_by = op_spec.get("held_by")
         located_at = op_spec.get("located_at")
@@ -198,6 +397,26 @@ def apply_op(world, op_spec: Dict[str, Any], ctx: Dict[str, str]) -> None:
         elif located_at:
             loc = resolve_token(located_at, ctx)
             world.link_entities(name, "Item", loc, "Location", "LOCATED_AT")
+            _place_spawned(world, name, op_spec, ctx)
+        return
+
+    if op == "spawn_location":
+        # 新地点（已存在则只补连通）；adjacent_to 可为单个或列表，默认双向连通
+        name = str(resolve_token(op_spec["name"], ctx))
+        if not world.get_entity_by_name(name, label="Location"):
+            props = {"description": str(op_spec.get("description") or "")}
+            if op_spec.get("tags"):
+                props["tags"] = str(op_spec["tags"])
+            world.add_entity(name, entity_type="Location", **props)
+        adj = op_spec.get("adjacent_to") or []
+        for other in adj if isinstance(adj, list) else [adj]:
+            other = str(resolve_token(other, ctx))
+            if not world.has_directed_relationship(name, "Location", other, "Location", "ADJACENT_TO"):
+                world.link_entities(name, "Location", other, "Location", "ADJACENT_TO")
+            if op_spec.get("bidirectional", True) and not world.has_directed_relationship(
+                other, "Location", name, "Location", "ADJACENT_TO"
+            ):
+                world.link_entities(other, "Location", name, "Location", "ADJACENT_TO")
         return
 
     if op == "link":
@@ -244,6 +463,26 @@ def apply_op(world, op_spec: Dict[str, Any], ctx: Dict[str, str]) -> None:
         world.delete_entity(entity, label=label)
         return
 
+    if op == "relocate":
+        # 把实体从任何地方（地点 / 持有者）挪到 to
+        entity = resolve_token(op_spec["entity"], ctx)
+        label = op_spec.get("label") or "Item"
+        to = resolve_token(op_spec["to"], ctx)
+        world.run_query(
+            f"MATCH (n:{label} {{name: $n}})-[r:LOCATED_AT]->() DELETE r", n=entity
+        )
+        if label == "Item":
+            world.run_query("MATCH (:Person)-[r:HAS_ITEM]->(i:Item {name: $n}) DELETE r", n=entity)
+        world.link_entities(entity, label, to, "Location", "LOCATED_AT")
+        return
+
+    if op == "set_state":
+        # 角色持续状态（内容包 states/ 定义）；state 为空 = 清除
+        entity = resolve_token(op_spec["entity"], ctx)
+        state = op_spec.get("state") or None
+        set_property(world, entity, "Person", "state", state)
+        return
+
     raise ValueError(f"Unknown operation primitive: {op}")
 
 
@@ -256,7 +495,12 @@ def check_all(world, conditions: List[Dict[str, Any]], ctx: Dict[str, str]) -> T
 
 
 def apply_all(world, ops: List[Dict[str, Any]], ctx: Dict[str, str]) -> None:
+    """依次执行；带 "when": [条件...] 的操作只在条件全部成立时执行。"""
+    ctx = _with_world(world, ctx)
     for op_spec in ops or []:
+        when = op_spec.get("when")
+        if when and not check_all(world, when, ctx)[0]:
+            continue
         apply_op(world, op_spec, ctx)
 
 

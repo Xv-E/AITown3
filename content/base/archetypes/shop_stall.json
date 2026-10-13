@@ -1,0 +1,22 @@
+{
+  "archetype": "shop_stall",
+  "item_kind": "stall",
+  "portable": false,
+  "value": 0,
+  "description": "A goods stall. Pay a coin to get bread.",
+  "accepts_from": ["kind:coin", "kind:crate"],
+  "script": {
+    "lore": "The stall sells bread for a coin. Each crate of goods restocks three loaves.",
+    "initial_state": { "stock": 2 },
+    "alerts": [
+      {
+        "when": { "prop_lte": ["stock", 0] },
+        "signal": "urgent",
+        "message": "The stall is sold out — it needs a crate of goods.",
+        "use_on": true,
+        "prefer_kind": "crate",
+        "audience": "works_at"
+      }
+    ]
+  }
+}

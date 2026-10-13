@@ -21,7 +21,10 @@ ITEM_GOALS = frozenset({
     "Enhance capabilities",
 })
 USE_ON_GOALS = frozenset({"Use item on"})
+USE_SELF_GOALS = frozenset({"Use item"})
 INTERACT_GOALS = frozenset({"Interact with"})
+# target_entity = 内容包里只需本人参与的动作名（如 sleep）
+PERFORM_GOALS = frozenset({"Perform action"})
 
 
 @dataclass
@@ -70,6 +73,35 @@ def _holds_item(world: "Neo4jWorld", person: str, item: str) -> bool:
     return bool(rows)
 
 
+def get_accepts_from(world: "Neo4jWorld", name: str, label: str) -> List[str]:
+    rows = world.run_query(
+        f"MATCH (e:{label} {{name: $n}}) RETURN e.accepts_from AS a LIMIT 1",
+        n=name,
+    )
+    raw = rows[0].get("a") if rows else None
+    if isinstance(raw, str):
+        try:
+            import json
+
+            raw = json.loads(raw)
+        except Exception:
+            raw = []
+    return [str(x) for x in (raw or []) if x]
+
+
+def _holds_kind(world: "Neo4jWorld", person: str, kind: str) -> bool:
+    rows = world.run_query(
+        """
+        MATCH (p:Person {name: $c})-[:HAS_ITEM]->(i:Item)
+        WHERE toLower(coalesce(i.item_kind, '')) = $k
+        RETURN i.name AS n LIMIT 1
+        """,
+        c=person,
+        k=kind.lower(),
+    )
+    return bool(rows)
+
+
 def _visited(world: "Neo4jWorld", person: str, loc: str) -> bool:
     rows = world.run_query(
         "MATCH (p:Person {name: $n})-[:VISITED]->(l:Location {name: $loc}) RETURN l.name AS n LIMIT 1",
@@ -114,6 +146,24 @@ def sanitize_goal_target(
             return None, f"Unknown location: {t}"
         return t, None
 
+    if t.startswith("kind:") and goal in ITEM_GOALS | USE_SELF_GOALS:
+        return t, None
+
+    if goal in PERFORM_GOALS:
+        from registry import get_registry
+
+        action = get_registry().get(t)
+        if action is None:
+            return None, f"Unknown action: {t}"
+        if len(action.parameters) != 1:
+            return None, f"{t} needs more than the actor; it cannot be a self action"
+        return t, None
+
+    if goal in USE_SELF_GOALS:
+        if not _entity_exists(world, t, "Item"):
+            return None, f"Unknown item: {t}"
+        return t, None
+
     if goal in ITEM_GOALS:
         if not _entity_exists(world, t, "Item"):
             return None, f"Unknown item: {t}"
@@ -141,6 +191,9 @@ def sanitize_goal_target(
                     return t, None
         except Exception:
             pass
+        for label in ("Item", "Person"):
+            if _entity_exists(world, t, label) and get_accepts_from(world, t, label):
+                return t, None
         if not _entity_exists(world, t, "Item"):
             return None, f"Unknown interaction target: {t}"
         rows = world.run_query(
@@ -190,6 +243,8 @@ def is_goal_satisfied(
         if goal == "Explore unknown location":
             return _visited(world, character, target_entity)
     if goal in ITEM_GOALS and target_entity:
+        if target_entity.startswith("kind:"):
+            return _holds_kind(world, character, target_entity[len("kind:"):])
         return _holds_item(world, character, target_entity)
     if goal in USE_ON_GOALS and target_entity:
         # 人物目标：交互仍可用则未满足（例如尚未用药）
@@ -235,6 +290,13 @@ def is_goal_satisfied(
         return False
     if goal == "Defeat enemy" and target_entity:
         return _is_dead(world, target_entity)
+    if goal in PERFORM_GOALS and target_entity:
+        # 进入持续状态的动作：已在该状态即满足
+        from action import get_property
+        from registry import get_registry
+
+        enter = getattr(get_registry().get(target_entity), "enter_state", None)
+        return bool(enter) and get_property(world, character, "Person", "state") == enter
     return False
 
 
@@ -273,7 +335,10 @@ def assess_goal(
     cleaned["target_entity"] = target
     if err and raw_target:
         cleaned["confidence"] = float(cleaned.get("confidence") or 0.5) * 0.5
-        if goal in SOCIAL_GOALS | LOCATION_GOALS | ITEM_GOALS | USE_ON_GOALS | INTERACT_GOALS:
+        if goal in (
+            SOCIAL_GOALS | LOCATION_GOALS | ITEM_GOALS | USE_ON_GOALS | USE_SELF_GOALS
+            | INTERACT_GOALS | PERFORM_GOALS
+        ):
             return FeasibilityResult(ok=False, goal_data=cleaned, reason=err)
 
     if is_goal_satisfied(

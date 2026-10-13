@@ -27,8 +27,18 @@ class PromptBuilder:
         memory_limit: int = 16,
         sim_time: Optional[float] = None,
     ) -> str:
-        """规划/决策共用：周围节点 + 已知事实 + 最近记忆。"""
-        parts = [
+        """规划/决策共用：触发原因 + 周围节点 + 已知事实 + 最近记忆。"""
+        parts: List[str] = []
+        trigger_text = getattr(agent, "_trigger_context", "") or ""
+        if trigger_text:
+            parts += [
+                "=== Why You Are Deciding Now ===",
+                trigger_text,
+                "Decide whether this changes what you should do. "
+                "If your current goal is still best, choose it again.",
+                "",
+            ]
+        parts += [
             "=== Nearby Graph (current place) ===",
             self._get_local_graph_text(agent),
             "",
@@ -57,7 +67,8 @@ class PromptBuilder:
         available_entities = self._get_available_entities_text()
         recent_actions = self._get_recent_actions_text(agent)
 
-        prompt = f"""You live in a small production camp that survives by chopping wood, gathering berries, keeping the campfire lit, and cooking meals together. Decide the next goal from work, fire, food, and people.
+        prompt = f"""{self._get_world_premise()}
+Decide the next goal from your work, the needs of the world around you, food, rest, and people.
 
 === Character Status ===
 {status}
@@ -72,10 +83,10 @@ class PromptBuilder:
 
 === Task Context ===
 Persona is fixed; goals are chosen each time from the situation.
-Keep the campfire burning — if fuel is low, fetch wood and use it on the Campfire.
-At meal times, bring berries to the Campfire to roast, then eat (use food items).
-Interactive mechanisms use goal "Interact with" plus interact_action (e.g. chop, turn_clockwise) when temporary actions are listed nearby; the plan binds that specific action, not a vague auto pick.
-Stories emerge from shared work: delayed wood, who forgot the fire, who found extra berries, secrets told at night.
+When something in the world needs attention and it fits your role, use "Use item on" that thing; the planner fetches or crafts the needed materials.
+To eat or consume something, use "Use item" with the item.
+Interactive mechanisms use goal "Interact with" plus interact_action when temporary actions are listed nearby; the plan binds that specific action, not a vague auto pick.
+Stories emerge from shared work, shortages, favours, and secrets.
 
 {self._get_task_instructions(task_instructions)}
 
@@ -89,8 +100,8 @@ Stories emerge from shared work: delayed wood, who forgot the fire, who found ex
 
         prompt += f"""
 === Instructions ===
-1. Prefer fire safety and meal routines when relevant; otherwise follow your work routine
-2. Collect wood in Forest (Interact with OakTree + interact_action=chop when listed); collect berries in BerryGrove; Use item on Campfire to fuel or cook
+1. Handle urgent needs that belong to your role; otherwise follow your routine
+2. Use the known ways to make things when you need a product
 3. If someone is here, talking ("Gain information") can start small personal stories
 4. The goal must be one of the predefined goal terms (see below)
 5. When Temporary Actions are listed, prefer Interact with + that interact_action id over a bare Interact with
@@ -108,6 +119,22 @@ Respond with a JSON object:
 }}
 """
         return prompt
+
+    def _get_world_premise(self) -> str:
+        try:
+            rows = self.world.run_query(
+                """
+                MATCH (m {name: 'WorldMeta'})
+                WHERE m.premise IS NOT NULL
+                RETURN m.title AS title, m.premise AS premise LIMIT 1
+                """
+            )
+            if rows and rows[0].get("premise"):
+                title = rows[0].get("title") or ""
+                return f"World: {title}. {rows[0]['premise']}".strip()
+        except Exception:
+            pass
+        return "You live in a small town."
 
     def _person_location(self, name: str) -> Optional[str]:
         try:
@@ -329,14 +356,7 @@ Respond with a JSON object:
             t = 0.0 if sim_time is None else float(sim_time)
             slots = load_person_routine(self.world, agent.name)
             slot = current_slot(slots, t) if slots else None
-            campfire = None
-            try:
-                from world_systems import get_campfire_status
-
-                campfire = get_campfire_status(self.world)
-            except Exception:
-                campfire = None
-            text = describe_routine_context(slot, t, campfire=campfire)
+            text = describe_routine_context(slot, t)
             # 物品行为 lore（给 LLM 读 script）
             try:
                 from item_scripts import nearby_item_lores
@@ -344,6 +364,28 @@ Respond with a JSON object:
                 lores = nearby_item_lores(self.world, getattr(agent, "location", None))
                 if lores:
                     text += "\nItem behaviors here:\n" + "\n".join(lores)
+            except Exception:
+                pass
+            try:
+                from item_scripts import describe_active_alerts
+
+                needs = describe_active_alerts(self.world)
+                if needs:
+                    text += (
+                        "\nThings in the world that need attention "
+                        "(decide yourself whether it is your business):\n" + "\n".join(needs)
+                    )
+            except Exception:
+                pass
+            try:
+                from item_chain import describe_recipes, load_world_view
+
+                recipes = describe_recipes(load_world_view(self.world))
+                if recipes:
+                    text += (
+                        "\nKnown ways to make things (Use item on the target; "
+                        "missing materials are fetched automatically):\n" + "\n".join(recipes)
+                    )
             except Exception:
                 pass
             return text

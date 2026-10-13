@@ -1,0 +1,210 @@
+{
+  "id": "frontier_village",
+  "title": "Frontier Village",
+  "premise": "Three settlers have just staked out a village at the edge of the wild. Around it lie a forest, a quarry and a wheat field, each a short walk across the land. They follow Oren's plan board, building one thing after another, and anyone can mark out new building sites.",
+  "locations": [
+    {
+      "name": "Village",
+      "description": "Flat ground by a stream, staked out for the new village. Everything gets built here.",
+      "tags": "hub,home,build,social",
+      "map": [0, 0],
+      "grid": [24, 13]
+    },
+    {
+      "name": "Forest",
+      "description": "Dense pine forest west of the village. Fallen and felled logs lie everywhere.",
+      "tags": "work,wild",
+      "map": [-3, 1],
+      "grid": [16, 10]
+    },
+    {
+      "name": "Quarry",
+      "description": "A rocky outcrop in the hills, where stone can be split and carried away.",
+      "tags": "work,wild",
+      "map": [3, 2],
+      "grid": [16, 10]
+    },
+    {
+      "name": "Field",
+      "description": "A small wheat field south of the village, planted in spring.",
+      "tags": "work,food",
+      "map": [2, -2],
+      "grid": [18, 10]
+    }
+  ],
+  "adjacencies": [
+    { "a": "Village", "b": "Forest" },
+    { "a": "Village", "b": "Quarry" },
+    { "a": "Village", "b": "Field" },
+    { "a": "Quarry", "b": "Field" }
+  ],
+  "persons": [
+    {
+      "name": "Traveler",
+      "located_at": "Village",
+      "role": "player",
+      "personality": "curious, helpful",
+      "background": "A wanderer who stumbled on the new settlement.",
+      "goal": "Help the settlement grow",
+      "values": "curiosity",
+      "mood": "curious",
+      "hp": 100,
+      "power_level": 5,
+      "speech_style": "friendly"
+    },
+    {
+      "name": "Oren",
+      "located_at": "Village",
+      "role": "npc",
+      "personality": "patient, methodical, proud of good joinery",
+      "background": "A carpenter who led the settlers here. He keeps the village plan board.",
+      "goal": "Turn the camp into a real village",
+      "values": "craft,perseverance",
+      "mood": "determined",
+      "hp": 110,
+      "power_level": 8,
+      "speech_style": "calm and practical",
+      "secret_policy": "share_gossip",
+      "trust_toward_player": 3,
+      "works_at": "Village",
+      "routine": [
+        { "start": 6, "end": 7, "location": "Village", "activity": "wake up and check the plan board", "goal": "Go to location" },
+        { "start": 7, "end": 19, "location": "Village", "activity": "build the village", "goal": "Go to location" },
+        { "start": 19, "end": 21, "location": "Village", "activity": "supper by the fire", "goal": "Go to location", "social": true },
+        { "start": 21, "end": 6, "location": "Village", "activity": "sleep", "action": "sleep" }
+      ]
+    },
+    {
+      "name": "Kai",
+      "located_at": "Village",
+      "role": "npc",
+      "personality": "energetic, strong, a little impatient",
+      "background": "A young woodcutter who hauls logs and stone for Oren.",
+      "goal": "Prove he can carry more than anyone",
+      "values": "strength,loyalty",
+      "mood": "eager",
+      "hp": 120,
+      "power_level": 10,
+      "speech_style": "short and cheerful",
+      "secret_policy": "share_gossip",
+      "trust_toward_player": 4,
+      "works_at": "Village",
+      "routine": [
+        { "start": 6, "end": 7.5, "location": "Village", "activity": "wake up", "goal": "Go to location" },
+        { "start": 7.5, "end": 18, "location": "Village", "activity": "haul materials", "goal": "Go to location" },
+        { "start": 18, "end": 21.5, "location": "Village", "activity": "rest and chat", "goal": "Go to location", "social": true },
+        { "start": 21.5, "end": 6, "location": "Village", "activity": "sleep", "action": "sleep" }
+      ]
+    },
+    {
+      "name": "Lia",
+      "located_at": "Village",
+      "role": "npc",
+      "personality": "warm, practical, worries about food",
+      "background": "A farmer who grows the settlement's wheat and dreams of fresh bread.",
+      "goal": "Make sure nobody in the village goes hungry",
+      "values": "care,community",
+      "mood": "hopeful",
+      "hp": 90,
+      "power_level": 6,
+      "speech_style": "chatty",
+      "secret_policy": "share_gossip",
+      "trust_toward_player": 4,
+      "works_at": "Field",
+      "routine": [
+        { "start": 6, "end": 7, "location": "Village", "activity": "wake up", "goal": "Go to location" },
+        { "start": 7, "end": 12, "location": "Field", "activity": "tend the wheat", "goal": "Go to location" },
+        { "start": 12, "end": 13, "location": "Field", "activity": "eat lunch (bread, if there is any)", "goal": "Use item", "item_kind": "food", "craft": true, "once": true },
+        { "start": 13, "end": 18, "location": "Field", "activity": "afternoon in the field", "goal": "Go to location" },
+        { "start": 18, "end": 21, "location": "Village", "activity": "supper and stories", "goal": "Go to location", "social": true },
+        { "start": 21, "end": 6, "location": "Village", "activity": "sleep", "action": "sleep" }
+      ]
+    }
+  ],
+  "items": [
+    { "name": "VillagePlan", "archetype": "village_plan", "located_at": "Village", "pos": [11, 1] },
+    { "name": "Tents", "archetype": "tents", "located_at": "Village", "pos": [2, 9] },
+    {
+      "name": "Woodlot",
+      "value": 0,
+      "located_at": "Forest",
+      "item_kind": "source",
+      "portable": false,
+      "footprint": [3, 2],
+      "pos": [6, 4],
+      "description": "Trees ready for felling.",
+      "script": {
+        "lore": "There are always a few logs lying ready in the forest.",
+        "on_tick": [
+          { "op": "ensure_kind", "item_kind": "log", "min": 3, "at": "Forest", "prefix": "Log",
+            "spawn": { "archetype": "log" } }
+        ]
+      }
+    },
+    {
+      "name": "StoneFace",
+      "value": 0,
+      "located_at": "Quarry",
+      "item_kind": "source",
+      "portable": false,
+      "footprint": [4, 2],
+      "pos": [6, 2],
+      "description": "A cliff of good building stone.",
+      "script": {
+        "lore": "Stone can always be split from the quarry face.",
+        "on_tick": [
+          { "op": "ensure_kind", "item_kind": "stone", "min": 3, "at": "Quarry", "prefix": "Stone",
+            "spawn": { "archetype": "stone" } }
+        ]
+      }
+    },
+    {
+      "name": "WheatRows",
+      "value": 0,
+      "located_at": "Field",
+      "item_kind": "source",
+      "portable": false,
+      "footprint": [6, 3],
+      "pos": [6, 3],
+      "description": "Rows of ripening wheat.",
+      "script": {
+        "lore": "Lia's wheat keeps ripening; sheaves can be cut whenever needed.",
+        "on_tick": [
+          { "op": "ensure_kind", "item_kind": "grain", "min": 3, "at": "Field", "prefix": "Wheat",
+            "spawn": { "archetype": "wheat" } }
+        ]
+      }
+    }
+  ],
+  "quests": [
+    {
+      "name": "FoundTheVillage",
+      "description": "Grow the camp into a village: Workshop, then Bakery, then the Village Hall. Houses can be added any time after the Workshop.",
+      "stage": "building",
+      "state": "active",
+      "objective": "Help the settlers gather materials, or mark out new building sites yourself (press B in the Village).",
+      "involves": ["Oren", "Kai", "Lia", "VillagePlan"],
+      "giver": "Oren"
+    }
+  ],
+  "facts": [
+    {
+      "name": "BuildOrder",
+      "text": "Oren's plan board: first a Workshop (logs and stone), then a Bakery (planks and stone), then a Village Hall (planks and bread for the feast).",
+      "secret_level": 0,
+      "known_by": ["Oren", "Kai", "Lia", "Traveler"]
+    },
+    {
+      "name": "Materials",
+      "text": "Logs come from the Forest, stone from the Quarry, wheat from the Field. The Workshop turns logs into planks; the Bakery turns wheat into bread.",
+      "secret_level": 0,
+      "known_by": ["Oren", "Kai", "Lia", "Traveler"]
+    }
+  ],
+  "rumors": [],
+  "social": [
+    { "a": "Oren", "rel": "KNOWS", "b": "Kai" },
+    { "a": "Oren", "rel": "KNOWS", "b": "Lia" },
+    { "a": "Kai", "rel": "FRIENDS_WITH", "b": "Lia" }
+  ]
+}

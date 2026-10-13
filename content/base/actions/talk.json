@@ -1,0 +1,24 @@
+{
+  "name": "talk",
+  "capability": "converse",
+  "description": "Talk with someone at the same location (both get to know each other)",
+  "duration": 4.0,
+  "params": [
+    { "name": "a", "type": "Person", "source": "self" },
+    { "name": "b", "type": "Person", "source": "people_here" },
+    { "name": "l", "type": "Location", "source": "here" }
+  ],
+  "requires": [
+    { "op": "neq", "a": "@a", "b": "@b", "message": "Cannot talk to yourself" },
+    { "op": "person_at", "person": "@a", "location": "@l" },
+    { "op": "person_at", "person": "@b", "location": "@l" },
+    { "op": "prop_gte", "entity": "@a", "label": "Person", "prop": "hp", "value": 1, "message": "@a is dead" },
+    { "op": "prop_gte", "entity": "@b", "label": "Person", "prop": "hp", "value": 1, "message": "@b is dead" }
+  ],
+  "effects": [
+    { "op": "link", "a": "@a", "a_label": "Person", "b": "@b", "b_label": "Person", "rel": "KNOWS",
+      "bidirectional": true }
+  ],
+  "pddl_preconditions": ["(at ?a ?l)", "(at ?b ?l)", "(alive ?a)", "(alive ?b)"],
+  "pddl_effects": ["(knows ?a ?b)", "(knows ?b ?a)"]
+}

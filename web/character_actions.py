@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
+from data_action import DataAction
 from registry import get_registry
 
 
@@ -188,7 +189,10 @@ def _items_at_location(world, loc: str) -> List[Dict[str, Any]]:
                coalesce(i.key_item, '') AS key_item,
                coalesce(i.connects_to, '') AS connects_to,
                coalesce(i.portable, true) AS portable,
-               i.script AS script
+               i.script AS script,
+               i.x AS x, i.y AS y,
+               coalesce(i.footprint_w, 1) AS w, coalesce(i.footprint_h, 1) AS h,
+               coalesce(i.archetype, '') AS archetype
         ORDER BY name
         """,
         loc=loc,
@@ -219,6 +223,11 @@ def _items_at_location(world, loc: str) -> List[Dict[str, Any]]:
             "connects_to": r.get("connects_to") or "",
             "portable": False if r.get("portable") is False else True,
             "script": script_obj,
+            "x": r.get("x"),
+            "y": r.get("y"),
+            "w": int(r.get("w") or 1),
+            "h": int(r.get("h") or 1),
+            "archetype": r.get("archetype") or "",
             "_loc": loc,
         }
         out.append(_enrich_item_interaction(item))
@@ -247,8 +256,7 @@ def _doors_at_location(world, loc: str) -> List[Dict[str, Any]]:
 
 def _is_interactable_item(item: Dict[str, Any]) -> bool:
     """Doors / fixtures / devices with interactive scripts."""
-    kind = (item.get("item_kind") or "").lower()
-    if kind in ("door", "campfire", "source", "fixture", "puzzle", "mechanism", "tree"):
+    if (item.get("item_kind") or "").lower() == "door":
         return True
     if item.get("portable") is False:
         return True
@@ -353,81 +361,22 @@ def _build_action_entries(world, person: str, state: Dict[str, Any]) -> List[Dic
         | set(alive_here)
     )
     entries: List[Dict[str, Any]] = []
+    sources: Dict[str, List[str]] = {
+        "self": [person],
+        "here": [loc] if loc else [],
+        "adjacent": adjacent,
+        "held": list(held),
+        "ground": items_here,
+        "people_here": alive_here,
+    }
 
     for action in reg.all():
         fields: List[Dict[str, Any]] = []
         available = False
         defaults: Dict[str, str] = {}
 
-        if action.name == "move":
-            if loc and adjacent:
-                available = True
-                defaults = {"c": person, "from": loc, "to": adjacent[0]}
-                fields = [
-                    _field("c", "Person", value=person, readonly=True, label="Character"),
-                    _field("from", "Location", value=loc, readonly=True, label="From"),
-                    _field("to", "Location", value=adjacent[0], options=adjacent, label="To"),
-                ]
-
-        elif action.name == "pick_up":
-            if loc and items_here:
-                available = True
-                defaults = {"c": person, "i": items_here[0], "l": loc}
-                fields = [
-                    _field("c", "Person", value=person, readonly=True, label="Character"),
-                    _field("i", "Item", value=items_here[0], options=items_here, label="Item"),
-                    _field("l", "Location", value=loc, readonly=True, label="Location"),
-                ]
-
-        elif action.name == "drop":
-            if held and loc:
-                available = True
-                defaults = {"c": person, "i": held[0], "l": loc}
-                fields = [
-                    _field("c", "Person", value=person, readonly=True, label="Character"),
-                    _field("i", "Item", value=held[0], options=held, label="Item"),
-                    _field("l", "Location", value=loc, readonly=True, label="Location"),
-                ]
-
-        elif action.name == "give":
-            if held and alive_here and loc:
-                available = True
-                defaults = {"giver": person, "i": held[0], "receiver": alive_here[0], "l": loc}
-                fields = [
-                    _field("giver", "Person", value=person, readonly=True, label="Giver"),
-                    _field("i", "Item", value=held[0], options=held, label="Item"),
-                    _field("receiver", "Person", value=alive_here[0], options=alive_here, label="Receiver"),
-                    _field("l", "Location", value=loc, readonly=True, label="Location"),
-                ]
-
-        elif action.name == "talk":
-            if alive and alive_here and loc:
-                available = True
-                defaults = {"a": person, "b": alive_here[0], "l": loc}
-                fields = [
-                    _field("a", "Person", value=person, readonly=True, label="Character A"),
-                    _field("b", "Person", value=alive_here[0], options=alive_here, label="Talk to"),
-                    _field("l", "Location", value=loc, readonly=True, label="Location"),
-                ]
-
-        elif action.name == "attack":
-            if alive and alive_here and loc:
-                available = True
-                defaults = {"attacker": person, "target": alive_here[0], "l": loc}
-                fields = [
-                    _field("attacker", "Person", value=person, readonly=True, label="Attacker"),
-                    _field("target", "Person", value=alive_here[0], options=alive_here, label="Target"),
-                    _field("l", "Location", value=loc, readonly=True, label="Location"),
-                ]
-
-        elif action.name == "use_item":
-            if alive and held:
-                available = True
-                defaults = {"c": person, "i": held[0]}
-                fields = [
-                    _field("c", "Person", value=person, readonly=True, label="Character"),
-                    _field("i", "Item", value=held[0], options=held, label="Item"),
-                ]
+        if isinstance(action, DataAction):
+            available, defaults, fields = _data_action_form(action, sources) if alive else (False, {}, [])
 
         elif action.name == "use_on":
             # Has inventory + someone/something nearby: can "use on target"; feasibility from world interaction table
@@ -506,9 +455,10 @@ def _build_action_entries(world, person: str, state: Dict[str, Any]) -> List[Dic
     available_names = {e["name"] for e in entries}
     for action in reg.all():
         if action.name not in available_names:
-            reason = _unavailable_reason(
-                action.name, loc, held, alive, adjacent, alive_here, items_here, locked_doors
-            )
+            if isinstance(action, DataAction):
+                reason = _data_action_missing(action, sources, loc=loc, alive=alive)
+            else:
+                reason = _unavailable_reason(action.name, loc, held, alive)
             entries.append({
                 "name": action.name,
                 "description": action.description,
@@ -525,38 +475,62 @@ def _build_action_entries(world, person: str, state: Dict[str, Any]) -> List[Dic
     return entries
 
 
-def _unavailable_reason(
-    action_name: str,
-    loc: Optional[str],
-    held: List[str],
-    alive: bool,
-    adjacent: List[str],
-    alive_here: List[str],
-    items_here: List[str],
-    locked_doors: Optional[List[Dict[str, Any]]] = None,
+_SOURCE_MISSING = {
+    "here": "Character has no current location",
+    "adjacent": "No adjacent locations to go to",
+    "held": "Not holding any items",
+    "ground": "No pickable items at current location",
+    "people_here": "No other living characters at this location",
+}
+
+
+def _param_source(action: DataAction, index: int, name: str) -> str:
+    return action.param_sources.get(name) or ("self" if index == 0 else "")
+
+
+def _data_action_form(
+    action: DataAction, sources: Dict[str, List[str]]
+) -> Tuple[bool, Dict[str, str], List[Dict[str, Any]]]:
+    """按参数的 source（self / here / adjacent / held / ground / people_here）填表单。"""
+    defaults: Dict[str, str] = {}
+    fields: List[Dict[str, Any]] = []
+    for idx, p in enumerate(action.parameters):
+        src = _param_source(action, idx, p.name)
+        opts = sources.get(src) or []
+        if not opts:
+            return False, {}, []
+        fixed = src in ("self", "here")
+        defaults[p.name] = opts[0]
+        fields.append(_field(
+            p.name, p.type, value=opts[0], options=None if fixed else opts, readonly=fixed,
+        ))
+    return True, defaults, fields
+
+
+def _data_action_missing(
+    action: DataAction, sources: Dict[str, List[str]], *, loc: Optional[str], alive: bool
 ) -> str:
+    if not alive:
+        return "Character is dead"
+    if not loc:
+        return _SOURCE_MISSING["here"]
+    for idx, p in enumerate(action.parameters):
+        src = _param_source(action, idx, p.name)
+        if not sources.get(src):
+            return _SOURCE_MISSING.get(src) or f"No value available for '{p.name}'"
+    return "Not available"
+
+
+def _unavailable_reason(action_name: str, loc: Optional[str], held: List[str], alive: bool) -> str:
     if not loc:
         return "Character has no current location"
-    locked_doors = locked_doors or []
-    use_on_hint = ""
     if action_name == "use_on":
         if not held:
-            use_on_hint = "Not holding any items"
-        elif not alive:
-            use_on_hint = "Character is dead"
-        else:
-            use_on_hint = "No selectable targets at this location"
-    reasons = {
-        "move": "No adjacent locations to go to" if not adjacent else "",
-        "pick_up": "No pickable items at current location" if not items_here else "",
-        "drop": "Not holding any items" if not held else "",
-        "give": "Must hold an item and have another character at the same location" if not (held and alive_here) else "",
-        "talk": "No other living characters at this location" if not alive_here else ("Character is dead" if not alive else ""),
-        "attack": "No other living characters at this location" if not alive_here else ("Character is dead" if not alive else ""),
-        "use_item": "Not holding any items" if not held else ("Character is dead" if not alive else ""),
-        "use_on": use_on_hint or "Not available",
-    }
-    return reasons.get(action_name, "Not available")
+            return "Not holding any items"
+        if not alive:
+            return "Character is dead"
+        return "No selectable targets at this location"
+    return "Not available"
 
 
 def list_characters(world) -> List[Dict[str, Any]]:
@@ -611,10 +585,15 @@ def get_location_info(world, loc: str) -> Optional[Dict[str, Any]]:
     if not rows:
         return None
     r = rows[0]
+    from spatial import zone_grid
+
+    grid_w, grid_h = zone_grid(world, loc)
     return {
         "name": r["name"],
         "description": r.get("description") or "",
         "tags": r.get("tags") or "",
+        "grid_w": grid_w,
+        "grid_h": grid_h,
     }
 
 
@@ -634,6 +613,7 @@ def list_locations_graph(world) -> Dict[str, Any]:
         RETURN l.name AS name,
                coalesce(l.description, '') AS description,
                coalesce(l.tags, '') AS tags,
+               l.map_x AS map_x, l.map_y AS map_y,
                collect(DISTINCT p.name) AS persons,
                collect(DISTINCT adj.name) AS adjacent
         ORDER BY name
@@ -659,6 +639,8 @@ def list_locations_graph(world) -> Dict[str, Any]:
             "name": name,
             "description": r.get("description") or "",
             "tags": r.get("tags") or "",
+            "map_x": r.get("map_x"),
+            "map_y": r.get("map_y"),
             "persons": persons,
             "items": [x["name"] for x in pickable],
             "interactables": [
@@ -842,7 +824,18 @@ def _play_simulation_snapshot(world) -> Dict[str, Any]:
         return {
             "sim_time": sim.sim_time,
             "tick": sim.tick_count,
+            "clock": _clock_safe(sim.sim_time),
             "npc_activity": sim.npc_activity_summary(world),
+            "chronicle": sim.chronicle(limit=12),
         }
     except Exception:
-        return {"sim_time": 0, "tick": 0, "npc_activity": []}
+        return {"sim_time": 0, "tick": 0, "clock": _clock_safe(0.0), "npc_activity": []}
+
+
+def _clock_safe(sim_time: float) -> Dict[str, Any]:
+    try:
+        from routine import clock_info
+
+        return clock_info(float(sim_time or 0.0))
+    except Exception:
+        return {}

@@ -1,0 +1,22 @@
+{
+  "archetype": "meal",
+  "name": "Meal",
+  "item_kind": "meal",
+  "portable": true,
+  "value": 20,
+  "description": "A hot stew.",
+  "effects_on": [
+    {
+      "target": "kind:order_board",
+      "consume": false,
+      "preconditions": [
+        { "op": "prop_gte", "entity": "@target", "label": "Item", "prop": "orders", "value": 1 }
+      ],
+      "ops": [
+        { "op": "add_prop", "entity": "@target", "label": "Item", "prop": "orders", "delta": -1 },
+        { "op": "unlink", "a": "@actor", "a_label": "Person", "b": "@tool", "b_label": "Item", "rel": "HAS_ITEM" },
+        { "op": "link", "a": "@target.last_customer", "a_label": "Person", "b": "@tool", "b_label": "Item", "rel": "HAS_ITEM" }
+      ]
+    }
+  ]
+}

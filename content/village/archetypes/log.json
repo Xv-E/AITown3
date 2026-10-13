@@ -1,0 +1,28 @@
+{
+  "archetype": "log",
+  "name": "Log",
+  "item_kind": "log",
+  "portable": true,
+  "value": 3,
+  "description": "A freshly cut log. Builders need them; a workbench saws them into planks.",
+  "effects_on": [
+    {
+      "target": "kind:site",
+      "consume": true,
+      "preconditions": [
+        { "op": "prop_gte", "entity": "@target", "label": "Item", "prop": "need_log", "value": 1,
+          "message": "@target does not need logs" }
+      ],
+      "ops": [
+        { "op": "add_prop", "entity": "@target", "label": "Item", "prop": "need_log", "delta": -1, "min": 0 }
+      ]
+    },
+    {
+      "target": "kind:workbench",
+      "consume": true,
+      "ops": [
+        { "op": "spawn_item", "archetype": "plank", "held_by": "@actor" }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "archetype": "crate",
+  "name": "Crate",
+  "item_kind": "crate",
+  "portable": true,
+  "value": 10,
+  "description": "A crate of bread for a market stall.",
+  "effects_on": [
+    {
+      "target": "kind:stall",
+      "consume": true,
+      "ops": [
+        { "op": "add_prop", "entity": "@target", "label": "Item", "prop": "stock", "delta": 3 }
+      ]
+    }
+  ]
+}

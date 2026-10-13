@@ -29,6 +29,7 @@ PlanStep = Tuple[str, List[str]]
 
 # Fast Downward / UP 偶发挂起时，超时后改试下一引擎，并保证能写出 inspect 日志
 _UP_TIMEOUT_SEC = float(os.environ.get("AITOWN3_UP_TIMEOUT", "20"))
+_ENHSP_PARAMS = os.environ.get("AITOWN3_ENHSP_PARAMS", "-h hadd -s WAStar")
 
 # 默认先 BFS：Fast Downward 子进程结束会 sys.exit，debugpy 跟进子进程时会停在
 # up_fast_downward/.../driver/main.py；BFS 可覆盖纯寻路且不触发 FD。
@@ -144,18 +145,21 @@ def _solve_with_unified_planning_timeout(
     timeout_sec: float = _UP_TIMEOUT_SEC,
 ) -> Dict[str, Any]:
     """UP/Fast Downward 可能挂起；超时后返回失败以便切换 BFS。"""
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        fut = pool.submit(_solve_with_unified_planning, domain_str, problem_str)
-        try:
-            return fut.result(timeout=timeout_sec)
-        except FuturesTimeout:
-            return {
-                "success": False,
-                "engine": "unified_planning",
-                "plan": [],
-                "raw": "",
-                "error": f"unified_planning 超时（>{timeout_sec:.0f}s）",
-            }
+    pool = ThreadPoolExecutor(max_workers=1)
+    fut = pool.submit(_solve_with_unified_planning, domain_str, problem_str, timeout_sec)
+    try:
+        # 引擎自己也按 timeout 结束子进程；这里多给一点余量
+        return fut.result(timeout=timeout_sec + 5)
+    except FuturesTimeout:
+        return {
+            "success": False,
+            "engine": "unified_planning",
+            "plan": [],
+            "raw": "",
+            "error": f"unified_planning 超时（>{timeout_sec:.0f}s）",
+        }
+    finally:
+        pool.shutdown(wait=False)
 
 
 # ---------- 公共入口 ----------
@@ -216,7 +220,9 @@ def solve_pddl(
 
 # ---------- unified-planning ----------
 
-def _solve_with_unified_planning(domain_str: str, problem_str: str) -> Dict[str, Any]:
+def _solve_with_unified_planning(
+    domain_str: str, problem_str: str, timeout: Optional[float] = None
+) -> Dict[str, Any]:
     try:
         from unified_planning.shortcuts import OneshotPlanner
         from unified_planning.io import PDDLReader
@@ -245,11 +251,19 @@ def _solve_with_unified_planning(domain_str: str, problem_str: str) -> Dict[str,
         problem = reader.parse_problem(domain_path, problem_path)
 
         # 让 unified-planning 自己挑可用引擎；找不到就抛 UPNoRequestedEngineAvailableException
-        with OneshotPlanner(problem_kind=problem.kind) as planner:
-            result = planner.solve(problem)
+        if ":numeric-fluents" in domain_str:
+            # ENHSP 默认 hadd+gbfs 计划绕路很多；WAStar 基本同速但计划短一半
+            planner_ctx = OneshotPlanner(name="enhsp", params={"params": _ENHSP_PARAMS})
+        else:
+            planner_ctx = OneshotPlanner(problem_kind=problem.kind)
+        with planner_ctx as planner:
+            result = planner.solve(problem, timeout=timeout)
             engine_used = getattr(planner, "name", "auto")
 
         if result.plan is None:
+            if "TIMEOUT" in str(result.status):
+                return {"success": False, "engine": f"up:{engine_used}", "plan": [],
+                        "raw": str(result), "error": f"unified_planning 超时（>{timeout:.0f}s）"}
             return {"success": False, "engine": f"up:{engine_used}", "plan": [],
                     "raw": str(result), "error": "未找到可行计划"}
 
@@ -348,7 +362,9 @@ def _solve_with_bfs(domain_str: str, problem_str: str) -> Dict[str, Any]:
             if nxt == goal_loc:
                 steps: List[PlanStep] = []
                 for i in range(len(new_path) - 1):
-                    steps.append(("move", [goal_person, new_path[i], new_path[i + 1]]))
+                    from registry import act
+
+                    steps.append((act("travel"), [goal_person, new_path[i], new_path[i + 1]]))
                 return {"success": True, "engine": "bfs", "plan": steps,
                         "raw": " -> ".join(new_path), "error": None}
             visited.add(nxt)

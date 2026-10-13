@@ -1,0 +1,12 @@
+{
+  "archetype": "village_bell",
+  "name": "VillageHall",
+  "item_kind": "hall",
+  "portable": false,
+  "value": 0,
+  "footprint": [4, 3],
+  "description": "The Village Hall, its beams still bright and fresh. A bronze bell hangs by the door.",
+  "script": {
+    "lore": "The hall marks the founding of the village. People gather here to talk."
+  }
+}

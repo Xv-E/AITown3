@@ -1,0 +1,14 @@
+{
+  "name": "wait",
+  "capability": "idle",
+  "description": "Wait in place for a moment",
+  "duration": 1.0,
+  "params": [
+    { "name": "c", "type": "Person", "source": "self" }
+  ],
+  "requires": [
+    { "op": "prop_gte", "entity": "@c", "label": "Person", "prop": "hp", "value": 1, "message": "@c is dead" }
+  ],
+  "effects": [],
+  "pddl_preconditions": ["(alive ?c)"]
+}

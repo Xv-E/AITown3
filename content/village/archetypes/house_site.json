@@ -1,0 +1,34 @@
+{
+  "archetype": "house_site",
+  "extends": "construction_site",
+  "name": "HouseSite",
+  "footprint": [2, 2],
+  "description": "A small plot marked out for a house. Needs planks and stone.",
+  "blueprint": {
+    "label": "House",
+    "description": "A home for new settlers. Needs 4 planks, 2 stone. Requires a Workshop.",
+    "zone_tags": ["build"],
+    "requires": [
+      { "op": "count", "archetype": "workbench", "gte": 1, "message": "Build a Workshop first" }
+    ],
+    "order": 40
+  },
+  "script": {
+    "initial_state": { "need_plank": 4, "need_stone": 2 },
+    "on_tick": [
+      {
+        "op": "rule",
+        "id": "built",
+        "when": [
+          { "op": "prop_lte", "entity": "@self", "prop": "need_plank", "value": 0 },
+          { "op": "prop_lte", "entity": "@self", "prop": "need_stone", "value": 0 }
+        ],
+        "do": [
+          { "op": "spawn_item", "archetype": "house", "located_at": "@here", "x": "@self.x", "y": "@self.y" },
+          { "op": "delete_entity", "entity": "@self" }
+        ],
+        "announce": "A new House stands in @here."
+      }
+    ]
+  }
+}

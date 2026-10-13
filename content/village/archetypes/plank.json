@@ -1,0 +1,21 @@
+{
+  "archetype": "plank",
+  "name": "Plank",
+  "item_kind": "plank",
+  "portable": true,
+  "value": 6,
+  "description": "A sawn plank, made from a log at a workbench.",
+  "effects_on": [
+    {
+      "target": "kind:site",
+      "consume": true,
+      "preconditions": [
+        { "op": "prop_gte", "entity": "@target", "label": "Item", "prop": "need_plank", "value": 1,
+          "message": "@target does not need planks" }
+      ],
+      "ops": [
+        { "op": "add_prop", "entity": "@target", "label": "Item", "prop": "need_plank", "delta": -1, "min": 0 }
+      ]
+    }
+  ]
+}

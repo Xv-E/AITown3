@@ -19,7 +19,9 @@ class GoalTerm(Enum):
     COLLECT_ITEM = "Collect item"
     ENHANCE_CAPABILITIES = "Enhance capabilities"
     USE_ITEM_ON = "Use item on"
+    USE_ITEM = "Use item"
     INTERACT_WITH = "Interact with"
+    PERFORM_ACTION = "Perform action"
 
 
 @dataclass
@@ -101,7 +103,13 @@ GOAL_DEFINITIONS: Dict[GoalTerm, GoalDefinition] = {
         pddl_predicates=[
             {"predicate": "unlocked", "args": ["?target"]},
         ],
-        example="Use DoorKey on VaultDoor (ops from world JSON)",
+        example="Use DoorKey on VaultDoor (ops from world JSON); missing tools are fetched or crafted first",
+    ),
+    GoalTerm.USE_ITEM: GoalDefinition(
+        term=GoalTerm.USE_ITEM,
+        description="自己使用 / 食用手上或附近的物品（target_entity 可为物品名或 kind:<类别>）",
+        pddl_predicates=[],
+        example="Use item kind:meal",
     ),
     GoalTerm.INTERACT_WITH: GoalDefinition(
         term=GoalTerm.INTERACT_WITH,
@@ -110,6 +118,12 @@ GOAL_DEFINITIONS: Dict[GoalTerm, GoalDefinition] = {
             {"predicate": "at", "args": ["?character", "?location"]},
         ],
         example="Interact with OakTree (interact_action=chop)",
+    ),
+    GoalTerm.PERFORM_ACTION: GoalDefinition(
+        term=GoalTerm.PERFORM_ACTION,
+        description="执行一个只需自己参与的内容动作（target_entity=动作名，如 sleep；可选 at_location 先走过去）",
+        pddl_predicates=[],
+        example="Perform action sleep at Cottages",
     ),
 }
 

@@ -1,0 +1,13 @@
+{
+  "archetype": "workbench",
+  "name": "Workshop",
+  "item_kind": "workbench",
+  "portable": false,
+  "value": 0,
+  "footprint": [3, 2],
+  "description": "A timber workshop with a big sawing bench. Put a log on it to get a plank.",
+  "accepts_from": ["kind:log"],
+  "script": {
+    "lore": "The workshop saws logs into planks. Planks are needed for finer buildings."
+  }
+}

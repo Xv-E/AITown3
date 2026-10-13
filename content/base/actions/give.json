@@ -1,0 +1,24 @@
+{
+  "name": "give",
+  "capability": "give",
+  "description": "Give a held item to another person at the same location",
+  "duration": 1.0,
+  "params": [
+    { "name": "giver", "type": "Person", "source": "self" },
+    { "name": "i", "type": "Item", "source": "held" },
+    { "name": "receiver", "type": "Person", "source": "people_here" },
+    { "name": "l", "type": "Location", "source": "here" }
+  ],
+  "requires": [
+    { "op": "neq", "a": "@giver", "b": "@receiver", "message": "Cannot give to yourself" },
+    { "op": "has_item", "person": "@giver", "item": "@i" },
+    { "op": "person_at", "person": "@giver", "location": "@l" },
+    { "op": "person_at", "person": "@receiver", "location": "@l" }
+  ],
+  "effects": [
+    { "op": "unlink", "a": "@giver", "a_label": "Person", "b": "@i", "b_label": "Item", "rel": "HAS_ITEM" },
+    { "op": "link", "a": "@receiver", "a_label": "Person", "b": "@i", "b_label": "Item", "rel": "HAS_ITEM" }
+  ],
+  "pddl_preconditions": ["(has-item ?giver ?i)", "(at ?giver ?l)", "(at ?receiver ?l)"],
+  "pddl_effects": ["(not (has-item ?giver ?i))", "(has-item ?receiver ?i)"]
+}

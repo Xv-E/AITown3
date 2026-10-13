@@ -1,0 +1,22 @@
+{
+  "archetype": "order_board",
+  "item_kind": "order_board",
+  "portable": false,
+  "value": 0,
+  "description": "An order counter. Pay a coin to order a meal; the cook serves meals here.",
+  "accepts_from": ["kind:coin", "kind:meal"],
+  "script": {
+    "lore": "Customers pay a coin here to order food. The kitchen serves finished meals at this counter and they go to whoever ordered last.",
+    "initial_state": { "orders": 0, "last_customer": "" },
+    "alerts": [
+      {
+        "when": { "prop_gt": ["orders", 0] },
+        "signal": "urgent",
+        "message": "Customers are waiting for food — cook a meal and serve it at the counter.",
+        "use_on": true,
+        "prefer_kind": "meal",
+        "audience": "works_at"
+      }
+    ]
+  }
+}

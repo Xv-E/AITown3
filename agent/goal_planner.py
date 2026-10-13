@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from goal_to_pddl import GoalToPDDLConverter
+from registry import act
 from trace_util import record_trace
 
 if TYPE_CHECKING:
@@ -119,7 +120,7 @@ def _plan_collect_item(
             )
         plan.extend(result["plan"])
 
-    plan.append(("pick_up", [character, item, item_loc]))
+    plan.append((act("take"), [character, item, item_loc]))
     return PlanResult(
         success=True,
         plan=plan,
@@ -376,7 +377,7 @@ def _plan_defeat_enemy(
             )
         plan.extend(result["plan"])
 
-    plan.append(("attack", [character, target, target_loc]))
+    plan.append((act("attack"), [character, target, target_loc]))
     return PlanResult(success=True, plan=plan, engine="rule:defeat", used_rule_based=True)
 
 
@@ -449,7 +450,7 @@ def _plan_gain_information(
             )
         plan.extend(result["plan"])
 
-    plan.append(("talk", [character, target, target_loc]))
+    plan.append((act("converse"), [character, target, target_loc]))
     return PlanResult(
         success=True,
         plan=plan,
@@ -603,9 +604,10 @@ def _maybe_prepend_heal(
     potion = _find_potion(world, character)
     if not potion:
         return plan
-    if any(step[0] == "use_item" and potion in step[1] for step in plan):
+    consume = act("consume")
+    if any(step[0] == consume and potion in step[1] for step in plan):
         return plan
-    return [("use_item", [character, potion])] + list(plan)
+    return [(consume, [character, potion])] + list(plan)
 
 
 def _maybe_append_give(
@@ -617,12 +619,19 @@ def _maybe_append_give(
     """Gain information 后若背包有非药水小礼物，可附加 give。"""
     if not target or not plan:
         return plan
-    if any(step[0] == "talk" for step in plan) is False:
+    if not any(step[0] == act("converse") for step in plan):
         return plan
     held = _held_items(world, character)
+    try:
+        from world_interactions import list_interactions
+
+        working_tools = {it.tool for it in list_interactions()}
+    except Exception:
+        working_tools = set()
+    # 有用途的物品（世界交互里的工具）不当随手礼物
     gifts = [
         i for i in held
-        if not (i.lower().startswith("potion") or i == "Potion")
+        if not (i.lower().startswith("potion") or i == "Potion") and i not in working_tools
     ]
     if not gifts:
         return plan
@@ -630,16 +639,42 @@ def _maybe_append_give(
     loc = _get_entity_location(world, "Person", target) or _get_person_location(world, character)
     if not loc:
         return plan
-    if any(step[0] == "give" for step in plan):
+    give = act("give")
+    if any(step[0] == give for step in plan):
         return plan
-    return list(plan) + [("give", [character, gift, target, loc])]
+    return list(plan) + [(give, [character, gift, target, loc])]
+
+
+def _plan_perform_action(
+    world: "Neo4jWorld",
+    character: str,
+    goal_data: Dict[str, Any],
+) -> PlanResult:
+    """先走到 at_location（可选），再执行一个只需本人参与的内容动作。"""
+    from registry import get_registry
+
+    name = str(goal_data.get("target_entity") or "").strip()
+    action = get_registry().get(name)
+    if action is None:
+        return PlanResult(success=False, error=f"Unknown action: {name}")
+    if len(action.parameters) != 1:
+        return PlanResult(success=False, error=f"{name} is not a self action")
+    plan: List[PlanStep] = []
+    where = str(goal_data.get("at_location") or "").strip()
+    if where and _get_person_location(world, character) != where:
+        route = _plan_go_to_location(world, character, where, explore=False)
+        if not route.success:
+            return route
+        plan.extend(route.plan)
+    plan.append((name, [character]))
+    return PlanResult(success=True, plan=plan, engine="rule:perform", used_rule_based=True)
 
 
 def wait_plan(character: str) -> PlanResult:
     """无可行动作时的显式等待。"""
     return PlanResult(
         success=True,
-        plan=[("wait", [character])],
+        plan=[(act("idle"), [character])],
         engine="rule:wait",
         used_rule_based=True,
     )
@@ -764,6 +799,59 @@ def plan_for_goal(
     return result
 
 
+def _plan_compiled(
+    world: "Neo4jWorld",
+    character: str,
+    conditions: List[Dict[str, Any]],
+    buf: Dict[str, str],
+) -> PlanResult:
+    """从内容数据自动编译的 PDDL（planner/compiler.py）。"""
+    from compiler import load_snapshot, plan_compiled
+    from knowledge import filter_snapshot, load_knowledge
+
+    snap = filter_snapshot(load_snapshot(world), character, load_knowledge(world, character))
+    result = plan_compiled(world, character, conditions, snapshot=snap)
+    buf["domain"] = result.get("domain") or ""
+    buf["problem"] = result.get("problem") or ""
+    if not result["success"]:
+        return PlanResult(success=False, error=f"Compiled PDDL: {result.get('error')}")
+    return PlanResult(
+        success=True,
+        plan=list(result["plan"]),
+        engine=f"compiled:{result.get('engine', '')}",
+        domain_str=result.get("domain") or "",
+        problem_str=result.get("problem") or "",
+    )
+
+
+def _as_far_as_known(err: str) -> str:
+    from knowledge import knowledge_mode
+
+    if knowledge_mode() == "omniscient" or not err:
+        return err
+    return f"{err} (as far as you know; explore or ask others)"
+
+
+def _compiled_fallback(
+    world: "Neo4jWorld",
+    character: str,
+    goal_term: str,
+    conditions: List[Dict[str, Any]],
+    failed: PlanResult,
+    buf: Dict[str, str],
+) -> PlanResult:
+    """planning.json 的 fallback 里列出的目标：规则规划失败后再用编译 PDDL 试一次。"""
+    from compiler import load_config
+
+    if goal_term not in load_config().fallback:
+        return failed
+    result = _plan_compiled(world, character, conditions, buf)
+    if result.success:
+        return result
+    failed.error = f"{failed.error}; {result.error}"
+    return failed
+
+
 def _plan_for_goal_impl(
     world: "Neo4jWorld",
     character: str,
@@ -797,6 +885,39 @@ def _plan_for_goal_impl(
         if not target:
             return PlanResult(success=False, error="Defeat enemy requires target_entity")
         return _finalize(_plan_defeat_enemy(world, character, target))
+
+    if goal_term == "Achieve":
+        conditions = goal_data.get("conditions") or []
+        if not conditions:
+            return PlanResult(success=False, error="Achieve requires conditions")
+        return _finalize(_plan_compiled(world, character, list(conditions), buf))
+
+    if goal_term in ("Collect item", "Accumulate items") and target and str(target).startswith("kind:"):
+        from item_chain import load_world_view, plan_obtain
+
+        steps, err = plan_obtain(load_world_view(world, viewer=character), character, str(target))
+        if steps is None:
+            failed = PlanResult(success=False, error=_as_far_as_known(err), used_rule_based=True)
+            want = [{"op": "has_item", "person": "@self", "item": str(target)}]
+            return _finalize(_compiled_fallback(world, character, goal_term, want, failed, buf))
+        return _finalize(PlanResult(
+            success=True, plan=steps, engine="rule:chain", used_rule_based=True
+        ))
+
+    if goal_term == "Use item":
+        from item_chain import kind_ref, load_world_view, plan_use_self
+
+        ref = target or (kind_ref(goal_data["item_kind"]) if goal_data.get("item_kind") else "")
+        if not ref:
+            return PlanResult(success=False, error="Use item requires an item or item_kind")
+        steps, err = plan_use_self(
+            load_world_view(world, viewer=character), character, str(ref), craft=bool(goal_data.get("craft"))
+        )
+        if steps is None:
+            return PlanResult(success=False, error=_as_far_as_known(err), used_rule_based=True)
+        return _finalize(PlanResult(
+            success=True, plan=steps, engine="rule:chain", used_rule_based=True
+        ))
 
     if goal_term in ("Collect item", "Accumulate items", "Strengthen abilities", "Enhance capabilities"):
         if not target:
@@ -833,6 +954,30 @@ def _plan_for_goal_impl(
         goal_facts = converter.convert_goal_to_pddl(
             {"goal": goal_term, "target_entity": target}, character
         )
+        door = _door_info(world, target)
+        if not (door and str(door.get("kind") or "").lower() == "door"):
+            from item_chain import load_world_view, plan_use_on
+
+            prefer_kind = str(
+                goal_data.get("item_kind")
+                or (goal_data.get("metadata") or {}).get("item_kind")
+                or ""
+            )
+            tool_hint = goal_data.get("tool_hint")
+            view = load_world_view(world, viewer=character)
+            if tool_hint and not prefer_kind:
+                prefer_kind = view.kind_of(str(tool_hint))
+            steps, chain_err = plan_use_on(view, character, target, prefer_kind=prefer_kind)
+            if steps is not None:
+                return _finalize(PlanResult(
+                    success=True,
+                    plan=steps,
+                    engine="rule:chain",
+                    used_rule_based=True,
+                    goal_facts=goal_facts,
+                ))
+            if target in (world.list_entities("Person") or []):
+                return PlanResult(success=False, error=chain_err, used_rule_based=True)
         rule = _plan_use_item_on(world, character, target)
         rule.goal_facts = goal_facts
         if rule.domain_str:
@@ -899,6 +1044,9 @@ def _plan_for_goal_impl(
 
     if goal_term == "Gain information":
         return _finalize(_plan_gain_information(world, character, target))
+
+    if goal_term == "Perform action":
+        return _finalize(_plan_perform_action(world, character, goal_data))
 
     if goal_term == "Go to location":
         return _finalize(_plan_go_to_location(world, character, target, explore=False))

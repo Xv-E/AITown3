@@ -1,0 +1,35 @@
+{
+  "archetype": "hall_site",
+  "extends": "construction_site",
+  "name": "HallSite",
+  "footprint": [4, 3],
+  "description": "The great frame of the Village Hall. Needs planks, and bread for the raising feast.",
+  "blueprint": {
+    "label": "Village Hall",
+    "description": "The heart of a real village. Needs 10 planks, 5 bread. Requires a Bakery; only one.",
+    "zone_tags": ["build"],
+    "requires": [
+      { "op": "count", "archetype": "oven", "gte": 1, "message": "Build a Bakery first" },
+      { "op": "count", "archetype": ["hall_site", "village_bell"], "lte": 0, "message": "There is already a Village Hall" }
+    ],
+    "order": 30
+  },
+  "script": {
+    "initial_state": { "need_plank": 10, "need_bread": 5 },
+    "on_tick": [
+      {
+        "op": "rule",
+        "id": "built",
+        "when": [
+          { "op": "prop_lte", "entity": "@self", "prop": "need_plank", "value": 0 },
+          { "op": "prop_lte", "entity": "@self", "prop": "need_bread", "value": 0 }
+        ],
+        "do": [
+          { "op": "spawn_item", "archetype": "village_bell", "located_at": "@here", "x": "@self.x", "y": "@self.y" },
+          { "op": "delete_entity", "entity": "@self" }
+        ],
+        "announce": "The Village Hall is raised! The settlement is now a proper village."
+      }
+    ]
+  }
+}
