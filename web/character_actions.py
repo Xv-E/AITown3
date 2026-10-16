@@ -659,6 +659,18 @@ def list_locations_graph(world) -> Dict[str, Any]:
     return {"locations": locations, "edges": edges}
 
 
+def _with_item_actions(world, person: str, item: Dict[str, Any]) -> Dict[str, Any]:
+    """可交互物品附上它的动作（作者写的 / 已有的），以及此刻对 person 能不能做。"""
+    try:
+        from ephemeral_action_dsl import load_actions_from_item
+        from item_interact import action_options
+
+        options = action_options(world, person, item["name"], load_actions_from_item(world, item["name"]))
+    except Exception:
+        options = []
+    return {**item, "actions": [{k: o[k] for k in ("id", "label", "available", "reason")} for o in options]}
+
+
 def get_character_actions(world, person: str) -> Dict[str, Any]:
     state = _person_state(world, person)
     if state is None:
@@ -668,6 +680,7 @@ def get_character_actions(world, person: str) -> Dict[str, Any]:
     people_here = _people_at_location(world, loc, exclude=person) if loc else []
     all_ground = _items_at_location(world, loc) if loc else []
     pickable, interactables = _split_ground_items(all_ground)
+    interactables = [_with_item_actions(world, person, it) for it in interactables]
     adjacent = _adjacent_locations(world, loc) if loc else []
     locked = _locked_exits(world, loc) if loc else []
 
@@ -690,6 +703,37 @@ def get_character_actions(world, person: str) -> Dict[str, Any]:
         "actions": actions,
         "available_action_count": available_count,
     }
+
+
+def world_view(world, viewer: Optional[str]) -> Dict[str, Any]:
+    """无缝世界的全貌（世界格子坐标）：区域范围、地上的东西、所有人站在哪。"""
+    from spatial import person_cell, region_areas
+
+    areas = region_areas(world)
+    regions = []
+    items: List[Dict[str, Any]] = []
+    for name, (ax, ay, aw, ah) in sorted(areas.items()):
+        info = get_location_info(world, name) or {}
+        regions.append({
+            "name": name, "x": ax, "y": ay, "w": aw, "h": ah,
+            "description": info.get("description") or "",
+            "tags": info.get("tags") or "",
+        })
+        for it in _items_at_location(world, name):
+            if it.get("x") is None or it.get("y") is None:
+                continue
+            entry = {k: it.get(k) for k in ("name", "item_kind", "portable", "locked", "description", "w", "h")}
+            entry.update(region=name, x=ax + int(it["x"]), y=ay + int(it["y"]))
+            if _is_interactable_item(it) and viewer:
+                entry["actions"] = _with_item_actions(world, viewer, it)["actions"]
+            items.append(entry)
+    persons = []
+    for c in list_characters(world):
+        cell = person_cell(world, c["name"])
+        persons.append({**c, "x": cell[0] if cell else None, "y": cell[1] if cell else None})
+    width = max((x + w for x, _, w, _ in areas.values()), default=0)
+    height = max((y + h for _, y, _, h in areas.values()), default=0)
+    return {"width": width, "height": height, "regions": regions, "items": items, "persons": persons}
 
 
 def get_play_state(world) -> Dict[str, Any]:
@@ -757,6 +801,7 @@ def get_play_state(world) -> Dict[str, Any]:
         "all_actions": actions_data.get("actions") or [],
         "quests": quests,
         "map": list_locations_graph(world),
+        "world": world_view(world, name),
         "simulation": _play_simulation_snapshot(world),
         "characters": list_characters(world),
     }
@@ -827,6 +872,9 @@ def _play_simulation_snapshot(world) -> Dict[str, Any]:
             "clock": _clock_safe(sim.sim_time),
             "npc_activity": sim.npc_activity_summary(world),
             "chronicle": sim.chronicle(limit=12),
+            "story": sim.story(),
+            "conflicts": sim.conflicts(limit=8),
+            "conversations": sim.conversations(limit=8),
         }
     except Exception:
         return {"sim_time": 0, "tick": 0, "clock": _clock_safe(0.0), "npc_activity": []}

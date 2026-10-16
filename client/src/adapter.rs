@@ -1,43 +1,85 @@
-//! Command → behaviour adapter.
+//! NPCs in the seamless world.
 //!
-//! The server simulation decides *what* NPCs do (`move(Lila, Home, Clinic)`,
-//! `pick_up(Rowan, Herb, Clinic)`, ...) and applies the effects to the graph.
-//! This module turns those commands, plus the location changes we observe
-//! between syncs, into visible behaviour: walk to the exit and use it, walk up
-//! to an item and pick it up, walk over to someone and talk, and so on.
+//! The server decides what each NPC does and, for anything that needs walking, sends the
+//! route (`pending_path`, world cells) and when the action completes. Here every NPC lives
+//! in the one world scene and follows that route so it arrives when the server's walk
+//! ends, then shows what it is doing above its head. Without a route it glides to the
+//! cell the server says it stands on.
 
 use bevy::prelude::*;
-use std::collections::{HashMap, VecDeque};
+use std::time::Instant;
 
-use crate::net::{NpcActivity, WorldSnapshot};
-use crate::scene::{
-    clamp_to_room, exit_position_for, npc_home, Interactive, PlayerAvatar, TargetKind,
-};
+use crate::net::{trim_line, NpcActivity, SimClock, WorldSnapshot};
+use crate::speech::SpeechPlayer;
+use crate::scene::{cell_center, Interactive, TargetKind, TILE};
 
-const NPC_SPEED: f32 = 170.0;
-const ARRIVE_EPS: f32 = 3.0;
-const APPROACH_GAP: f32 = 42.0;
-
-#[derive(Clone, Debug)]
-enum Step {
-    WalkTo(Vec2),
-    /// Stand still showing `text` above the head for `secs` seconds.
-    Act { text: String, secs: f32 },
-    Despawn,
-}
+/// Server walking speed (world cells per sim second); must match spatial.WALK_CELLS_PER_SEC.
+const SERVER_WALK_SPEED: f32 = 10.0;
+/// Fallback glide speed when correcting to the server position (pixels per second).
+const GLIDE_SPEED: f32 = 6.0 * TILE;
+const MIN_WALK_SECS: f32 = 0.2;
 
 #[derive(Component)]
 pub struct NpcAvatar {
     name: String,
-    home: Vec2,
-    queue: VecDeque<Step>,
-    current: Option<Step>,
-    /// Walking out through an exit; never returns home.
-    leaving: bool,
-    /// Already gone from this room according to the server.
-    gone: bool,
-    pending_key: String,
+    /// Route + timing currently being walked.
+    walk: Option<Walk>,
+    /// Identifies the server action the current walk belongs to.
+    walk_key: String,
     bubble: String,
+}
+
+impl NpcAvatar {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+}
+
+struct Walk {
+    points: Vec<Vec2>,
+    started: Instant,
+    secs: f32,
+}
+
+impl Walk {
+    fn position(&self) -> (Vec2, bool) {
+        let t = (self.started.elapsed().as_secs_f32() / self.secs).clamp(0.0, 1.0);
+        let lengths: Vec<f32> = self.points.windows(2).map(|w| w[0].distance(w[1])).collect();
+        let total: f32 = lengths.iter().sum();
+        if total <= f32::EPSILON {
+            return (*self.points.last().unwrap(), true);
+        }
+        let mut left = t * total;
+        for (i, len) in lengths.iter().enumerate() {
+            if left <= *len {
+                let a = self.points[i];
+                let b = self.points[i + 1];
+                return (a.lerp(b, if *len > 0.0 { left / len } else { 1.0 }), t >= 1.0);
+            }
+            left -= len;
+        }
+        (*self.points.last().unwrap(), true)
+    }
+}
+
+/// Points to walk and how long (sim seconds) it should take, at the server's walking
+/// speed. If we hear about the walk late, pick it up where the NPC should be by now
+/// instead of rushing through the whole route in the time that is left.
+fn walk_plan(here: Vec2, path: &[[i32; 2]], activity: &crate::net::NpcActivity, now: f32) -> (Vec<Vec2>, f32) {
+    let cells: Vec<Vec2> = path.iter().map(|c| cell_center(IVec2::new(c[0], c[1]))).collect();
+    let total = activity
+        .pending_walk_seconds
+        .filter(|s| *s > 0.0)
+        .unwrap_or(path.len().saturating_sub(1) as f32 / SERVER_WALK_SPEED);
+    let elapsed = activity.pending_started_at.map_or(0.0, |t| (now - t).clamp(0.0, total));
+    let walked = ((cells.len() - 1) as f32 * elapsed / total.max(1e-3)).floor() as usize;
+    let walked = walked.min(cells.len() - 1);
+    let expected = cells[walked];
+    // Close to where they should be: keep walking from here. Far behind: jump there.
+    let start = if here.distance(expected) <= TILE * 3.0 { here } else { expected };
+    let mut points = vec![start];
+    points.extend(cells[walked + 1..].iter().copied());
+    (points, total - elapsed)
 }
 
 #[derive(Component)]
@@ -45,249 +87,119 @@ pub struct NpcBubble {
     owner: Entity,
 }
 
+/// Small line under the name: what the NPC is currently trying to do.
+#[derive(Component)]
+pub struct NpcThought {
+    owner: Entity,
+}
+
 #[derive(Resource, Default)]
 pub struct NpcDirector {
-    room: String,
     revision: Option<u64>,
-    known_locations: HashMap<String, String>,
 }
 
 pub fn sync_npcs(
     mut commands: Commands,
     world: Res<WorldSnapshot>,
+    clock: Res<SimClock>,
     mut director: ResMut<NpcDirector>,
     mut avatars: Query<(Entity, &mut NpcAvatar, &Transform)>,
-    targets: Query<(&Transform, &Interactive), Without<NpcAvatar>>,
-    player: Query<&Transform, (With<PlayerAvatar>, Without<NpcAvatar>)>,
 ) {
     if director.revision == Some(world.revision) {
         return;
     }
     director.revision = Some(world.revision);
 
-    let room = world.current_location.name.clone();
-    let room_changed = director.room != room;
-    if room_changed {
-        for (entity, _, _) in &avatars {
+    let people: Vec<_> = world
+        .world
+        .persons
+        .iter()
+        .filter(|p| p.name != world.player.name && p.cell().is_some())
+        .collect();
+
+    // Gone from the world (or world reloaded): remove.
+    for (entity, avatar, _) in &avatars {
+        if !people.iter().any(|p| p.name == avatar.name) {
             commands.entity(entity).despawn();
         }
-        director.room = room.clone();
     }
 
-    // Where things are right now, for "walk over to X".
-    let mut positions: HashMap<String, Vec2> = HashMap::new();
-    for (transform, interactive) in &targets {
-        positions.insert(interactive.name.clone(), transform.translation.truncate());
-    }
-    for (_, avatar, transform) in &avatars {
-        positions.insert(avatar.name.clone(), transform.translation.truncate());
-    }
-    if let Ok(transform) = player.single() {
-        positions.insert(world.player.name.clone(), transform.translation.truncate());
-    }
-
-    let mut here = world.people_here.clone();
-    here.sort_by(|a, b| a.name.cmp(&b.name));
-    let mut seen: Vec<String> = Vec::new();
-
-    for (idx, actor) in here.iter().enumerate() {
-        let home = npc_home(&world, &actor.name, idx);
-        seen.push(actor.name.clone());
-
-        let existing = if room_changed {
-            None
-        } else {
-            avatars
-                .iter_mut()
-                .find(|(_, avatar, _)| avatar.name == actor.name && !avatar.gone)
-        };
-
-        if let Some((_, mut avatar, _)) = existing {
-            avatar.home = home;
+    for person in people {
+        let server_cell = person.cell().unwrap();
+        let existing = avatars.iter_mut().find(|(_, a, _)| a.name == person.name);
+        let Some((entity, mut avatar, transform)) = existing else {
+            spawn_npc(&mut commands, &person.name, person.alive, person.hp, cell_center(server_cell));
             continue;
-        }
-
-        // New arrival: enter through the exit they came from, if we know it.
-        let came_from = director.known_locations.get(&actor.name).cloned();
-        let entry = came_from
-            .filter(|prev| !room_changed && *prev != room)
-            .and_then(|prev| exit_position_for(&world, &prev));
-        let mut queue = VecDeque::new();
-        let start = match entry {
-            Some(door) => {
-                queue.push_back(Step::WalkTo(home));
-                door
-            }
-            None => home,
         };
-        spawn_npc(&mut commands, &actor.name, actor.alive, actor.hp, start, home, queue);
-    }
+        commands.entity(entity).insert(Interactive {
+            kind: TargetKind::Person { name: person.name.clone() },
+            prompt: format!("{}  (HP {})", person.name, person.hp),
+            name: person.name.clone(),
+            radius: TILE * 1.8,
+        });
+        let here = transform.translation.truncate();
+        let activity = world.activity(&person.name);
+        avatar.bubble = activity.map(action_text).unwrap_or_default();
 
-    // Left the room (or died / vanished): walk out through the matching exit.
-    if !room_changed {
-        for (entity, mut avatar, _) in &mut avatars {
-            if avatar.gone || seen.contains(&avatar.name) {
-                continue;
-            }
-            avatar.gone = true;
-            commands.entity(entity).remove::<Interactive>();
-            if avatar.leaving {
-                avatar.queue.push_back(Step::Despawn);
-                continue;
-            }
-            let destination = world
-                .character(&avatar.name)
-                .and_then(|c| c.location.clone())
-                .unwrap_or_default();
-            avatar.queue.clear();
-            avatar.current = None;
-            avatar.leaving = true;
-            if let Some(door) = exit_position_for(&world, &destination) {
-                avatar.queue.push_back(Step::WalkTo(door));
-                avatar.queue.push_back(Step::Act {
-                    text: format!("-> {destination}"),
-                    secs: 0.4,
+        let path = activity.and_then(|a| a.pending_path.clone()).filter(|p| p.len() >= 2);
+        match (activity, path) {
+            (Some(a), Some(path)) => {
+                let key = format!("{:?}{:?}", path.last(), a.pending_completes_at);
+                if key == avatar.walk_key {
+                    continue;
+                }
+                avatar.walk_key = key;
+                let (points, sim_secs) = walk_plan(here, &path, a, clock.now());
+                avatar.walk = Some(Walk {
+                    points,
+                    started: Instant::now(),
+                    secs: (sim_secs * clock.wall_per_sim()).max(MIN_WALK_SECS),
                 });
             }
-            avatar.queue.push_back(Step::Despawn);
-        }
-
-        // Translate what each NPC is currently doing into steps.
-        for (_, mut avatar, transform) in &mut avatars {
-            if avatar.gone {
-                continue;
+            _ => {
+                let target = cell_center(server_cell);
+                if avatar.walk.is_some() || here.distance(target) < 2.0 {
+                    continue;
+                }
+                avatar.walk_key.clear();
+                avatar.walk = Some(Walk {
+                    points: vec![here, target],
+                    started: Instant::now(),
+                    secs: (here.distance(target) / GLIDE_SPEED).max(MIN_WALK_SECS),
+                });
             }
-            let Some(activity) = world.activity(&avatar.name) else {
-                continue;
-            };
-            if activity.pending_action.is_empty() {
-                avatar.pending_key.clear();
-                // A move that never happened (rejected / replanned): come back inside.
-                avatar.leaving = false;
-                continue;
-            }
-            let key = format!("{}({})", activity.pending_action, activity.pending_args.join(","));
-            if key == avatar.pending_key {
-                continue;
-            }
-            avatar.pending_key = key;
-            let me = transform.translation.truncate();
-            let (steps, leaving) = command_to_steps(activity, &world, &positions, me);
-            if steps.is_empty() {
-                continue;
-            }
-            avatar.queue = steps.into();
-            avatar.current = None;
-            avatar.leaving = leaving;
         }
     }
-
-    director.known_locations = world
-        .characters
-        .iter()
-        .filter_map(|c| c.location.clone().map(|loc| (c.name.clone(), loc)))
-        .collect();
 }
 
-/// The adapter table: one simulation command → a short behaviour script.
-fn command_to_steps(
-    activity: &NpcActivity,
-    world: &WorldSnapshot,
-    positions: &HashMap<String, Vec2>,
-    me: Vec2,
-) -> (Vec<Step>, bool) {
+/// What the NPC is doing, for the bubble above its head.
+fn action_text(activity: &NpcActivity) -> String {
+    // The plan step in words, with how far through the plan they are.
+    if !activity.step_line.is_empty() {
+        return if activity.plan_len > 1 {
+            format!("{} ({}/{})", activity.step_line, activity.plan_step, activity.plan_len)
+        } else {
+            activity.step_line.clone()
+        };
+    }
     let args = &activity.pending_args;
     let arg = |i: usize| args.get(i).cloned().unwrap_or_default();
-    let approach = |name: &str| {
-        positions.get(name).map(|&target| {
-            let away = (me - target).normalize_or(Vec2::NEG_Y);
-            clamp_to_room(target + away * APPROACH_GAP)
-        })
-    };
-    let walk_then = |target: &str, text: String, secs: f32| {
-        let mut steps = Vec::new();
-        if let Some(spot) = approach(target) {
-            steps.push(Step::WalkTo(spot));
-        }
-        steps.push(Step::Act { text, secs });
-        steps
-    };
-
     match activity.pending_action.as_str() {
-        "move" => {
-            let to = arg(2);
-            match exit_position_for(world, &to) {
-                Some(door) => (
-                    vec![
-                        Step::WalkTo(door),
-                        Step::Act {
-                            text: format!("-> {to}"),
-                            secs: 0.6,
-                        },
-                    ],
-                    true,
-                ),
-                None => (Vec::new(), false),
-            }
-        }
-        "talk" => {
-            let other = arg(1);
-            (walk_then(&other, format!("talking to {other}..."), 3.5), false)
-        }
-        "pick_up" => {
-            let item = arg(1);
-            (walk_then(&item, format!("picks up {item}"), 1.0), false)
-        }
-        "give" => {
-            let (item, receiver) = (arg(1), arg(2));
-            (walk_then(&receiver, format!("gives {item} to {receiver}"), 1.2), false)
-        }
-        "attack" => {
-            let target = arg(1);
-            (walk_then(&target, format!("attacks {target}!"), 1.2), false)
-        }
-        "use_on" => {
-            let (item, target) = (arg(1), arg(2));
-            (walk_then(&target, format!("uses {item} on {target}"), 1.5), false)
-        }
-        "interact" => {
-            let target = arg(1);
-            (walk_then(&target, format!("uses {target}"), 2.5), false)
-        }
-        "drop" => (
-            vec![Step::Act {
-                text: format!("drops {}", arg(1)),
-                secs: 1.0,
-            }],
-            false,
-        ),
-        "use_item" => (
-            vec![Step::Act {
-                text: format!("uses {}", arg(1)),
-                secs: 1.0,
-            }],
-            false,
-        ),
-        "wait" | "noop" | "" => (Vec::new(), false),
-        other => (
-            vec![Step::Act {
-                text: other.to_string(),
-                secs: 1.0,
-            }],
-            false,
-        ),
+        "" | "wait" | "noop" => String::new(),
+        "move" => format!("-> {}", arg(2)),
+        "talk" => format!("talking to {}", arg(1)),
+        "pick_up" => format!("picking up {}", arg(1)),
+        "give" => format!("giving {} to {}", arg(1), arg(2)),
+        "attack" => format!("attacking {}!", arg(1)),
+        "use_on" => format!("{} -> {}", arg(1), arg(2)),
+        "interact" => format!("{} {}", arg(2).replace('_', " "), arg(1)),
+        "drop" => format!("dropping {}", arg(1)),
+        "use_item" => format!("using {}", arg(1)),
+        other => other.replace('_', " "),
     }
 }
 
-fn spawn_npc(
-    commands: &mut Commands,
-    name: &str,
-    alive: bool,
-    hp: i32,
-    start: Vec2,
-    home: Vec2,
-    queue: VecDeque<Step>,
-) {
+fn spawn_npc(commands: &mut Commands, name: &str, alive: bool, hp: i32, at: Vec2) {
     let color = if alive {
         Color::srgb(0.78, 0.32, 0.43)
     } else {
@@ -297,27 +209,21 @@ fn spawn_npc(
         .spawn((
             Sprite {
                 color,
-                custom_size: Some(Vec2::splat(46.0)),
+                custom_size: Some(Vec2::splat(TILE * 0.85)),
                 ..default()
             },
-            Transform::from_xyz(start.x, start.y, 5.0),
+            Transform::from_xyz(at.x, at.y, 5.0),
             NpcAvatar {
                 name: name.to_string(),
-                home,
-                queue,
-                current: None,
-                leaving: false,
-                gone: false,
-                pending_key: String::new(),
+                walk: None,
+                walk_key: String::new(),
                 bubble: String::new(),
             },
             Interactive {
-                kind: TargetKind::Person {
-                    name: name.to_string(),
-                },
+                kind: TargetKind::Person { name: name.to_string() },
                 prompt: format!("{name}  (HP {hp})"),
                 name: name.to_string(),
-                radius: 56.0,
+                radius: TILE * 1.8,
             },
         ))
         .id();
@@ -329,7 +235,17 @@ fn spawn_npc(
                 ..default()
             },
             TextColor(Color::srgb(0.98, 0.88, 0.84)),
-            Transform::from_xyz(0.0, -36.0, 0.2),
+            Transform::from_xyz(0.0, -TILE * 0.75, 0.2),
+        ));
+        parent.spawn((
+            Text2d::new(""),
+            TextFont {
+                font_size: 10.0,
+                ..default()
+            },
+            TextColor(Color::srgb(0.66, 0.72, 0.80)),
+            Transform::from_xyz(0.0, -TILE * 1.15, 0.2),
+            NpcThought { owner: npc },
         ));
         parent.spawn((
             Text2d::new(""),
@@ -338,70 +254,41 @@ fn spawn_npc(
                 ..default()
             },
             TextColor(Color::srgb(1.0, 0.92, 0.55)),
-            Transform::from_xyz(0.0, 40.0, 0.3),
+            Transform::from_xyz(0.0, TILE * 0.85, 0.3),
             NpcBubble { owner: npc },
         ));
     });
 }
 
 pub fn run_npc_behaviour(
-    mut commands: Commands,
     time: Res<Time>,
-    mut avatars: Query<(Entity, &mut NpcAvatar, &mut Transform)>,
+    speech: Res<SpeechPlayer>,
+    mut avatars: Query<(&mut NpcAvatar, &mut Transform)>,
 ) {
-    let dt = time.delta_secs();
-    for (entity, mut avatar, mut transform) in &mut avatars {
-        if avatar.current.is_none() {
-            avatar.current = avatar.queue.pop_front();
-        }
-        if avatar.current.is_none() && !avatar.leaving && !avatar.gone {
-            let pos = transform.translation.truncate();
-            if pos.distance(avatar.home) > ARRIVE_EPS {
-                avatar.current = Some(Step::WalkTo(avatar.home));
+    for (mut avatar, mut transform) in &mut avatars {
+        if speech.in_conversation(&avatar.name) {
+            // Stand still until the conversation has been said; the walk resumes where it was.
+            if let Some(walk) = avatar.walk.as_mut() {
+                walk.started += time.delta();
             }
+            continue;
         }
-
-        let mut finished = false;
-        let mut bubble = String::new();
-        match avatar.current.as_mut() {
-            Some(Step::WalkTo(dest)) => {
-                let pos = transform.translation.truncate();
-                let delta = *dest - pos;
-                let step = NPC_SPEED * dt;
-                if delta.length() <= step.max(ARRIVE_EPS) {
-                    transform.translation.x = dest.x;
-                    transform.translation.y = dest.y;
-                    finished = true;
-                } else {
-                    let next = pos + delta.normalize() * step;
-                    transform.translation.x = next.x;
-                    transform.translation.y = next.y;
-                }
-            }
-            Some(Step::Act { text, secs }) => {
-                bubble = text.clone();
-                *secs -= dt;
-                finished = *secs <= 0.0;
-            }
-            Some(Step::Despawn) => {
-                commands.entity(entity).despawn();
-                continue;
-            }
-            None => {}
-        }
-        if finished {
-            avatar.current = None;
-        }
-        if avatar.bubble != bubble {
-            avatar.bubble = bubble;
+        let Some(walk) = avatar.walk.as_ref() else { continue };
+        let (pos, done) = walk.position();
+        transform.translation.x = pos.x;
+        transform.translation.y = pos.y;
+        if done {
+            avatar.walk = None;
         }
     }
 }
 
 pub fn update_npc_bubbles(
     world: Res<WorldSnapshot>,
+    speech: Res<SpeechPlayer>,
     avatars: Query<&NpcAvatar>,
-    mut bubbles: Query<(&NpcBubble, &mut Text2d)>,
+    mut bubbles: Query<(&NpcBubble, &mut Text2d), Without<NpcThought>>,
+    mut thoughts: Query<(&NpcThought, &mut Text2d), Without<NpcBubble>>,
 ) {
     for (bubble, mut text) in &mut bubbles {
         let Ok(avatar) = avatars.get(bubble.owner) else {
@@ -411,7 +298,9 @@ pub fn update_npc_bubbles(
             .activity(&avatar.name)
             .map(|a| a.state_label.clone())
             .unwrap_or_default();
-        let next = if !state_label.is_empty() && avatar.bubble.is_empty() {
+        let next = if speech.is_speaking(&avatar.name) {
+            String::new() // the speech bubble is up; don't stack the action text on it
+        } else if !state_label.is_empty() && avatar.bubble.is_empty() {
             state_label
         } else {
             avatar.bubble.clone()
@@ -419,5 +308,62 @@ pub fn update_npc_bubbles(
         if text.0 != next {
             text.0 = next;
         }
+    }
+    for (thought, mut text) in &mut thoughts {
+        let Ok(avatar) = avatars.get(thought.owner) else {
+            continue;
+        };
+        let next = world
+            .activity(&avatar.name)
+            .map(thought_line)
+            .unwrap_or_default();
+        if text.0 != next {
+            text.0 = next;
+        }
+    }
+}
+
+/// "goal -> target" for the line under an NPC's name.
+pub fn thought_line(activity: &NpcActivity) -> String {
+    let goal = match (activity.goal.as_str(), activity.target.as_str()) {
+        ("", _) => return String::new(),
+        (goal, "") => goal.to_string(),
+        (goal, target) => format!("{goal} -> {target}"),
+    };
+    trim_line(&goal, 34)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_walk_heard_about_late_is_picked_up_mid_route_not_rushed() {
+        let path: Vec<[i32; 2]> = (0..21).map(|x| [x, 0]).collect(); // 20 cells = 2 sim s
+        let activity = crate::net::NpcActivity {
+            pending_started_at: Some(10.0),
+            pending_walk_seconds: Some(2.0),
+            ..Default::default()
+        };
+        let start = cell_center(IVec2::new(0, 0));
+        let (points, secs) = walk_plan(start, &path, &activity, 10.0);
+        assert_eq!((points.len(), secs), (21, 2.0), "on time: the whole route, full time");
+        let (points, secs) = walk_plan(start, &path, &activity, 11.0);
+        assert_eq!(points[0], cell_center(IVec2::new(10, 0)), "late: jump to where they should be");
+        assert_eq!((points.len(), secs), (11, 1.0), "...and walk the rest at the same speed");
+    }
+    use std::time::Duration;
+
+    #[test]
+    fn walk_follows_the_route_and_finishes() {
+        let walk = Walk {
+            points: vec![Vec2::ZERO, Vec2::new(10.0, 0.0), Vec2::new(10.0, 10.0)],
+            started: Instant::now() - Duration::from_millis(500),
+            secs: 1.0,
+        };
+        let (mid, done) = walk.position();
+        assert!(!done && (mid - Vec2::new(10.0, 0.0)).length() < 1.0, "{mid:?}");
+        let finished = Walk { started: Instant::now() - Duration::from_secs(2), ..walk };
+        assert_eq!(finished.position(), (Vec2::new(10.0, 10.0), true));
     }
 }

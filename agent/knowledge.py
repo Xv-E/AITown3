@@ -201,8 +201,29 @@ def load_knowledge(world: Any, me: str, *, _seed_missing: bool = True) -> Knowle
 
 
 def know_places(world: Any, me: str, places: Iterable[str], *, with_neighbors: bool = False) -> None:
-    names = [p for p in places if p]
+    names = {p for p in places if p}
     if not names:
+        return
+    if with_neighbors:
+        rows = world.run_query(
+            """
+            UNWIND $names AS n
+            MATCH (:Location {name: n})-[:ADJACENT_TO|LOCKED_ADJACENT_TO]-(m:Location)
+            RETURN DISTINCT m.name AS name
+            """,
+            names=sorted(names),
+        )
+        names |= {r["name"] for r in rows if r.get("name")}
+    # 只写新认识的地点：每拍都会调用，无变化时不写库（写会让 tick 读缓存失效）
+    known = {
+        r["name"]
+        for r in world.run_query(
+            "MATCH (:Person {name: $me})-[:KNOWS_PLACE]->(l:Location) RETURN l.name AS name",
+            me=me,
+        )
+    }
+    missing = sorted(names - known)
+    if not missing:
         return
     world.run_query(
         """
@@ -211,18 +232,8 @@ def know_places(world: Any, me: str, places: Iterable[str], *, with_neighbors: b
         MATCH (l:Location {name: n})
         MERGE (p)-[:KNOWS_PLACE]->(l)
         """,
-        me=me, names=names,
+        me=me, names=missing,
     )
-    if with_neighbors:
-        world.run_query(
-            """
-            MATCH (p:Person {name: $me})
-            UNWIND $names AS n
-            MATCH (:Location {name: n})-[:ADJACENT_TO|LOCKED_ADJACENT_TO]-(m:Location)
-            MERGE (p)-[:KNOWS_PLACE]->(m)
-            """,
-            me=me, names=names,
-        )
 
 
 def learn(world: Any, me: str, beliefs: Dict[str, Belief], *, t: float = 0.0,

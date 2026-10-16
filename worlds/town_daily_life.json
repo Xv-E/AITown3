@@ -6,27 +6,32 @@
     {
       "name": "CampfireClearing",
       "description": "The heart of the camp. The campfire burns day and night; meals, chatter, and night watch all happen here.",
-      "tags": "hub,fire,social,meal"
+      "tags": "hub,fire,social,meal",
+      "area": [20, 13, 20, 14]
     },
     {
       "name": "Forest",
       "description": "Dense woods west of camp. Fallen logs and dry branches make good firewood.",
-      "tags": "work,wood"
+      "tags": "work,wood",
+      "area": [0, 10, 20, 20]
     },
     {
       "name": "BerryGrove",
       "description": "Sunlit thickets. Ripe berries can be picked and roasted at the fire.",
-      "tags": "work,food"
+      "tags": "work,food",
+      "area": [40, 10, 20, 20]
     },
     {
       "name": "RiverBank",
       "description": "A shallow riverbank. A place to fetch water, rest, and whisper secrets.",
-      "tags": "social,water"
+      "tags": "social,water",
+      "area": [20, 27, 20, 13]
     },
     {
       "name": "Shelter",
       "description": "A rough wooden lean-to. Everyone sleeps packed together here at night.",
-      "tags": "home,rest"
+      "tags": "home,rest",
+      "area": [20, 0, 20, 13]
     }
   ],
   "adjacencies": [
@@ -503,11 +508,61 @@
       "located_at": "Forest",
       "item_kind": "tree",
       "portable": false,
-      "description": "A sturdy oak. Interactions are invented at runtime as temporary actions.",
+      "description": "A sturdy oak. Good branches grow back over a few hours.",
       "script": {
         "interactive": true,
         "lore": "Rowan's working oak. Solid chops free logs without killing the whole tree.",
-        "behavior": "Harvestable oak tree. Primary useful interaction is chopping to obtain wood for the campfire. Examining the bark is fine but should not yield wood. Do not fell the tree permanently."
+        "state_props": [
+          "logs"
+        ],
+        "initial_state": {
+          "logs": 3
+        },
+        "on_tick": [
+          {
+            "op": "add_prop",
+            "prop": "logs",
+            "delta_per_sec": 0.02,
+            "max": 3
+          }
+        ],
+        "actions": [
+          {
+            "id": "chop",
+            "label": "Chop for wood",
+            "requires": [
+              {
+                "op": "prop_gte",
+                "entity": "@target",
+                "prop": "logs",
+                "value": 1,
+                "message": "@target has no good branches left; give it a few hours"
+              }
+            ],
+            "effects": [
+              {
+                "op": "spawn_item",
+                "archetype": "firewood",
+                "held_by": "@actor"
+              },
+              {
+                "op": "add_prop",
+                "entity": "@target",
+                "prop": "logs",
+                "delta": -1,
+                "min": 0
+              }
+            ],
+            "narrative": "@actor chops a dry log from @target."
+          },
+          {
+            "id": "examine",
+            "label": "Examine the bark",
+            "requires": [],
+            "effects": [],
+            "narrative": "@actor runs a hand over the bark of @target. Good wood, if you give it time."
+          }
+        ]
       }
     },
     {
@@ -536,7 +591,316 @@
             "solved",
             true
           ]
-        }
+        },
+        "actions": [
+          {
+            "id": "turn_cw_from_north",
+            "label": "Turn clockwise",
+            "requires": [
+              {
+                "op": "prop_eq",
+                "entity": "@target",
+                "prop": "facing",
+                "value": "north"
+              },
+              {
+                "op": "prop_eq",
+                "entity": "@target",
+                "prop": "solved",
+                "value": false,
+                "message": "@target is locked in place, facing east"
+              }
+            ],
+            "effects": [
+              {
+                "op": "set_prop",
+                "entity": "@target",
+                "prop": "solved",
+                "value": true,
+                "when": [
+                  {
+                    "op": "prop_gte",
+                    "entity": "@target",
+                    "prop": "steps",
+                    "value": 2
+                  }
+                ]
+              },
+              {
+                "op": "add_prop",
+                "entity": "@target",
+                "prop": "steps",
+                "delta": 1
+              },
+              {
+                "op": "set_prop",
+                "entity": "@target",
+                "prop": "facing",
+                "value": "east"
+              }
+            ],
+            "narrative": "@actor turns @target clockwise; it grinds round to face east."
+          },
+          {
+            "id": "turn_cw_from_east",
+            "label": "Turn clockwise",
+            "requires": [
+              {
+                "op": "prop_eq",
+                "entity": "@target",
+                "prop": "facing",
+                "value": "east"
+              },
+              {
+                "op": "prop_eq",
+                "entity": "@target",
+                "prop": "solved",
+                "value": false,
+                "message": "@target is locked in place, facing east"
+              }
+            ],
+            "effects": [
+              {
+                "op": "add_prop",
+                "entity": "@target",
+                "prop": "steps",
+                "delta": 1
+              },
+              {
+                "op": "set_prop",
+                "entity": "@target",
+                "prop": "facing",
+                "value": "south"
+              }
+            ],
+            "narrative": "@actor turns @target clockwise; it grinds round to face south."
+          },
+          {
+            "id": "turn_cw_from_south",
+            "label": "Turn clockwise",
+            "requires": [
+              {
+                "op": "prop_eq",
+                "entity": "@target",
+                "prop": "facing",
+                "value": "south"
+              },
+              {
+                "op": "prop_eq",
+                "entity": "@target",
+                "prop": "solved",
+                "value": false,
+                "message": "@target is locked in place, facing east"
+              }
+            ],
+            "effects": [
+              {
+                "op": "add_prop",
+                "entity": "@target",
+                "prop": "steps",
+                "delta": 1
+              },
+              {
+                "op": "set_prop",
+                "entity": "@target",
+                "prop": "facing",
+                "value": "west"
+              }
+            ],
+            "narrative": "@actor turns @target clockwise; it grinds round to face west."
+          },
+          {
+            "id": "turn_cw_from_west",
+            "label": "Turn clockwise",
+            "requires": [
+              {
+                "op": "prop_eq",
+                "entity": "@target",
+                "prop": "facing",
+                "value": "west"
+              },
+              {
+                "op": "prop_eq",
+                "entity": "@target",
+                "prop": "solved",
+                "value": false,
+                "message": "@target is locked in place, facing east"
+              }
+            ],
+            "effects": [
+              {
+                "op": "add_prop",
+                "entity": "@target",
+                "prop": "steps",
+                "delta": 1
+              },
+              {
+                "op": "set_prop",
+                "entity": "@target",
+                "prop": "facing",
+                "value": "north"
+              }
+            ],
+            "narrative": "@actor turns @target clockwise; it grinds round to face north."
+          },
+          {
+            "id": "turn_ccw_from_east",
+            "label": "Turn counterclockwise",
+            "requires": [
+              {
+                "op": "prop_eq",
+                "entity": "@target",
+                "prop": "facing",
+                "value": "east"
+              },
+              {
+                "op": "prop_eq",
+                "entity": "@target",
+                "prop": "solved",
+                "value": false,
+                "message": "@target is locked in place, facing east"
+              }
+            ],
+            "effects": [
+              {
+                "op": "add_prop",
+                "entity": "@target",
+                "prop": "steps",
+                "delta": 1
+              },
+              {
+                "op": "set_prop",
+                "entity": "@target",
+                "prop": "facing",
+                "value": "north"
+              }
+            ],
+            "narrative": "@actor turns @target counterclockwise; it grinds round to face north."
+          },
+          {
+            "id": "turn_ccw_from_south",
+            "label": "Turn counterclockwise",
+            "requires": [
+              {
+                "op": "prop_eq",
+                "entity": "@target",
+                "prop": "facing",
+                "value": "south"
+              },
+              {
+                "op": "prop_eq",
+                "entity": "@target",
+                "prop": "solved",
+                "value": false,
+                "message": "@target is locked in place, facing east"
+              }
+            ],
+            "effects": [
+              {
+                "op": "set_prop",
+                "entity": "@target",
+                "prop": "solved",
+                "value": true,
+                "when": [
+                  {
+                    "op": "prop_gte",
+                    "entity": "@target",
+                    "prop": "steps",
+                    "value": 2
+                  }
+                ]
+              },
+              {
+                "op": "add_prop",
+                "entity": "@target",
+                "prop": "steps",
+                "delta": 1
+              },
+              {
+                "op": "set_prop",
+                "entity": "@target",
+                "prop": "facing",
+                "value": "east"
+              }
+            ],
+            "narrative": "@actor turns @target counterclockwise; it grinds round to face east."
+          },
+          {
+            "id": "turn_ccw_from_west",
+            "label": "Turn counterclockwise",
+            "requires": [
+              {
+                "op": "prop_eq",
+                "entity": "@target",
+                "prop": "facing",
+                "value": "west"
+              },
+              {
+                "op": "prop_eq",
+                "entity": "@target",
+                "prop": "solved",
+                "value": false,
+                "message": "@target is locked in place, facing east"
+              }
+            ],
+            "effects": [
+              {
+                "op": "add_prop",
+                "entity": "@target",
+                "prop": "steps",
+                "delta": 1
+              },
+              {
+                "op": "set_prop",
+                "entity": "@target",
+                "prop": "facing",
+                "value": "south"
+              }
+            ],
+            "narrative": "@actor turns @target counterclockwise; it grinds round to face south."
+          },
+          {
+            "id": "turn_ccw_from_north",
+            "label": "Turn counterclockwise",
+            "requires": [
+              {
+                "op": "prop_eq",
+                "entity": "@target",
+                "prop": "facing",
+                "value": "north"
+              },
+              {
+                "op": "prop_eq",
+                "entity": "@target",
+                "prop": "solved",
+                "value": false,
+                "message": "@target is locked in place, facing east"
+              }
+            ],
+            "effects": [
+              {
+                "op": "add_prop",
+                "entity": "@target",
+                "prop": "steps",
+                "delta": 1
+              },
+              {
+                "op": "set_prop",
+                "entity": "@target",
+                "prop": "facing",
+                "value": "west"
+              }
+            ],
+            "narrative": "@actor turns @target counterclockwise; it grinds round to face west."
+          },
+          {
+            "id": "examine",
+            "label": "Study the carvings",
+            "requires": [],
+            "effects": [],
+            "narrative": "@actor studies @target. The wind marks all point east, as if the dial wants to come to rest there after a few turns."
+          }
+        ]
       }
     },
     {

@@ -4,6 +4,7 @@ Web world simulator — bridges GameLoop with UI plan state (continuous clock).
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -142,6 +143,8 @@ class WorldSimulator:
         self._last_result: Optional[Dict[str, Any]] = None
 
     def reset(self) -> None:
+        if self._game_loop is not None:
+            self._game_loop.close()
         self._game_loop = None
         self._overlays.clear()
         self.turn_count = 0
@@ -184,6 +187,13 @@ class WorldSimulator:
                 verbose=False,
                 plan_engines=["unified_planning", "bfs"],
             )
+            if os.environ.get("AITOWN3_STORYTELLER", "1") != "0":
+                from storyteller import Storyteller
+
+                self._game_loop.storyteller = Storyteller()
+            from quest import QuestTracker
+
+            self._game_loop.hooks.append(QuestTracker())
         else:
             self._game_loop.world = world
         return self._game_loop
@@ -363,6 +373,12 @@ class WorldSimulator:
                 "pending_action": pending.get("name") if isinstance(pending, dict) else None,
                 "pending_args": [str(a) for a in (pending.get("args") or [])] if isinstance(pending, dict) else [],
                 "pending_label": pending_label,
+                # 模拟秒；客户端结合 simulation.sim_time 把走路 / 动作动画对齐到服务端完成时刻
+                "pending_started_at": pending.get("started_at") if isinstance(pending, dict) else None,
+                "pending_completes_at": pending.get("completes_at") if isinstance(pending, dict) else None,
+                # 世界格子路径：客户端照着它在 completes_at 之前走完
+                "pending_path": pending.get("path") if isinstance(pending, dict) else None,
+                "pending_walk_seconds": pending.get("walk_seconds") if isinstance(pending, dict) else None,
                 "busy_remaining": p.get("busy_remaining", 0),
                 "plan_remaining": p.get("plan_remaining", 0),
                 "replan_reason": p.get("replan_reason"),
@@ -373,8 +389,52 @@ class WorldSimulator:
                 "state": states.get(name),
                 "state_label": _state_label(content, states.get(name)),
                 "trigger": trig.get("text") if isinstance(trig, dict) else None,
+                **self._plan_brief(name),
             })
         return out
+
+    def _plan_brief(self, name: str) -> Dict[str, Any]:
+        """头顶小字用：第几步 / 共几步、这一步写成人话、此刻在干什么。"""
+        loop = self._game_loop
+        state = loop.get_agent_state(name) if loop else None
+        if state is None:
+            return {}
+        try:
+            from narration import plan_view
+
+            view = plan_view(state, loop.sim_time, loop.world)
+        except Exception:  # noqa: BLE001
+            return {}
+        current = next((s["line"] for s in view["steps"] if s["state"] == "current"), "")
+        return {
+            "plan_step": view["step"],
+            "plan_len": len(view["steps"]),
+            "step_line": current,
+            "now_label": view["now"]["label"],
+        }
+
+    def story(self) -> Dict[str, Any]:
+        """Storyteller 当前走向 + 最近几拍（新的在前）。"""
+        loop = self._game_loop
+        if loop is None or loop.storyteller is None:
+            return {"arc": "", "beats": []}
+        return loop.storyteller.to_dict()
+
+    def conversations(self, limit: int = 8) -> List[Dict[str, Any]]:
+        """最近的对话（旧的在前，客户端按 id 去重后依次播放）。"""
+        loop = self._game_loop
+        return list(loop.conversations[-max(1, int(limit)):]) if loop else []
+
+    def record_conversation(self, world, a: str, b: str, location: str, lines: List[Any]) -> None:
+        """玩家通过界面说的话也进同一个列表（NPC 的回话同样冒气泡）。"""
+        self._ensure_loop(world).record_conversation(a, b, location, lines)
+
+    def conflicts(self, limit: int = 8) -> List[Dict[str, Any]]:
+        """最近的计划冲突（新的在前）。"""
+        loop = self._game_loop
+        if loop is None:
+            return []
+        return list(reversed(loop.conflicts[-max(1, int(limit)):]))
 
     def chronicle(self, limit: int = 12) -> List[Dict[str, Any]]:
         """世界大事记（新的在前）。"""
@@ -383,29 +443,56 @@ class WorldSimulator:
             return []
         return list(reversed(loop.chronicle[-max(1, int(limit)):]))
 
+    def chat(self, npc: str, player: str, *, ended: bool = False) -> None:
+        """玩家在和 npc 聊天：npc 站着等回话；ended=True 时放开。模拟没启动时什么都不做。"""
+        loop = self._game_loop
+        if loop is None:
+            return
+        from game_loop import PLAYER_REPLY_WAIT
+
+        if ended:
+            loop.release(npc, player)
+        else:
+            loop.engage(npc, player, PLAYER_REPLY_WAIT)
+
     def announce(self, text: str) -> None:
         """玩家等外部来源的新闻：进大事记并作为 news trigger 推给 NPC（模拟未启动时忽略）。"""
         loop = self._game_loop
         if loop is not None and text:
             loop._record_announcements({"events": [{"type": "announce", "text": text}]})
 
-    def history(self, name: str, limit: int = 60) -> Dict[str, Any]:
-        """角色行为日志（新的在前）+ 当前目标 / 剩余计划。"""
+    def history(self, name: str, limit: int = 60, world=None) -> Dict[str, Any]:
+        """角色行为日志（新的在前）+ 当前目标 / 剩余计划。
+
+        每条带 line（给玩家看的一句话）；技术字段（text / action / args …）保留给调试视图。
+        """
         loop = self._game_loop
         state = loop.get_agent_state(name) if loop else None
         if state is None:
             return {"name": name, "entries": [], "goal": None, "plan": []}
         from game_loop import _goal_text, _step_text
+        from content import get_content
+        from narration import NO_WORDS, entry_line, entry_reason, goal_phrase, plan_view
 
+        talk = get_content().action_for("converse")
+        world = world if world is not None else loop.world
         plan = [_step_text(s) for s in (state.current_plan or [])[state.plan_index:]]
         goal = state.last_goal or {}
+        entries = []
+        for e in reversed(state.history[-max(1, int(limit)):]):
+            e = dict(e, line=entry_line(e, name, world), **entry_reason(e, world))
+            if e.get("kind") == "done" and e.get("action") == talk and not e.get("dialogue"):
+                e["note"] = NO_WORDS
+            entries.append(e)
         return {
             "name": name,
             "goal": _goal_text(goal) if goal else None,
+            "goal_line": goal_phrase(goal, world) if goal else None,
             "goal_reason": goal.get("reason") or goal.get("reasoning"),
             "plan": plan,
             "status": state.status,
-            "entries": list(reversed(state.history[-max(1, int(limit)):])),
+            **plan_view(state, loop.sim_time, world),
+            "entries": entries,
         }
 
     def advance_time(self, world, hours: float) -> float:

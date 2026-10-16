@@ -3,11 +3,12 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::{
     collections::HashMap,
-    io::{Read, Write},
+    io::{BufRead, BufReader, Read, Write},
     net::TcpStream,
     sync::{
+        atomic::{AtomicBool, Ordering},
         mpsc::{self, Receiver, Sender},
-        Mutex,
+        Arc, Mutex,
     },
     thread,
     time::{Duration, Instant},
@@ -16,6 +17,9 @@ use std::{
 use crate::ui::{DialogueView, UiState};
 
 pub const SYNC_INTERVAL: Duration = Duration::from_millis(500);
+/// Server keepalives arrive every 15 s; a silent stream for longer than this is dead.
+const STREAM_READ_TIMEOUT: Duration = Duration::from_secs(40);
+const STREAM_MAX_BACKOFF: Duration = Duration::from_secs(5);
 
 #[derive(Resource, Clone)]
 pub struct ClientConfig {
@@ -44,6 +48,11 @@ pub struct NetBridge {
     server: String,
     state_in_flight: bool,
     last_state_sync: Instant,
+    /// True while the `/api/stream` push channel is connected; polling pauses meanwhile.
+    streaming: Arc<AtomicBool>,
+    /// Player position reports go on their own thread (latest wins), so a slow request
+    /// such as an LLM dialogue never holds them up.
+    position_tx: Sender<IVec2>,
     pub last_message: String,
 }
 
@@ -51,6 +60,9 @@ impl NetBridge {
     pub fn new(server: &str) -> Self {
         let (request_tx, request_rx) = mpsc::channel::<NetRequest>();
         let (response_tx, response_rx) = mpsc::channel::<NetResponse>();
+        let streaming = Arc::new(AtomicBool::new(false));
+        spawn_state_stream(server.to_string(), response_tx.clone(), streaming.clone());
+        let position_tx = spawn_position_reporter(server.to_string());
 
         thread::spawn(move || {
             while let Ok(request) = request_rx.recv() {
@@ -67,6 +79,8 @@ impl NetBridge {
             server: server.to_string(),
             state_in_flight: false,
             last_state_sync: Instant::now() - SYNC_INTERVAL,
+            streaming,
+            position_tx,
             last_message: "Starting offline; waiting for AITown3 server.".to_string(),
         };
         bridge.send(NetRequestKind::SimulationStatus);
@@ -84,7 +98,24 @@ impl NetBridge {
         self.send(NetRequestKind::ExecuteAction {
             action: action.to_string(),
             params,
+            message: String::new(),
+            history: Vec::new(),
         });
+    }
+
+    /// Say something in a conversation (`history`: earlier lines of this chat, oldest first).
+    pub fn say(&self, params: HashMap<String, String>, message: &str, history: &[(String, String)]) {
+        self.send(NetRequestKind::ExecuteAction {
+            action: "talk".to_string(),
+            params,
+            message: message.to_string(),
+            history: history.to_vec(),
+        });
+    }
+
+    /// The player closed their chat with `npc`: it no longer has to stand and wait.
+    pub fn chat_end(&self, player: &str, npc: &str) {
+        self.send(NetRequestKind::ChatEnd { player: player.to_string(), npc: npc.to_string() });
     }
 
     pub fn set_simulation(&self, running: bool, use_llm: bool) {
@@ -97,6 +128,15 @@ impl NetBridge {
 
     pub fn refresh_now(&mut self) {
         self.last_state_sync = Instant::now() - SYNC_INTERVAL;
+    }
+
+    pub fn is_streaming(&self) -> bool {
+        self.streaming.load(Ordering::Relaxed)
+    }
+
+    /// Tell the server which world cell the player stands on (it updates their region).
+    pub fn report_position(&self, cell: IVec2) {
+        let _ = self.position_tx.send(cell);
     }
 
     pub fn fetch_history(&self, name: &str) {
@@ -123,12 +163,18 @@ enum NetRequestKind {
     ExecuteAction {
         action: String,
         params: HashMap<String, String>,
+        message: String,
+        history: Vec<(String, String)>,
     },
     SetSimulation {
         running: bool,
         use_llm: bool,
     },
     SimulationStatus,
+    ChatEnd {
+        player: String,
+        npc: String,
+    },
     AdvanceTime {
         hours: f32,
     },
@@ -156,6 +202,8 @@ enum NetResponse {
     History(String, Result<History, String>),
     Blueprints(Result<Vec<Blueprint>, String>),
     Build(Result<(bool, String), String>),
+    /// Fire-and-forget requests: nothing to show.
+    Done,
 }
 
 fn handle_request(request: NetRequest) -> NetResponse {
@@ -168,8 +216,13 @@ fn handle_request(request: NetRequest) -> NetResponse {
             },
             Err(err) => NetResponse::State(Err(err)),
         },
-        NetRequestKind::ExecuteAction { action, params } => {
-            let body = json!({ "action": action, "params": params, "message": "" });
+        NetRequestKind::ExecuteAction { action, params, message, history } => {
+            let history: Vec<_> = history
+                .iter()
+                .filter(|(who, _)| !who.is_empty())
+                .map(|(who, text)| json!({ "speaker": who, "text": text }))
+                .collect();
+            let body = json!({ "action": action, "params": params, "message": message, "history": history });
             match http_json(server, "POST", "/api/actions/execute", Some(body.to_string())) {
                 Ok(value) => NetResponse::Action(Ok(ActionResult::from_json(&action, &value))),
                 Err(err) => NetResponse::Action(Err(err)),
@@ -191,6 +244,11 @@ fn handle_request(request: NetRequest) -> NetResponse {
             NetResponse::Simulation(
                 result.map(|v| v.get("running").and_then(Value::as_bool).unwrap_or(false)),
             )
+        }
+        NetRequestKind::ChatEnd { player, npc } => {
+            let body = json!({ "player": player, "npc": npc });
+            let _ = http_json(server, "POST", "/api/player/chat_end", Some(body.to_string()));
+            NetResponse::Done
         }
         NetRequestKind::AdvanceTime { hours } => {
             let body = json!({ "hours": hours });
@@ -258,20 +316,61 @@ fn one() -> i32 {
 pub struct History {
     #[serde(default, deserialize_with = "lenient_string")]
     pub goal: String,
+    /// The goal in plain words ("feed the campfire").
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub goal_line: String,
     #[serde(default, deserialize_with = "lenient_string")]
     pub goal_reason: String,
-    #[serde(default, deserialize_with = "lenient_vec")]
-    pub plan: Vec<String>,
     #[serde(default, deserialize_with = "lenient_string")]
     pub status: String,
+    /// The whole current plan, each step marked done / current / todo.
+    #[serde(default)]
+    pub steps: Vec<PlanStep>,
+    /// 1-based step being worked on (0 = no plan).
+    #[serde(default)]
+    pub step: usize,
+    #[serde(default)]
+    pub now: PlanNow,
     #[serde(default)]
     pub entries: Vec<HistoryEntry>,
+}
+
+#[derive(Deserialize, Clone, Default)]
+pub struct PlanStep {
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub line: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub text: String,
+    /// "done" | "current" | "todo"
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub state: String,
+}
+
+/// What the NPC is doing this moment, in words, and how far along.
+#[derive(Deserialize, Clone, Default)]
+pub struct PlanNow {
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub label: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub phase: String,
+    #[serde(default)]
+    pub progress: Option<f32>,
 }
 
 #[derive(Deserialize, Clone, Default)]
 pub struct HistoryEntry {
     #[serde(default, deserialize_with = "lenient_string")]
     pub clock: String,
+    /// The goal this entry served ("get Wood1"), and why it was chosen at the time.
+    #[serde(default, rename = "for", deserialize_with = "lenient_string")]
+    pub for_goal: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub why: String,
+    /// The event as one plain sentence (story view).
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub line: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub note: String,
     #[serde(default, deserialize_with = "lenient_string")]
     pub kind: String,
     #[serde(default, deserialize_with = "lenient_string")]
@@ -339,7 +438,8 @@ impl ActionResult {
 }
 
 pub fn schedule_state_sync(mut net: ResMut<NetBridge>) {
-    if net.state_in_flight || net.last_state_sync.elapsed() < SYNC_INTERVAL {
+    // The server pushes every change while the stream is up; poll only as a fallback.
+    if net.is_streaming() || net.state_in_flight || net.last_state_sync.elapsed() < SYNC_INTERVAL {
         return;
     }
     net.state_in_flight = true;
@@ -350,6 +450,7 @@ pub fn schedule_state_sync(mut net: ResMut<NetBridge>) {
 pub fn receive_network_messages(
     mut net: ResMut<NetBridge>,
     mut world: ResMut<WorldSnapshot>,
+    mut clock: ResMut<SimClock>,
     mut ui: ResMut<UiState>,
 ) {
     let responses = {
@@ -371,9 +472,14 @@ pub fn receive_network_messages(
                 if world.revision > 0 && latest.is_some() && latest != previous {
                     ui.toast(format!("News: {}", latest.unwrap_or_default()));
                 }
+                clock.observe(&next.simulation);
                 *world = next;
                 net.state_in_flight = false;
-                net.last_message = "Synced with AITown3.".to_string();
+                net.last_message = if net.is_streaming() {
+                    "Live (server push).".to_string()
+                } else {
+                    "Synced with AITown3.".to_string()
+                };
             }
             NetResponse::State(Err(err)) => {
                 net.state_in_flight = false;
@@ -385,7 +491,20 @@ pub fn receive_network_messages(
             NetResponse::Action(Ok(result)) => {
                 net.last_message = result.message.clone();
                 net.refresh_now();
-                if result.action == "talk" && !result.success {
+                if result.action == "talk" && ui.dialogue.as_ref().is_some_and(|d| d.chat) {
+                    // Typed chat: add their reply under what we said.
+                    let me = world.player.name.clone();
+                    if let Some(view) = ui.dialogue.as_mut() {
+                        view.waiting = false;
+                        if !result.success {
+                            view.lines.push((String::new(), format!("(can't talk: {})", result.message)));
+                        } else if result.lines.iter().all(|(who, _)| who.is_empty() || *who == me) {
+                            view.lines.push((String::new(), format!("({})", result.message)));
+                        } else {
+                            view.lines.extend(result.lines.into_iter().filter(|(who, _)| *who != me));
+                        }
+                    }
+                } else if result.action == "talk" && !result.success {
                     ui.dialogue = None;
                     ui.toast(format!("Can't talk: {}", result.message));
                 } else if result.action == "talk" {
@@ -399,11 +518,7 @@ pub fn receive_network_messages(
                     } else {
                         result.lines
                     };
-                    ui.dialogue = Some(DialogueView {
-                        partner,
-                        lines,
-                        waiting: false,
-                    });
+                    ui.dialogue = Some(DialogueView::shown(partner, lines));
                 } else if result.success {
                     if !ui.travelling() {
                         ui.toast(result.message);
@@ -414,6 +529,7 @@ pub fn receive_network_messages(
                 }
             }
             NetResponse::Blueprints(Ok(list)) => ui.open_build_menu(list),
+            NetResponse::Done => {}
             NetResponse::Blueprints(Err(err)) => ui.toast(format!("Can't load blueprints: {err}")),
             NetResponse::Build(Ok((success, message))) => {
                 net.refresh_now();
@@ -479,7 +595,9 @@ pub struct WorldSnapshot {
     pub use_on_by_target: HashMap<String, Vec<String>>,
     pub characters: Vec<Actor>,
     pub simulation: Simulation,
-    pub map: WorldMap,
+    /// The seamless world: regions, everything on the ground and everyone, in world cells.
+    pub world: WorldView,
+    pub quests: Vec<QuestView>,
     pub online: bool,
     pub revision: u64,
 }
@@ -521,10 +639,24 @@ impl WorldSnapshot {
             use_on_by_target: HashMap::new(),
             characters: Vec::new(),
             simulation: Simulation::default(),
-            map: WorldMap::default(),
+            world: WorldView::default(),
+            quests: Vec::new(),
             online: false,
             revision: 0,
         }
+    }
+
+    /// Where the server last put the player (world cell).
+    pub fn player_cell(&self) -> Option<IVec2> {
+        self.world
+            .persons
+            .iter()
+            .find(|p| p.name == self.player.name)
+            .and_then(Actor::cell)
+    }
+
+    pub fn region(&self, name: &str) -> Option<&RegionView> {
+        self.world.regions.iter().find(|r| r.name == name)
     }
 
     pub fn held_items(&self) -> Vec<String> {
@@ -616,7 +748,8 @@ impl From<PlayState> for WorldSnapshot {
             use_on_by_target,
             characters: state.characters.unwrap_or_default(),
             simulation: state.simulation.unwrap_or_default(),
-            map: state.map.unwrap_or_default(),
+            world: state.world.unwrap_or_default(),
+            quests: state.quests,
             online: true,
             revision: 0,
         }
@@ -646,7 +779,69 @@ struct PlayState {
     #[serde(default)]
     simulation: Option<Simulation>,
     #[serde(default)]
-    map: Option<WorldMap>,
+    world: Option<WorldView>,
+    #[serde(default)]
+    quests: Vec<QuestView>,
+}
+
+#[derive(Deserialize, Clone, Default)]
+pub struct QuestView {
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub stage: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub state: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub objective: String,
+}
+
+impl WorldSnapshot {
+    /// The quest objective to show the player (first active quest that has one).
+    pub fn current_objective(&self) -> Option<&QuestView> {
+        self.quests
+            .iter()
+            .find(|q| q.state.eq_ignore_ascii_case("active") && !q.objective.is_empty())
+    }
+}
+
+#[derive(Deserialize, Clone, Default)]
+pub struct WorldView {
+    #[serde(default)]
+    pub width: i32,
+    #[serde(default)]
+    pub height: i32,
+    #[serde(default)]
+    pub regions: Vec<RegionView>,
+    /// Everything on the ground; x / y are world cells.
+    #[serde(default)]
+    pub items: Vec<Thing>,
+    #[serde(default)]
+    pub persons: Vec<Actor>,
+}
+
+#[derive(Deserialize, Clone, Default)]
+pub struct RegionView {
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub name: String,
+    #[serde(default)]
+    pub x: i32,
+    #[serde(default)]
+    pub y: i32,
+    #[serde(default)]
+    pub w: i32,
+    #[serde(default)]
+    pub h: i32,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub description: String,
+}
+
+impl RegionView {
+    pub fn contains(&self, cell: IVec2) -> bool {
+        cell.x >= self.x && cell.x < self.x + self.w && cell.y >= self.y && cell.y < self.y + self.h
+    }
+
+    pub fn center(&self) -> IVec2 {
+        IVec2::new(self.x + self.w / 2, self.y + self.h / 2)
+    }
 }
 
 #[derive(Deserialize, Clone, Default)]
@@ -667,6 +862,17 @@ pub struct Actor {
     pub personality: String,
     #[serde(default, deserialize_with = "lenient_vec")]
     pub held_items: Vec<String>,
+    /// World cell (seamless world).
+    #[serde(default)]
+    pub x: Option<i32>,
+    #[serde(default)]
+    pub y: Option<i32>,
+}
+
+impl Actor {
+    pub fn cell(&self) -> Option<IVec2> {
+        Some(IVec2::new(self.x?, self.y?))
+    }
 }
 
 #[derive(Deserialize, Clone, Default)]
@@ -690,6 +896,21 @@ pub struct Thing {
     pub w: i32,
     #[serde(default = "one")]
     pub h: i32,
+    /// Fixed actions this object offers (server tells whether each is doable right now).
+    #[serde(default)]
+    pub actions: Vec<ThingAction>,
+}
+
+#[derive(Deserialize, Clone, Default)]
+pub struct ThingAction {
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub id: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub label: String,
+    #[serde(default)]
+    pub available: bool,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub reason: String,
 }
 
 impl Thing {
@@ -720,90 +941,6 @@ pub struct Location {
     pub name: String,
     #[serde(default, deserialize_with = "lenient_string")]
     pub description: String,
-    #[serde(default)]
-    pub grid_w: i32,
-    #[serde(default)]
-    pub grid_h: i32,
-}
-
-/// Zones and routes for the world map.
-#[derive(Deserialize, Clone, Default)]
-pub struct WorldMap {
-    #[serde(default)]
-    pub locations: Vec<MapZone>,
-    #[serde(default)]
-    pub edges: Vec<MapEdge>,
-}
-
-#[derive(Deserialize, Clone, Default)]
-pub struct MapZone {
-    #[serde(default, deserialize_with = "lenient_string")]
-    pub name: String,
-    #[serde(default, deserialize_with = "lenient_string")]
-    pub description: String,
-    #[serde(default)]
-    pub map_x: Option<f32>,
-    #[serde(default)]
-    pub map_y: Option<f32>,
-    #[serde(default, deserialize_with = "lenient_vec")]
-    pub persons: Vec<String>,
-    #[serde(default, deserialize_with = "lenient_vec")]
-    pub adjacent: Vec<String>,
-}
-
-#[derive(Deserialize, Clone, Default)]
-pub struct MapEdge {
-    #[serde(default, deserialize_with = "lenient_string")]
-    pub a: String,
-    #[serde(default, deserialize_with = "lenient_string")]
-    pub b: String,
-}
-
-impl WorldMap {
-    /// Shortest hop list from `from` to `to` (excluding `from`).
-    pub fn route(&self, from: &str, to: &str) -> Option<Vec<String>> {
-        if from == to {
-            return Some(Vec::new());
-        }
-        let mut prev: HashMap<String, String> = HashMap::new();
-        let mut queue = std::collections::VecDeque::from([from.to_string()]);
-        prev.insert(from.to_string(), String::new());
-        while let Some(cur) = queue.pop_front() {
-            for next in self.neighbours(&cur) {
-                if prev.contains_key(&next) {
-                    continue;
-                }
-                prev.insert(next.clone(), cur.clone());
-                if next == to {
-                    let mut path = vec![next];
-                    while let Some(p) = prev.get(path.last().unwrap()).filter(|p| !p.is_empty() && *p != from) {
-                        path.push(p.clone());
-                    }
-                    path.reverse();
-                    return Some(path);
-                }
-                queue.push_back(next);
-            }
-        }
-        None
-    }
-
-    fn neighbours(&self, zone: &str) -> Vec<String> {
-        let mut out: Vec<String> = self
-            .locations
-            .iter()
-            .find(|z| z.name == zone)
-            .map(|z| z.adjacent.clone())
-            .unwrap_or_default();
-        for e in &self.edges {
-            if e.a == zone && !out.contains(&e.b) {
-                out.push(e.b.clone());
-            } else if e.b == zone && !out.contains(&e.a) {
-                out.push(e.a.clone());
-            }
-        }
-        out
-    }
 }
 
 #[derive(Deserialize, Clone, Default)]
@@ -820,6 +957,15 @@ struct Here {
 pub struct Simulation {
     #[serde(default)]
     pub tick: u64,
+    /// Server simulation clock, in sim seconds.
+    #[serde(default)]
+    pub sim_time: f32,
+    #[serde(default)]
+    pub running: bool,
+    #[serde(default)]
+    pub interval_seconds: f32,
+    #[serde(default)]
+    pub sim_dt: f32,
     #[serde(default)]
     pub clock: Clock,
     #[serde(default)]
@@ -827,6 +973,39 @@ pub struct Simulation {
     /// World announcements, newest first.
     #[serde(default)]
     pub chronicle: Vec<ChronicleEntry>,
+    /// Where the server-side storyteller is steering things.
+    #[serde(default)]
+    pub story: Story,
+    /// Recent conversations, oldest first (played back as speech bubbles).
+    #[serde(default)]
+    pub conversations: Vec<Conversation>,
+}
+
+#[derive(Deserialize, Clone, Default)]
+pub struct Conversation {
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub id: String,
+    /// The two people talking (both stand still until it has been said).
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub a: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub b: String,
+    #[serde(default)]
+    pub lines: Vec<ConversationLine>,
+}
+
+#[derive(Deserialize, Clone, Default)]
+pub struct ConversationLine {
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub speaker: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub text: String,
+}
+
+#[derive(Deserialize, Clone, Default)]
+pub struct Story {
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub arc: String,
 }
 
 #[derive(Deserialize, Clone, Default)]
@@ -859,6 +1038,30 @@ pub struct NpcActivity {
     pub pending_action: String,
     #[serde(default, deserialize_with = "lenient_vec")]
     pub pending_args: Vec<String>,
+    /// Sim time the pending action will complete on the server.
+    #[serde(default)]
+    pub pending_completes_at: Option<f32>,
+    /// World cells the NPC walks before the action happens (start included).
+    #[serde(default)]
+    pub pending_path: Option<Vec<[i32; 2]>>,
+    /// Sim time the pending action started, and how much of it is walking (sim seconds).
+    #[serde(default)]
+    pub pending_started_at: Option<f32>,
+    #[serde(default)]
+    pub pending_walk_seconds: Option<f32>,
+    /// Plan progress: step `plan_step` of `plan_len`, that step in words, and what they are doing now.
+    #[serde(default)]
+    pub plan_step: usize,
+    #[serde(default)]
+    pub plan_len: usize,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub step_line: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub now_label: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub goal: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub target: String,
     #[serde(default, deserialize_with = "lenient_string")]
     pub reason: String,
     /// 持续状态（内容包 states/，如 asleep）；空 = 无
@@ -916,19 +1119,13 @@ fn http_json(
     path: &str,
     body: Option<String>,
 ) -> Result<Value, String> {
-    let base = base_url
-        .strip_prefix("http://")
-        .ok_or_else(|| "Only http:// servers are supported in this minimal client".to_string())?;
-    let (host_port, prefix) = base.split_once('/').unwrap_or((base, ""));
-    let (host, port) = host_port
-        .split_once(':')
-        .map(|(h, p)| (h, p.parse::<u16>().unwrap_or(80)))
-        .unwrap_or((host_port, 80));
-    let full_path = if prefix.is_empty() {
-        path.to_string()
-    } else {
-        format!("/{prefix}{path}")
-    };
+    let ServerAddr {
+        host,
+        port,
+        host_port,
+        full_path,
+    } = ServerAddr::parse(base_url, path)?;
+    let (host, host_port) = (host.as_str(), host_port.as_str());
 
     let mut stream = TcpStream::connect((host, port))
         .map_err(|err| format!("Could not connect to {host}:{port}: {err}"))?;
@@ -981,3 +1178,280 @@ fn http_json(
     }
     serde_json::from_str(body).map_err(|err| format!("Invalid JSON response: {err}"))
 }
+
+struct ServerAddr {
+    host: String,
+    port: u16,
+    host_port: String,
+    full_path: String,
+}
+
+impl ServerAddr {
+    fn parse(base_url: &str, path: &str) -> Result<Self, String> {
+        let base = base_url
+            .strip_prefix("http://")
+            .ok_or_else(|| "Only http:// servers are supported in this minimal client".to_string())?;
+        let (host_port, prefix) = base.split_once('/').unwrap_or((base, ""));
+        let (host, port) = host_port
+            .split_once(':')
+            .map(|(h, p)| (h, p.parse::<u16>().unwrap_or(80)))
+            .unwrap_or((host_port, 80));
+        let full_path = if prefix.is_empty() {
+            path.to_string()
+        } else {
+            format!("/{prefix}{path}")
+        };
+        Ok(Self {
+            host: host.to_string(),
+            port,
+            host_port: host_port.to_string(),
+            full_path,
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Server push: `/api/stream` (Server-Sent Events)
+// ---------------------------------------------------------------------------
+
+/// Keeps one SSE connection open on its own thread, reconnecting with backoff.
+/// Every `event: state` frame becomes a normal `NetResponse::State`, so the rest of
+/// the client handles pushed and polled state the same way.
+fn spawn_state_stream(server: String, tx: Sender<NetResponse>, streaming: Arc<AtomicBool>) {
+    thread::spawn(move || {
+        let mut backoff = Duration::from_secs(1);
+        loop {
+            let started = Instant::now();
+            let receiver_gone = read_state_stream(&server, &tx, &streaming).is_err();
+            streaming.store(false, Ordering::Relaxed);
+            if receiver_gone {
+                break;
+            }
+            if started.elapsed() > Duration::from_secs(10) {
+                backoff = Duration::from_secs(1);
+            }
+            thread::sleep(backoff);
+            backoff = (backoff * 2).min(STREAM_MAX_BACKOFF);
+        }
+    });
+}
+
+/// Returns `Err(())` only when the app side hung up; connection problems return `Ok(())`
+/// so the caller reconnects.
+fn read_state_stream(
+    server: &str,
+    tx: &Sender<NetResponse>,
+    streaming: &AtomicBool,
+) -> Result<(), ()> {
+    let Ok(addr) = ServerAddr::parse(server, "/api/stream") else {
+        return Ok(());
+    };
+    let Ok(mut stream) = TcpStream::connect((addr.host.as_str(), addr.port)) else {
+        return Ok(());
+    };
+    let _ = stream.set_read_timeout(Some(STREAM_READ_TIMEOUT));
+    let request = format!(
+        "GET {} HTTP/1.1\r\nHost: {}\r\nAccept: text/event-stream\r\nCache-Control: no-cache\r\n\r\n",
+        addr.full_path, addr.host_port
+    );
+    if stream.write_all(request.as_bytes()).is_err() {
+        return Ok(());
+    }
+
+    let mut reader = BufReader::new(stream);
+    let mut line = String::new();
+    if reader.read_line(&mut line).is_err() || !line.contains(" 200") {
+        return Ok(());
+    }
+    let mut chunked = false;
+    loop {
+        line.clear();
+        if reader.read_line(&mut line).unwrap_or(0) == 0 {
+            return Ok(());
+        }
+        let header = line.trim();
+        if header.is_empty() {
+            break;
+        }
+        if header.eq_ignore_ascii_case("transfer-encoding: chunked") {
+            chunked = true;
+        }
+    }
+    streaming.store(true, Ordering::Relaxed);
+
+    let mut events = SseBuffer::default();
+    loop {
+        let Some(bytes) = next_body_bytes(&mut reader, chunked) else {
+            return Ok(());
+        };
+        for data in events.push(&bytes) {
+            // A frame we can't read is reported (shown as the offline reason), not dropped:
+            // polling is paused while the stream is up, so silence would look like "offline".
+            let response = match serde_json::from_str::<PlayState>(&data) {
+                Ok(state) => NetResponse::State(Ok(state)),
+                Err(err) => NetResponse::State(Err(format!("Bad state from server: {err}"))),
+            };
+            if tx.send(response).is_err() {
+                return Err(());
+            }
+        }
+    }
+}
+
+/// Next piece of the response body, de-chunked. `None` = connection over.
+fn next_body_bytes(reader: &mut BufReader<TcpStream>, chunked: bool) -> Option<Vec<u8>> {
+    if !chunked {
+        let buf = reader.fill_buf().ok()?;
+        if buf.is_empty() {
+            return None;
+        }
+        let out = buf.to_vec();
+        reader.consume(out.len());
+        return Some(out);
+    }
+    let mut size_line = String::new();
+    if reader.read_line(&mut size_line).ok()? == 0 {
+        return None;
+    }
+    let size_hex = size_line.trim().split(';').next().unwrap_or("");
+    let size = usize::from_str_radix(size_hex, 16).ok()?;
+    if size == 0 {
+        return None;
+    }
+    let mut out = vec![0u8; size];
+    reader.read_exact(&mut out).ok()?;
+    let mut crlf = [0u8; 2];
+    reader.read_exact(&mut crlf).ok()?;
+    Some(out)
+}
+
+/// Splits an SSE byte stream into the `data` payloads of `event: state` frames.
+#[derive(Default)]
+struct SseBuffer {
+    pending: Vec<u8>,
+}
+
+impl SseBuffer {
+    fn push(&mut self, bytes: &[u8]) -> Vec<String> {
+        self.pending.extend(bytes.iter().filter(|&&b| b != b'\r'));
+        let mut out = Vec::new();
+        while let Some(end) = self.pending.windows(2).position(|w| w == b"\n\n") {
+            let frame: Vec<u8> = self.pending.drain(..end + 2).collect();
+            let frame = String::from_utf8_lossy(&frame);
+            let mut event = "message";
+            let mut data: Vec<&str> = Vec::new();
+            for line in frame.lines() {
+                if let Some(v) = line.strip_prefix("event:") {
+                    event = v.trim();
+                } else if let Some(v) = line.strip_prefix("data:") {
+                    data.push(v.strip_prefix(' ').unwrap_or(v));
+                }
+            }
+            if event == "state" && !data.is_empty() {
+                out.push(data.join("\n"));
+            }
+        }
+        out
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Simulation clock (maps server sim seconds to local wall time)
+// ---------------------------------------------------------------------------
+
+/// Tracks the server's sim clock between state updates so animations can be timed
+/// to finish when the server-side action does.
+#[derive(Resource)]
+pub struct SimClock {
+    sim_time: f32,
+    at: Instant,
+    running: bool,
+    /// Real seconds per sim second, smoothed over recent updates.
+    wall_per_sim: f32,
+}
+
+impl Default for SimClock {
+    fn default() -> Self {
+        Self {
+            sim_time: 0.0,
+            at: Instant::now(),
+            running: false,
+            wall_per_sim: 1.0,
+        }
+    }
+}
+
+impl SimClock {
+    pub fn observe(&mut self, sim: &Simulation) {
+        let now = Instant::now();
+        let advanced = sim.sim_time - self.sim_time;
+        if self.running && sim.running && advanced > 0.0 {
+            let measured = now.duration_since(self.at).as_secs_f32() / advanced;
+            self.wall_per_sim = (0.7 * self.wall_per_sim + 0.3 * measured).clamp(0.02, 20.0);
+        } else if sim.running && !self.running && sim.sim_dt > 0.0 && sim.interval_seconds > 0.0 {
+            // Fresh start: the configured pace is the best first guess.
+            self.wall_per_sim = sim.interval_seconds / sim.sim_dt;
+        }
+        if advanced != 0.0 || sim.running != self.running {
+            self.sim_time = sim.sim_time;
+            self.at = now;
+        }
+        self.running = sim.running;
+    }
+
+    /// Estimated current server sim time (extrapolated while running).
+    pub fn now(&self) -> f32 {
+        if !self.running {
+            return self.sim_time;
+        }
+        let elapsed = self.at.elapsed().as_secs_f32() / self.wall_per_sim.max(1e-3);
+        self.sim_time + elapsed
+    }
+
+}
+
+// ---------------------------------------------------------------------------
+// Player position reports (seamless world)
+// ---------------------------------------------------------------------------
+
+/// One thread, latest position wins: queued reports collapse to the newest cell.
+fn spawn_position_reporter(server: String) -> Sender<IVec2> {
+    let (tx, rx) = mpsc::channel::<IVec2>();
+    thread::spawn(move || {
+        while let Ok(mut cell) = rx.recv() {
+            while let Ok(newer) = rx.try_recv() {
+                cell = newer;
+            }
+            let body = json!({ "x": cell.x, "y": cell.y }).to_string();
+            let _ = http_json(&server, "POST", "/api/player/position", Some(body));
+        }
+    });
+    tx
+}
+
+impl SimClock {
+    /// Real seconds one sim second takes right now (1.0 until measured).
+    pub fn wall_per_sim(&self) -> f32 {
+        self.wall_per_sim
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SseBuffer;
+
+    #[test]
+    fn sse_frames_split_across_reads() {
+        let mut buf = SseBuffer::default();
+        assert!(buf.push(b": connected\n\nevent: state\ndata: {\"a\"").is_empty());
+        let out = buf.push(b":1}\n\n: keepalive\n\nevent: state\r\ndata: 2\r\n\r\n");
+        assert_eq!(out, vec!["{\"a\":1}".to_string(), "2".to_string()]);
+    }
+
+    #[test]
+    fn other_events_are_ignored() {
+        let mut buf = SseBuffer::default();
+        assert!(buf.push(b"event: ping\ndata: x\n\n").is_empty());
+    }
+}
+

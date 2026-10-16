@@ -265,11 +265,14 @@ def _invoke_json(
     raw = ""
     try:
         logger.info("Director stage=%s start", stage)
+        from model_instances import creative_model_name
+
         raw = invoke_primary(
             user,
             system=system,
             max_tokens=max_tokens,
             timeout=_llm_timeout(),
+            model=creative_model_name(),
         )
         text = str(raw)
         logger.info("Director stage=%s raw_len=%s", stage, len(text))

@@ -96,6 +96,8 @@ class ChromaMemory:
 
         from embedder import STEmbedder
         self.embedder = STEmbedder(model_path=embedding_model_path)
+        # 多个 NPC 并行规划 / 对话时：建 collection 与写入串行，避免 SQLite 唯一约束冲突
+        self._write_lock = threading.RLock()
 
         ChromaMemory._instance = self
 
@@ -117,11 +119,12 @@ class ChromaMemory:
     # ---------- collection helpers ----------
 
     def _get_or_create(self, npc: str):
-        return self.client.get_or_create_collection(
-            name=_safe_collection_name(npc),
-            embedding_function=self.embedder,
-            metadata={"hnsw:space": "cosine"},
-        )
+        with self._write_lock:
+            return self.client.get_or_create_collection(
+                name=_safe_collection_name(npc),
+                embedding_function=self.embedder,
+                metadata={"hnsw:space": "cosine"},
+            )
 
     # ---------- CRUD ----------
 
@@ -135,7 +138,8 @@ class ChromaMemory:
             **metadata,
         })
         mid = mem_id or uuid.uuid4().hex
-        col.add(ids=[mid], documents=[text], metadatas=[meta])
+        with self._write_lock:
+            col.add(ids=[mid], documents=[text], metadatas=[meta])
         return mid
 
     def add_many(self, npc: str, texts: List[str],
@@ -151,7 +155,8 @@ class ChromaMemory:
             m.setdefault("timestamp",
                          datetime.now().isoformat(timespec="seconds"))
             metas.append(_sanitize_metadata(m))
-        col.add(ids=ids, documents=texts, metadatas=metas)
+        with self._write_lock:
+            col.add(ids=ids, documents=texts, metadatas=metas)
         return ids
 
     def search(self, npc: str, query: str, top_k: int = 5,

@@ -386,6 +386,16 @@ def _atom_args(text: str) -> List[str]:
     return t.strip("()").split()[1:]
 
 
+def _parse_json(raw: Any) -> Any:
+    """图里 JSON 以字符串存；坏的 / 空的当作没有。"""
+    if not isinstance(raw, str):
+        return raw
+    try:
+        return json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+
+
 def _effects_on(props: Dict[str, Any]) -> List[Dict[str, Any]]:
     from world_interactions import _parse_json_field, normalize_effect
 
@@ -396,11 +406,20 @@ def _effects_on(props: Dict[str, Any]) -> List[Dict[str, Any]]:
 # ---------- 编译器 ----------
 
 class Compiler:
-    def __init__(self, snap: Snapshot, character: str, cfg: PlanningConfig, content) -> None:
+    def __init__(
+        self,
+        snap: Snapshot,
+        character: str,
+        cfg: PlanningConfig,
+        content,
+        extra_actions: Optional[List[Dict[str, Any]]] = None,
+    ) -> None:
         self.snap = snap
         self.character = character
         self.cfg = cfg
         self.content = content
+        # 调用方额外给的动作（同内容包格式），例如任务线验证里的「完成第 k 阶段」
+        self.extra_actions = list(extra_actions or [])
         self.report = CompileReport()
         self.objs: Dict[str, Obj] = {}
         self.by_name: Dict[str, str] = {}
@@ -426,9 +445,9 @@ class Compiler:
         self._discover(goal)
         self._add_pool_objects()
         self._collect_entries()
-        for spec in self.content.actions.values():
+        for spec in list(self.content.actions.values()) + self.extra_actions:
             self._compile_action(spec)
-        self.report.add("interact", "", "not compiled: its effects are LLM-written Cypher")
+        self._compile_ephemeral()
         self._compile_use_on()
         self._compile_goal(goal)
         if self.cfg.narrow_types:
@@ -439,6 +458,7 @@ class Compiler:
                 self._prune()
         else:
             self.schemas = [s for s in self.schemas if s.eff]
+        self._fold_ground_statics()
         if self.cfg.prune_objects:
             self._prune_objects()
 
@@ -484,7 +504,44 @@ class Compiler:
     # ----- 发现：哪些属性会变、要预留哪些 spawn 对象 -----
 
     def _active_actions(self) -> List[Dict[str, Any]]:
-        return [s for n, s in self.content.actions.items() if not self._excluded(n)]
+        out = [s for n, s in self.content.actions.items() if not self._excluded(n)]
+        out += [s for s in self.extra_actions if not self._excluded(str(s["name"]))]
+        if not self._excluded("interact"):
+            out += [spec for _, spec in self._ephemeral()]
+        return out
+
+    def _ephemeral(self) -> List[Tuple[Obj, Dict[str, Any]]]:
+        """物品上 LLM 发明的声明式临时动作（旧 Cypher 版本规划器看不懂，跳过）。"""
+        cached = getattr(self, "_ephemeral_cache", None)
+        if cached is not None:
+            return cached
+        from ephemeral_action_dsl import validate_action_spec
+
+        out: List[Tuple[Obj, Dict[str, Any]]] = []
+        for obj in list(self.objs.values()):
+            if obj.type != "item" or obj.pool:
+                continue
+            # 作者写在 script.actions 里的优先（运行时也是这个顺序）
+            script = _parse_json(obj.props.get("script"))
+            authored = script.get("actions") if isinstance(script, dict) else None
+            if isinstance(authored, list) and authored:
+                for raw in authored:
+                    action, err = validate_action_spec(raw, host_item=obj.name)
+                    if action is None:
+                        self.report.add(f"interact:{obj.name}", "", f"authored action rejected: {err}")
+                    else:
+                        out.append((obj, action.spec()))
+                continue
+            data = _parse_json(obj.props.get("ephemeral_actions"))
+            for row in data or []:
+                if not isinstance(row, dict) or not row.get("id"):
+                    continue
+                if str(row.get("cypher") or "").strip():
+                    self.report.add(f"interact:{obj.name}:{row['id']}", "", "not compiled: legacy Cypher action")
+                    continue
+                out.append((obj, row))
+        self._ephemeral_cache = out
+        return out
 
     def _discover(self, goal: List[Dict[str, Any]]) -> None:
         queue: List[Dict[str, Any]] = []
@@ -985,6 +1042,24 @@ class Compiler:
         self.report.add(name, "", "hand-written PDDL from planning.json")
         self.schemas.append(Schema(_ident(name), name, list(params), decode, pre, eff))
 
+    def _compile_ephemeral(self) -> None:
+        """每个声明式临时动作 → 一个 PDDL 动作，解码回游戏里的 interact(actor, 物品, id)。"""
+        if self._excluded("interact"):
+            self.report.add("interact", "", "excluded by planning.json")
+            return
+        from ephemeral_action_dsl import IMPLICIT_REQUIRES
+
+        over = self.cfg.actions.get("interact") or {}
+        for obj, spec in self._ephemeral():
+            actor, here = Term("?actor", "person"), Term("?here", "location")
+            env = {"actor": actor, "target": Term(obj.id, obj.type, const=True), "here": here}
+            params = [("?actor", "person"), ("?here", "location")]
+            requires = list(IMPLICIT_REQUIRES) + list(spec.get("requires") or [])
+            name = f"interact--{obj.name}--{spec['id']}"
+            # 解码：非对象 token 原样输出 → 第三个参数就是临时动作 id
+            decode = ["?actor", obj.id, str(spec["id"])]
+            self._build(name, "interact", env, params, decode, requires, list(spec.get("effects") or []), over)
+
     def _compile_use_on(self) -> None:
         if self._excluded("use_on"):
             self.report.add("use_on", "", "excluded by planning.json")
@@ -1147,6 +1222,39 @@ class Compiler:
                 continue
             kept.append(replace(s, eff=[e for e in s.eff if e.sym in relevant]))
         self.schemas = kept
+
+    def _fold_ground_statics(self) -> None:
+        """剩下的动作都不会改、且参数全是常量的条件：编译期按初始状态求值。
+
+        真 → 删掉这个条件；假 → 动作永远做不了，删掉动作。问题更小，而且 ENHSP 会把
+        「谓词从不变化 + 全常量参数」的前置条件误判成无解（例：(mood-is-focused Rowan)）。
+        """
+        changed = {e.sym for s in self.schemas for e in s.eff}
+
+        def fold(schemas: List[Schema]) -> List[Schema]:
+            out: List[Schema] = []
+            for s in schemas:
+                pre: List[Lit] = []
+                alive = True
+                for lit in s.pre:
+                    args = lit.args()
+                    if (
+                        lit.numeric or lit.sym in changed or lit.sym not in self.preds
+                        or any(a.startswith("?") for a in args)
+                    ):
+                        pre.append(lit)
+                        continue
+                    if (tuple(args) in set(self._facts(lit.sym))) == lit.neg:
+                        alive = False
+                        self.report.add(s.name, "", f"never applicable: {lit.pddl()} is false and never changes")
+                        break
+                if alive:
+                    out.append(replace(s, pre=pre))
+            return out
+
+        self.schemas = fold(self.schemas)
+        self.goals = fold(self.goals)
+        self._fact_cache.clear()
 
     # ----- 单调数值化简 -----
 
@@ -1570,10 +1678,11 @@ def compile_pddl(
     *,
     config: Optional[PlanningConfig] = None,
     content=None,
+    extra_actions: Optional[List[Dict[str, Any]]] = None,
 ) -> Compiled:
     from content import get_content
 
-    comp = Compiler(snap, character, config or load_config(), content or get_content())
+    comp = Compiler(snap, character, config or load_config(), content or get_content(), extra_actions)
     comp.compile(_as_goal(goal))
     return Compiled(comp.domain(), comp.problem(), comp.report, comp)
 

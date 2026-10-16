@@ -65,6 +65,8 @@ def build_from_blueprint(
             props["map_x"], props["map_y"] = loc.map
         if loc.grid:
             props["grid_w"], props["grid_h"] = loc.grid
+        if loc.area:
+            props["area_x"], props["area_y"] = loc.area[0], loc.area[1]
         world.add_entity(loc.name, entity_type="Location", **props)
 
     for edge in bp.adjacencies:
@@ -232,9 +234,12 @@ def build_from_blueprint(
         actions_path = str(Path(__file__).resolve().parent.parent / "actions")
         if actions_path not in sys.path:
             sys.path.insert(0, actions_path)
-        from spatial import place_unplaced
+        from spatial import layout_regions, place_people, place_unplaced
 
+        # 先把区域拼到同一张世界格子上，再摆物品、给人落脚点
+        layout_regions(world)
         place_unplaced(world)
+        place_people(world)
     except Exception as e:
         logger.warning("格子布局失败: %s", e)
 

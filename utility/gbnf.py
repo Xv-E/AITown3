@@ -22,6 +22,14 @@ ITEM_GOALS = frozenset({
     "Accumulate items",
     "Strengthen abilities",
     "Enhance capabilities",
+    # 目标也是物品：对它用道具 / 直接使用 / 交互
+    "Use item on",
+    "Use item",
+    "Interact with",
+})
+# target_entity = 只需本人参与的动作名（如 sleep），不是图中实体
+ACTION_GOALS = frozenset({
+    "Perform action",
 })
 
 
@@ -114,6 +122,7 @@ def _build_typed_synthesis(
     loc_goals = [g for g in goal_terms if g in LOCATION_GOALS]
     person_goals = [g for g in goal_terms if g in PERSON_GOALS]
     item_goals = [g for g in goal_terms if g in ITEM_GOALS]
+    action_goals = [g for g in goal_terms if g in ACTION_GOALS]
 
     if loc_goals:
         variants.append("location_object")
@@ -132,6 +141,11 @@ def _build_typed_synthesis(
         rules.append(f"item_goal ::= {_quoted_alternatives(item_goals)}")
         rules.append(_entity_rule("item_entity", entities.items))
         rules.append(_object_variant("item_object", "item_goal", "item_entity"))
+
+    if action_goals:
+        variants.append("action_object")
+        rules.append(f"action_goal ::= {_quoted_alternatives(action_goals)}")
+        rules.append(_object_variant("action_object", "action_goal", "string"))
 
     if not variants:
         # 无识别 goal 时回退：任意 goal + null target
@@ -186,7 +200,8 @@ def generate_synthesis_grammar(
     Step-5 synthesis JSON：final_goal 与 target_entity 按类型配对约束。
     - Go to / Explore -> location_entity
     - Gain information / Defeat enemy -> person_entity
-    - Collect item 等 -> item_entity
+    - Collect item / Use item on / Interact with 等 -> item_entity
+    - Perform action -> 任意字符串（动作名）
     """
     if not goal_terms:
         return generate_json_grammar()

@@ -93,8 +93,9 @@ class UseOnAction(Action):
 
 class InteractAction(Action):
     """
-    执行物品上的临时 Action（LLM 写 Cypher，挂在 Item.ephemeral_actions）。
-    option=auto：必要时先合成脚本，再选一个临时 action id 执行。
+    执行物品上的临时 Action（LLM 发明的声明式 requires / effects，挂在 Item.ephemeral_actions；
+    旧存档里的 Cypher 版本也能执行）。
+    option=auto：必要时先合成，再选一个临时 action id 执行。
     """
 
     def __init__(self):
@@ -136,6 +137,13 @@ class InteractAction(Action):
             return False, f"{target} is not on the ground"
         if cur != t_loc:
             return False, f"{c} and {target} are not at the same location"
+        if option and option not in ("auto", "_", "-"):
+            # 计划里点名的声明式临时动作：连同它自己的 requires 一起预检
+            from ephemeral_action_dsl import check_ephemeral, find_action, load_actions_from_item
+
+            chosen = find_action(load_actions_from_item(world, target), option)
+            if chosen is not None:
+                return check_ephemeral(world, chosen, actor=c, target=target)
         return True, "ok"
 
     def apply(self, world, c: str, target: str, option: str = "auto") -> None:

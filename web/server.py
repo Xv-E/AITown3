@@ -14,13 +14,14 @@ import argparse
 import asyncio
 import os
 import sys
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -48,6 +49,7 @@ from llm_service import get_llm_status, get_character_memories, clear_character_
 from content import get_content  # noqa: E402
 from registry import get_registry  # noqa: E402
 from world_simulator import get_world_simulator  # noqa: E402
+from state_stream import StateHub  # noqa: E402
 
 _STATIC = _WEB_DIR / "static"
 
@@ -57,18 +59,47 @@ app.mount("/static", StaticFiles(directory=str(_STATIC)), name="static")
 _world: Optional[Neo4jWorld] = None
 
 
+_world_init_lock = threading.Lock()
+
+
 def get_world() -> Neo4jWorld:
     global _world
     if _world is None:
-        Neo4jWorld._instance = None  # type: ignore[attr-defined]
-        _world = Neo4jWorld.get_instance()
+        with _world_init_lock:
+            if _world is None:
+                Neo4jWorld._instance = None  # type: ignore[attr-defined]
+                world = Neo4jWorld.get_instance()
+                _ensure_default_world(world)
+                _world = world
     return _world
+
+
+def _ensure_default_world(world: Neo4jWorld) -> None:
+    """数据库是空的（第一次启动 / 被清空过）就建主世界，打开就能玩；已有世界不动。"""
+    if world.run_query("MATCH (l:Location) RETURN l.name AS n LIMIT 1"):
+        return
+    from director import build_from_blueprint, default_world_id, load_world
+
+    wid = default_world_id()
+    print(f"Empty world database: loading the main world '{wid}'...")
+    build_from_blueprint(world, load_world(wid), clear=True)
+    try:
+        clear_all_memories()  # 旧世界留下的 NPC 记忆不属于这个世界
+    except Exception:
+        pass
 
 
 class ExecuteActionRequest(BaseModel):
     action: str
     params: Dict[str, str] = Field(default_factory=dict)
     message: str = ""  # Player dialogue line for talk actions
+    # Earlier lines of the same chat (player typing in the dialogue box), oldest first
+    history: List[Dict[str, str]] = Field(default_factory=list)
+
+
+class ChatEndRequest(BaseModel):
+    player: str
+    npc: str
 
 
 class SetPlanRequest(BaseModel):
@@ -146,6 +177,58 @@ _sim_started_at: Optional[str] = None
 _sim_last_result: Optional[Dict[str, Any]] = None
 # Simulation ticks may overlap with dialogue/planning; too few workers can block move completion
 _executor = ThreadPoolExecutor(max_workers=4)
+
+
+def _build_stream_state() -> Dict[str, Any]:
+    world = get_world()
+    with world.read_cache():
+        state = get_play_state(world)
+    sim = state.setdefault("simulation", {})
+    sim.update({
+        "running": _sim_running,
+        "interval_seconds": _sim_interval,
+        "sim_dt": _sim_dt,
+        "use_llm": _sim_use_llm,
+    })
+    return state
+
+
+_state_hub = StateHub(_build_stream_state, _executor)
+
+
+class _PushOnWrite:
+    """任何非 GET 请求结束后都推一次最新 play state（动作、加载世界、跳时间……）。"""
+
+    def __init__(self, asgi_app):
+        self.app = asgi_app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or scope.get("method") in ("GET", "HEAD", "OPTIONS"):
+            await self.app(scope, receive, send)
+            return
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            _state_hub.mark_dirty()
+
+
+app.add_middleware(_PushOnWrite)
+
+from quest_api import make_router as _questline_router  # noqa: E402
+
+app.include_router(
+    _questline_router(get_world, story_arc=lambda: get_world_simulator().story().get("arc", ""))
+)
+
+
+@app.get("/api/stream")
+async def api_stream():
+    """Server-Sent Events：每次世界变化推送完整 play state（event: state）。"""
+    return StreamingResponse(
+        _state_hub.events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.get("/")
@@ -245,6 +328,26 @@ def api_player():
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+class PlayerPositionRequest(BaseModel):
+    x: int
+    y: int
+
+
+@app.post("/api/player/position")
+def api_player_position(req: PlayerPositionRequest):
+    """无缝世界：客户端汇报玩家站在哪个世界格子；跨进别的区域时更新所在区域。"""
+    from spatial import move_person_freely
+
+    world = get_world()
+    player = get_player(world)
+    if player is None:
+        raise HTTPException(status_code=404, detail="No player character in the current world")
+    result = move_person_freely(world, player["name"], (req.x, req.y))
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("error") or "bad position")
+    return result
+
+
 @app.get("/api/play/state")
 def api_play_state():
     """Fetch full play state (player, scene, actions, map) in one call."""
@@ -333,6 +436,13 @@ def api_actions():
     return {"actions": out}
 
 
+@app.post("/api/player/chat_end")
+def player_chat_end(req: ChatEndRequest):
+    """玩家关掉了和 NPC 的对话框：NPC 不用再等了。"""
+    get_world_simulator().chat(req.npc, req.player, ended=True)
+    return {"ok": True}
+
+
 @app.post("/api/actions/execute")
 async def api_execute(req: ExecuteActionRequest):
     reg = get_registry()
@@ -368,6 +478,8 @@ async def api_execute(req: ExecuteActionRequest):
                 a, b, loc = positional[:3]
                 mem = get_web_memory()
                 msg = (req.message or "").strip()
+                # 玩家在聊：对方站着等，别聊到一半走掉
+                get_world_simulator().chat(b, a)
 
                 def _talk():
                     return handle_talk_dialogue(
@@ -375,11 +487,15 @@ async def api_execute(req: ExecuteActionRequest):
                         memory=mem,
                         force_mock=False,
                         player_message=msg,
+                        history=list(req.history or []),
                     )
 
                 # Run dialogue LLM in thread pool to avoid blocking the event loop / connection pool
                 loop = asyncio.get_running_loop()
                 dialogue = await loop.run_in_executor(_executor, _talk)
+                # 玩家自己说的那句也放进去：先玩家头上冒，再是 NPC 的回话
+                said = ([{"speaker": a, "text": msg}] if msg else []) + list(dialogue.get("lines") or [])
+                get_world_simulator().record_conversation(world, a, b, loc, said)
             except Exception as e:
                 dialogue = {
                     "summary": "dialogue failed",
@@ -654,8 +770,14 @@ def api_turn(req: TurnRequest):
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+# 每拍除了 interval 的等待，计算本身大约要这么久（秒）
+_TICK_OVERHEAD = 0.2
+
+
 def _run_simulation_tick() -> Dict[str, Any]:
     mgr = get_plan_manager()
+    # 模拟节奏 → 说话的人要站多少模拟秒才对得上客户端的气泡
+    get_world_simulator()._ensure_loop(get_world()).sim_per_wall = _sim_dt / max(_sim_interval + _TICK_OVERHEAD, 0.05)
     return mgr.tick(
         get_world(),
         dt=_sim_dt,
@@ -675,6 +797,7 @@ async def _simulation_loop() -> None:
             loop = asyncio.get_event_loop()
             result = await loop.run_in_executor(_executor, _run_simulation_tick)
             _sim_last_result = result
+            _state_hub.mark_dirty()
             if isinstance(result, dict) and result.get("missions_complete"):
                 _sim_last_result = {
                     **result,

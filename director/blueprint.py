@@ -33,14 +33,24 @@ class LocationSpec:
     # 大地图坐标 [x, y]；区域格子尺寸 [w, h]
     map: Optional[List[float]] = None
     grid: Optional[List[int]] = None
+    # 无缝世界里的范围 [x, y, w, h]（世界格子）；没写就按连接关系自动排
+    area: Optional[List[int]] = None
 
     def normalized(self) -> "LocationSpec":
+        area = self.area
+        if isinstance(area, dict):
+            area = [area.get("x"), area.get("y"), area.get("w"), area.get("h")]
+        try:
+            area = [int(v) for v in area] if isinstance(area, (list, tuple)) and len(area) == 4 else None
+        except (TypeError, ValueError):
+            area = None
         return LocationSpec(
             name=_clean_name(self.name, "Place"),
             description=(self.description or "").strip(),
             tags=(self.tags or "").strip(),
             map=_num_pair(self.map, float),
-            grid=_num_pair(self.grid, int),
+            grid=[area[2], area[3]] if area else _num_pair(self.grid, int),
+            area=area,
         )
 
 
@@ -757,6 +767,7 @@ class EventBlueprint:
                 tags=str(x.get("tags", "")),
                 map=x.get("map"),
                 grid=x.get("grid"),
+                area=x.get("area"),
             )
             for x in (data.get("locations") or [])
             if isinstance(x, dict)

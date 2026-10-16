@@ -147,6 +147,7 @@ VISITED: List[Tuple[str, str]] = [
 HAS_ITEM: List[Tuple[str, str]] = [
     ("Alice", "Apple"),
     ("Guard", "Sword"),
+    ("Merchant", "Potion"),
 ]
 
 # Person -[:OWNS]-> Item（永久所有权）

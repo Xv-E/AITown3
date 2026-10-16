@@ -17,12 +17,12 @@ import item_interact as ii  # noqa: E402
 import goal_planner as gp  # noqa: E402
 
 
-def test_candidates_shape_mock():
+def test_candidates_shape_mock(monkeypatch):
     world = MagicMock()
     world.list_entities.return_value = ["OakTree"]
 
-    ii.is_interactive_item = lambda w, n: n == "OakTree"  # type: ignore
-    ii._item_loc = lambda w, n: "Forest"  # type: ignore
+    monkeypatch.setattr(ii, "is_interactive_item", lambda w, n: n == "OakTree")
+    monkeypatch.setattr(ii, "_item_loc", lambda w, n: "Forest")
     acts = [
         EphemeralAction(
             id="chop", label="Chop", source_code="x", cypher="RETURN 1", host_item="OakTree"
@@ -35,12 +35,12 @@ def test_candidates_shape_mock():
             host_item="OakTree",
         ),
     ]
-    ii.ensure_ephemeral_actions = lambda *a, **k: acts  # type: ignore
+    monkeypatch.setattr(ii, "ensure_ephemeral_actions", lambda *a, **k: acts)
 
     # get_person_location is imported inside the function
     import action as action_mod
 
-    action_mod.get_person_location = lambda w, n: "Forest"  # type: ignore
+    monkeypatch.setattr(action_mod, "get_person_location", lambda w, n: "Forest")
 
     cands = ephemeral_action_goal_candidates(world, "Rowan", force_mock=True)
     ids = {(c["target_entity"], c["interact_action"]) for c in cands}
@@ -56,19 +56,19 @@ def test_candidates_shape_mock():
     assert ("OakTree", "examine") in raw_ids
 
 
-def test_plan_binds_action_id():
+def test_plan_binds_action_id(monkeypatch):
     world = MagicMock()
     world.run_query.return_value = [{"loc": "Forest"}]
 
-    ii.is_interactive_item = lambda w, n: True  # type: ignore
-    ii.interaction_success = lambda w, n: False  # type: ignore
-    ii.ensure_ephemeral_actions = lambda *a, **k: [  # type: ignore
+    monkeypatch.setattr(ii, "is_interactive_item", lambda w, n: True)
+    monkeypatch.setattr(ii, "interaction_success", lambda w, n: False)
+    monkeypatch.setattr(ii, "ensure_ephemeral_actions", lambda *a, **k: [
         EphemeralAction(id="chop", label="Chop", source_code="", cypher="RETURN 1")
-    ]
-    ii.FORCE_MOCK = True
+    ])
+    monkeypatch.setattr(ii, "FORCE_MOCK", True)
 
-    gp._get_entity_location = lambda w, label, name: "Forest"  # type: ignore
-    gp._get_person_location = lambda w, name: "Forest"  # type: ignore
+    monkeypatch.setattr(gp, "_get_entity_location", lambda w, label, name: "Forest")
+    monkeypatch.setattr(gp, "_get_person_location", lambda w, name: "Forest")
 
     result = _plan_interact_with(world, "Rowan", "OakTree", interact_action="chop")
     assert result.success
@@ -77,6 +77,6 @@ def test_plan_binds_action_id():
 
 
 if __name__ == "__main__":
-    test_candidates_shape_mock()
-    test_plan_binds_action_id()
-    print("ok")
+    import pytest
+
+    raise SystemExit(pytest.main([__file__, "-q"]))

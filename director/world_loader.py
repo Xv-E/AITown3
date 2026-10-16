@@ -16,7 +16,8 @@ from .blueprint import EventBlueprint
 logger = logging.getLogger(__name__)
 
 _WORLDS_DIR = Path(__file__).resolve().parent.parent / "worlds"
-_DEFAULT_WORLD_ID = "key_and_door"
+# 主世界：无缝营地。其余模板是小型演示 / 回归测试
+_DEFAULT_WORLD_ID = "town_daily_life"
 
 
 def worlds_dir() -> Path:
@@ -45,8 +46,11 @@ def list_worlds() -> List[Dict[str, str]]:
                 "id": wid,
                 "title": str(data.get("title") or wid),
                 "premise": str(data.get("premise") or ""),
+                "default": wid == _DEFAULT_WORLD_ID,
             }
         )
+    # 主世界排最前，界面上先看到它
+    out.sort(key=lambda w: not w["default"])
     return out
 
 
@@ -65,7 +69,7 @@ def load_world(world_id: str) -> EventBlueprint:
 
 
 def pick_world(prompt: str = "") -> EventBlueprint:
-    """按提示关键词选世界；默认 key_and_door。"""
+    """按提示关键词选世界；没命中就用主世界。"""
     text = (prompt or "").lower()
     worlds = list_worlds()
     if not worlds:

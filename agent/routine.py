@@ -346,6 +346,21 @@ def people_at_location(
     return names
 
 
+def people_around(world: "Neo4jWorld", character: str, location: Optional[str]) -> List[str]:
+    """身边的人：无缝世界里按距离（不分区域），没有布局的世界退回到同一地点。"""
+    from content import get_content
+
+    try:
+        from spatial import people_near
+
+        near = people_near(world, character, hidden=get_content().hidden_states())
+    except Exception:
+        near = None
+    if near is not None:
+        return near
+    return people_at_location(world, location, exclude=character) if location else []
+
+
 def pick_social_target(
     world: "Neo4jWorld",
     character: str,
@@ -355,7 +370,7 @@ def pick_social_target(
 ) -> Optional[str]:
     if not location:
         return None
-    others = people_at_location(world, location, exclude=character)
+    others = people_around(world, character, location)
     if not others:
         return None
     recent = set(recent_talk_targets or [])

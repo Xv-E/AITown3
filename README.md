@@ -38,7 +38,8 @@ NEO4J_PASSWORD=your_password
 LLM_PRIMARY=qwen
 DASHSCOPE_API_KEY=your_key
 OPENAI_BASE_URL=https://dashscope-intl.aliyuncs.com/compatible-mode/v1
-OPENAI_MODEL=qwen-turbo
+OPENAI_MODEL=qwen-flash            # NPC decisions and dialogue: frequent calls, cheap and fast
+OPENAI_CREATIVE_MODEL=qwen-plus    # Director / Storyteller / object actions: rare calls, need quality
 
 # Optional local LlamaCpp (GBNF repair only)
 # DEFAULT_MODEL_PATH=Models/your-model.gguf
@@ -58,6 +59,8 @@ python web/server.py --host 127.0.0.1 --port 8765
 ```
 
 Open [http://127.0.0.1:8765](http://127.0.0.1:8765).
+
+The main world is **Campfire Camp** (`worlds/town_daily_life.json`). If the database is empty when the server starts, it is built automatically; an existing world is left as it is. Load it again any time with `POST /api/worlds/town_daily_life/load` (this resets the world and NPC memories). The other templates are small demos kept as regression tests.
 
 Useful flags:
 
@@ -111,6 +114,100 @@ pytest test/ -v
 ```
 
 Some tests skip if Neo4j or `llama_cpp` is unavailable.
+
+> ⚠️ Graph-backed tests **clear and rebuild the Neo4j database** they connect to. Reload a template world in the UI afterwards. Chroma memory tests use a temporary directory and never touch `data/chroma`.
+
+`test/test_sim_regression.py` runs the campfire world for 40 ticks (rule mode, serial and parallel planning) and checks invariants: no errors, every NPC acts, the player never auto-acts.
+
+## Seamless world
+
+The world is one continuous grid. Each location is a named **region** on it with no walls in between; you walk from the Forest into the Clearing.
+
+```json
+{"name": "Forest", "tags": "work,wood", "area": [0, 10, 20, 20]}
+```
+
+`area` is `[x, y, w, h]` in world cells. Worlds without `area` are laid out automatically, with neighbouring regions placed side by side.
+
+- **AI reasons in regions** (PDDL, routines, knowledge, the Storyteller): "go to the Forest", "chop the OakTree".
+- **The world runs in cells** (`actions/spatial.py`): people have world coordinates; `move` and "walk up to the target first" become A* paths whose length sets the action's duration (`WALK_CELLS_PER_SEC`). The path goes to the client so NPCs walk it in time.
+- **Who is around** is distance-based (`VIEW_RADIUS`), not same-region.
+- **The player walks freely**: the client reports the player's cell (`POST /api/player/position`); crossing into another region changes their region on the server.
+- The play state's `world` block carries every region, item and person in world cells.
+
+Coordinates: `Person.x/y` are world cells; `Item.x/y` stay local to the item's region (add the region's `area_x/area_y`).
+
+## Object actions
+
+Interactive objects (a tree, a dial…) list what can be done with them in their script, as **data**: the same `requires` / `effects` primitives as the content-pack actions.
+
+```json
+"script": {
+  "initial_state": {"logs": 3},
+  "on_tick": [{"op": "add_prop", "prop": "logs", "delta_per_sec": 0.02, "max": 3}],
+  "actions": [
+    {"id": "chop", "label": "Chop for wood",
+     "requires": [{"op": "prop_gte", "entity": "@target", "prop": "logs", "value": 1,
+                   "message": "@target has no good branches left; give it a few hours"}],
+     "effects": [{"op": "spawn_item", "archetype": "firewood", "held_by": "@actor"},
+                 {"op": "add_prop", "entity": "@target", "prop": "logs", "delta": -1, "min": 0}],
+     "narrative": "@actor chops a dry log from @target."}
+  ]
+}
+```
+
+Placeholders: `@actor`, `@target` (the object), `@here` (where it stands). The engine adds "actor is alive and next to the object".
+
+- **Same for everyone**: the player's menu, NPC decisions and the planner all see these actions. The play state lists each object's actions with `available` / `reason`, so the player sees what they can do right now and why the rest can't be done.
+- **Validated** (`agent/ephemeral_action_dsl.py`); `test/test_authored_actions.py` checks every action in `worlds/*.json`.
+- **Planned with**: the PDDL compiler turns each action into a normal PDDL action, so "campfire fuel ≥ 80" is solved as chop → walk back → feed the fire, and an NPC can work out how to solve the dial — no hand-written rules.
+
+**LLM-invented actions are off by default** so the world stays predictable. With `AITOWN3_INVENT_ACTIONS=1`, objects without authored actions get 2–4 actions invented by the LLM in the same format (validated, with one round of error feedback). Authored actions always take priority.
+
+## Questlines (Director v2)
+
+`quest/` adds a questline **into the running world** — new regions, people, items with object actions, clues, and 2–6 stages — without clearing anything.
+
+```bash
+curl -X POST http://127.0.0.1:8765/api/questlines/draft -H "Content-Type: application/json" -d "{\"theme\": \"someone steals from the camp at night\"}"
+curl -X POST http://127.0.0.1:8765/api/questlines/apply -H "Content-Type: application/json" -d "{}"
+curl http://127.0.0.1:8765/api/questlines
+```
+
+1. **Draft** (`quest/author.py`): the creative model writes a JSON patch from a digest of the world (people, places, grudges, story arc). Obvious slips are fixed automatically; anything else is sent back with its previous answer so it edits rather than rewrites.
+2. **Validate** (`quest/spec.py`): names, places, people and every condition / reward / object action use the same primitives and rules as object actions.
+3. **Prove it's playable** (`quest/verify.py`): on an in-memory copy of the world, each stage becomes a PDDL action (*conditions → reward*) and the planner must finish the line as the player. Rejected: unreachable stages (the first one is named), stages already true at the start, and stages that complete the moment the previous one does. The plan is returned as a walkthrough.
+4. **Apply** (`quest/apply.py`): written incrementally after re-checking against the world as it is now; new regions are laid out next to the map.
+5. **Play** (`quest/runtime.py`, a `GameLoop` hook): each tick the current stage's conditions are checked; on completion the reward is applied, the news goes to everyone and the next stage's giver is prompted. The current objective shows under the Bevy clock.
+
+Only `spatial`/`graph_ops`/`compiler` are reused; the engine sees questlines only through `GameLoop.hooks` and the compiler's generic `extra_actions`.
+
+## Storyteller and plan conflicts
+
+While the simulation runs, the **Storyteller** (`agent/storyteller.py`) reads the camp every few game hours — who is doing what, recent plan conflicts, grudges, public news — and asks the LLM where the story goes next. It can only act through three validated beats:
+
+| Beat | Effect |
+|------|--------|
+| `announce` | Public event: chronicle entry + a news trigger for everyone |
+| `whisper` | Private rumour / thought for one NPC; `urgent` interrupts their current plan |
+| `adjust` | Modest change to a number an item's script actually uses (e.g. wind drains campfire `fuel`) |
+
+LLM calls run off the tick thread and apply on a later tick. Without an LLM (rule mode) it falls back to templates. The current arc is in the play state (`simulation.story`) and shown under the Bevy clock.
+
+**Plan conflicts** (`agent/conflicts.py`): when an NPC takes or uses up an item that someone else's plan relies on — after that person decided on the plan — the other plan is interrupted and replanned, both get a trigger, and the loser's `TENSION` toward the taker grows. Grudges appear in each NPC's LLM prompt and feed the Storyteller. Recent conflicts are in `simulation.conflicts`.
+
+## Performance knobs
+
+| Env var | Default | Meaning |
+|---------|---------|---------|
+| `AITOWN3_PLAN_WORKERS` | `4` | NPCs that decide/plan in parallel per tick (`1` = serial) |
+| `AITOWN3_UP_TIMEOUT` | `20` | Seconds before a unified-planning solve falls back |
+| `AITOWN3_STORYTELLER` | `1` | `0` turns the Storyteller off |
+| `OPENAI_CREATIVE_MODEL` | `OPENAI_MODEL` | Model for the Director, Storyteller and object-action generation |
+| `AITOWN3_INVENT_ACTIONS` | `0` | `1` lets the LLM invent actions for objects that have none authored |
+| `AITOWN3_STORY_HOURS` | `4` | Game hours between story beats |
+
+Within a tick, identical read queries hit Neo4j once (`Neo4jWorld.read_cache`); any write query invalidates the cache.
 
 ## Architecture (short)
 

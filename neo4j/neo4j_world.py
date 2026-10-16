@@ -5,9 +5,13 @@ Neo4j 数据库连接管理类
 """
 
 from neo4j import GraphDatabase
-from typing import Optional, List, Dict, Any
+from contextlib import contextmanager
+from typing import Iterator, Optional, List, Dict, Any
+import copy
 import os
 import logging
+import re
+import threading
 from env_loader import load_project_env
 
 # 从仓库根目录加载 `.env`（在任意子目录下运行脚本也能读到）
@@ -16,6 +20,9 @@ load_project_env()
 # 配置日志
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# 可能改图的 Cypher（保守：CALL 一律当写）；命中则不缓存并让读缓存失效
+_WRITE_RE = re.compile(r"\b(CREATE|MERGE|SET|DELETE|REMOVE|DROP|FOREACH|CALL)\b", re.IGNORECASE)
 
 
 class Neo4jWorld:
@@ -83,6 +90,12 @@ class Neo4jWorld:
             logger.error(error_msg)
             raise ConnectionError(error_msg) from e
         
+        # 读缓存（见 read_cache）
+        self._cache_lock = threading.Lock()
+        self._cache_depth = 0
+        self._cache_gen = 0
+        self._cache: Dict[Any, List[Dict[str, Any]]] = {}
+
         # 保存单例实例
         Neo4jWorld._instance = self
         
@@ -123,8 +136,37 @@ class Neo4jWorld:
         """
         with self.driver.session() as session:
             session.run("MATCH (n) DETACH DELETE n")
+        self.invalidate_cache()
         logger.warning("All nodes and relationships cleared")
-    
+
+    @contextmanager
+    def read_cache(self) -> Iterator[None]:
+        """作用域内相同的只读查询只打一次库；任何写查询都会清空缓存。
+
+        一次模拟 tick 里各角色反复读同样的属性（是否死亡、物品脚本……），
+        缓存后结果与不缓存一致：只复用「上次写之后」读到的结果。可嵌套、可跨线程。
+        """
+        with self._cache_lock:
+            self._cache_depth += 1
+        try:
+            yield
+        finally:
+            with self._cache_lock:
+                self._cache_depth -= 1
+                if self._cache_depth == 0:
+                    self._cache.clear()
+                    self._cache_gen += 1
+
+    def invalidate_cache(self) -> None:
+        with self._cache_lock:
+            self._cache.clear()
+            self._cache_gen += 1
+
+    def _run(self, cypher: str, params: Dict[str, Any]) -> List[Dict[str, Any]]:
+        with self.driver.session() as session:
+            result = session.run(cypher, **params)
+            return [record.data() for record in result]
+
     def run_query(self, cypher: str, **params) -> List[Dict[str, Any]]:
         """
         执行Cypher查询
@@ -136,10 +178,27 @@ class Neo4jWorld:
         Returns:
             List[Dict[str, Any]]: 查询结果记录列表
         """
-        with self.driver.session() as session:
-            result = session.run(cypher, **params)
-            return [record.data() for record in result]
-    
+        if _WRITE_RE.search(cypher):
+            try:
+                return self._run(cypher, params)
+            finally:
+                self.invalidate_cache()
+        if not self._cache_depth:
+            return self._run(cypher, params)
+
+        key = (cypher, repr(sorted(params.items())))
+        with self._cache_lock:
+            hit = self._cache.get(key)
+            gen = self._cache_gen
+        if hit is not None:
+            return copy.deepcopy(hit)
+        rows = self._run(cypher, params)
+        with self._cache_lock:
+            # 读的过程中若有写发生，结果可能已过期，不入缓存
+            if self._cache_depth and self._cache_gen == gen:
+                self._cache[key] = rows
+        return copy.deepcopy(rows)
+
     def get_entity_by_name(self, name: str, label: str = "Entity") -> Optional[Dict[str, Any]]:
         """
         根据名称查找实体节点

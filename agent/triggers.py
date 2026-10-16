@@ -78,7 +78,7 @@ def observe(
 ) -> tuple:
     """返回 (Observation, {alert_key: alert}, slot)。"""
     from item_scripts import alert_applies_to
-    from routine import current_slot, load_person_routine, people_at_location
+    from routine import current_slot, load_person_routine, people_around
 
     slots = load_person_routine(world, character)
     slot = current_slot(slots, sim_time) if slots else None
@@ -86,7 +86,7 @@ def observe(
     for a in alerts:
         if alert_applies_to(world, character, a, sim_time=sim_time):
             mine[f"{a.get('item')}|{a.get('signal')}|{a.get('message')}"] = a
-    people = frozenset(people_at_location(world, location, exclude=character)) if location else frozenset()
+    people = frozenset(people_around(world, character, location))
     obs = Observation(
         slot=slot.key if slot else None,
         location=location,
@@ -128,7 +128,7 @@ def diff_triggers(
         ))
     if cur.location == prev.location:
         for name in sorted(cur.people - prev.people):
-            out.append(Trigger("event", "person_arrived", f"{name} arrived at {cur.location}.",
+            out.append(Trigger("event", "person_arrived", f"{name} came over to you at {cur.location}.",
                                0.5, sim_time, {"person": name}))
     for item in sorted(cur.inventory - prev.inventory):
         out.append(Trigger("event", "received_item", f"You received {item}.",

@@ -158,11 +158,17 @@ class TestDirectorBlueprint(unittest.TestCase):
 
 
 class TestWorldTemplates(unittest.TestCase):
+    def test_the_camp_is_the_main_world_and_listed_first(self):
+        self.assertEqual(default_world_id(), "town_daily_life")
+        worlds = list_worlds()
+        self.assertEqual(worlds[0]["id"], "town_daily_life")
+        self.assertTrue(worlds[0]["default"])
+        self.assertEqual(sum(1 for w in worlds if w["default"]), 1)
+
     def test_list_and_load_key_and_door(self):
         worlds = list_worlds()
         ids = [w["id"] for w in worlds]
         self.assertIn("key_and_door", ids)
-        self.assertEqual(default_world_id(), "key_and_door")
         bp = load_world("key_and_door")
         self.assertEqual(bp.source, "world")
         self.assertTrue(any(p.role == "player" for p in bp.persons))

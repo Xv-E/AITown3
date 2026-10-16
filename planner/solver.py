@@ -19,6 +19,7 @@ from __future__ import annotations
 import os
 import re
 import tempfile
+import threading
 import time
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
@@ -36,29 +37,43 @@ _ENHSP_PARAMS = os.environ.get("AITOWN3_ENHSP_PARAMS", "-h hadd -s WAStar")
 _DEFAULT_ENGINES = ["bfs", "unified_planning"]
 
 
-def _scrub_debugpy_for_planner_child() -> Dict[str, Optional[str]]:
-    """临时去掉会让 debugpy 附着到 Fast Downward 子进程的环境变量，返回旧值以便还原。"""
+# 多个 NPC 并行求解时共用 os.environ：第一个进入的线程去掉变量，最后一个离开的线程还原
+_env_lock = threading.Lock()
+_env_users = 0
+_env_saved: Dict[str, Optional[str]] = {}
+
+
+def _scrub_debugpy_for_planner_child() -> None:
+    """临时去掉会让 debugpy 附着到 Fast Downward 子进程的环境变量（引用计数，线程安全）。"""
+    global _env_users, _env_saved
     keys = (
         "PYDEVD_USE_CYTHON",
         "PYDEVD_USE_FRAME_EVAL",
         "PYDEVD_LOAD_VALUES_ASYNC",
         "DEBUGPY_LOG_DIR",
         "DEBUGPY_ADAPTER_ENDPOINTS",
+        "PYDEVD_DISABLE_FILE_VALIDATION",
     )
-    saved: Dict[str, Optional[str]] = {}
-    for k in keys:
-        saved[k] = os.environ.pop(k, None)
-    # 告知部分 pydevd 版本不要追子进程
-    os.environ["PYDEVD_DISABLE_FILE_VALIDATION"] = "1"
-    return saved
+    with _env_lock:
+        _env_users += 1
+        if _env_users > 1:
+            return
+        _env_saved = {k: os.environ.pop(k, None) for k in keys}
+        # 告知部分 pydevd 版本不要追子进程
+        os.environ["PYDEVD_DISABLE_FILE_VALIDATION"] = "1"
 
 
-def _restore_env(saved: Dict[str, Optional[str]]) -> None:
-    for k, v in saved.items():
-        if v is None:
-            os.environ.pop(k, None)
-        else:
-            os.environ[k] = v
+def _restore_env() -> None:
+    global _env_users
+    with _env_lock:
+        _env_users -= 1
+        if _env_users > 0:
+            return
+        for k, v in _env_saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
 
 
 # 部分 PDDL 引擎（如 Fast Downward）会把对象名 lowercase 化。
@@ -224,7 +239,7 @@ def _solve_with_unified_planning(
     domain_str: str, problem_str: str, timeout: Optional[float] = None
 ) -> Dict[str, Any]:
     try:
-        from unified_planning.shortcuts import OneshotPlanner
+        from unified_planning.environment import Environment
         from unified_planning.io import PDDLReader
     except ImportError as e:
         return {"success": False, "engine": "unified_planning", "plan": [],
@@ -232,7 +247,7 @@ def _solve_with_unified_planning(
 
     domain_path: Optional[str] = None
     problem_path: Optional[str] = None
-    saved_env = _scrub_debugpy_for_planner_child()
+    _scrub_debugpy_for_planner_child()
     try:
         # PDDLReader.parse_problem 需要文件路径，这里写到临时文件
         domain_fd = tempfile.NamedTemporaryFile(mode="w", suffix=".pddl",
@@ -247,15 +262,18 @@ def _solve_with_unified_planning(
         problem_fd.close()
         problem_path = problem_fd.name
 
-        reader = PDDLReader()
+        # 每次求解用独立 Environment：UP 全局环境的表达式管理器不是线程安全的
+        env = Environment()
+        env.credits_stream = None
+        reader = PDDLReader(environment=env)
         problem = reader.parse_problem(domain_path, problem_path)
 
         # 让 unified-planning 自己挑可用引擎；找不到就抛 UPNoRequestedEngineAvailableException
         if ":numeric-fluents" in domain_str:
             # ENHSP 默认 hadd+gbfs 计划绕路很多；WAStar 基本同速但计划短一半
-            planner_ctx = OneshotPlanner(name="enhsp", params={"params": _ENHSP_PARAMS})
+            planner_ctx = env.factory.OneshotPlanner(name="enhsp", params={"params": _ENHSP_PARAMS})
         else:
-            planner_ctx = OneshotPlanner(problem_kind=problem.kind)
+            planner_ctx = env.factory.OneshotPlanner(problem_kind=problem.kind)
         with planner_ctx as planner:
             result = planner.solve(problem, timeout=timeout)
             engine_used = getattr(planner, "name", "auto")
@@ -295,7 +313,7 @@ def _solve_with_unified_planning(
         return {"success": False, "engine": "unified_planning", "plan": [],
                 "raw": "", "error": f"求解异常: {e}"}
     finally:
-        _restore_env(saved_env)
+        _restore_env()
         for p in (domain_path, problem_path):
             if p and os.path.exists(p):
                 try:

@@ -8,6 +8,7 @@ import atexit
 import json
 import logging
 import os
+import threading
 from typing import Any, Dict, List, Optional
 
 from env_loader import load_project_env
@@ -26,6 +27,9 @@ default_model_path = os.getenv(
 _llama_instance = None
 _ollama_instance = None
 _openai_instance = None
+# 多个 NPC 并行规划时：单例只建一次；llama-cpp 上下文不能被多线程同时推理
+_init_lock = threading.Lock()
+llama_call_lock = threading.Lock()
 
 
 def get_dashscope_api_key() -> str:
@@ -43,6 +47,13 @@ def primary_model_name() -> str:
         or os.getenv("DASHSCOPE_MODEL")
         or "qwen-plus"
     )
+
+
+def creative_model_name() -> str:
+    """写故事的调用（导演、Storyteller、物品动作）用的模型；没配就和 NPC 用同一个。
+
+    NPC 决策调用频繁，适合便宜快的模型；这几处调用少但要创意和稳定的 JSON。"""
+    return os.getenv("OPENAI_CREATIVE_MODEL") or primary_model_name()
 
 
 def is_primary_configured() -> bool:
@@ -63,7 +74,11 @@ def is_local_gbnf_ready() -> bool:
 
 def get_llama_instance(model_path: Optional[str] = None, **kwargs):
     global _llama_instance
-    if _llama_instance is None:
+    if _llama_instance is not None:
+        return _llama_instance
+    with _init_lock:
+        if _llama_instance is not None:
+            return _llama_instance
         from langchain_community.llms import LlamaCpp
 
         path = model_path or default_model_path
@@ -97,7 +112,11 @@ def get_ollama_instance(model_name: Optional[str] = None, **kwargs):
 
 def get_openai_instance(**kwargs):
     global _openai_instance
-    if _openai_instance is None:
+    if _openai_instance is not None:
+        return _openai_instance
+    with _init_lock:
+        if _openai_instance is not None:
+            return _openai_instance
         from openai import OpenAI
         import httpx
 

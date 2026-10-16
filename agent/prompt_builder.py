@@ -38,6 +38,14 @@ class PromptBuilder:
                 "If your current goal is still best, choose it again.",
                 "",
             ]
+        tensions = self._get_tensions_text(agent)
+        if tensions:
+            parts += [
+                "=== Grudges / Friction ===",
+                tensions,
+                "You may confront, avoid, make up with, or compete with these people.",
+                "",
+            ]
         parts += [
             "=== Nearby Graph (current place) ===",
             self._get_local_graph_text(agent),
@@ -119,6 +127,16 @@ Respond with a JSON object:
 }}
 """
         return prompt
+
+    def _get_tensions_text(self, agent: "AgentProfile") -> str:
+        if self.world is None:
+            return ""
+        try:
+            from conflicts import describe_tensions
+
+            return describe_tensions(self.world, agent.name)
+        except Exception:
+            return ""
 
     def _get_world_premise(self) -> str:
         try:

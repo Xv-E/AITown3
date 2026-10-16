@@ -499,6 +499,22 @@ def _llm_speaker_utterance(
     return "", meta
 
 
+HISTORY_TURNS = 8
+
+
+def history_block(history: Optional[List[Dict[str, str]]]) -> str:
+    """这段对话里之前说过的话（玩家在对话框里连着聊时，NPC 要接得上）。"""
+    turns = [
+        (str(h.get("speaker") or "").strip(), str(h.get("text") or "").strip().replace('"', "'"))
+        for h in (history or [])[-HISTORY_TURNS:]
+        if isinstance(h, dict)
+    ]
+    turns = [(who, text[:200]) for who, text in turns if who and text]
+    if not turns:
+        return ""
+    return "Conversation so far:\n" + "\n".join(f'{who}: "{text}"' for who, text in turns) + "\n"
+
+
 def _build_dialogue_prompt(
     *,
     speaker_a: str,
@@ -512,16 +528,18 @@ def _build_dialogue_prompt(
     limits_block: str,
     limits: Dict[str, Any],
     retry_note: str = "",
+    history: Optional[List[Dict[str, str]]] = None,
 ) -> str:
     """尽量短的对话 prompt，降低 DashScope 超时概率。"""
     retry = f"{retry_note}\n" if retry_note else ""
+    so_far = history_block(history)
     hints = "; ".join(mem_hints[:2]) if mem_hints else "none"
     # 压缩 knowledge，避免长上下文拖慢
     clue = (clue_block or "").strip()
     if len(clue) > 600:
         clue = clue[:600] + "…"
-    return f"""{retry}You are {speaker_b} at {location}. Stay in character. Reply in English only.
-Player ({speaker_a}): "{safe_msg or '(greets you)'}"
+    return f"""{retry}You are {speaker_b} at {location}. Stay in character. Reply in the language the player writes in (English if unsure).
+{so_far}Player ({speaker_a}): "{safe_msg or '(greets you)'}"
 Profile: {agent_b.personality}; {agent_b.background}; mood={agent_b.mood}; style={style}
 Knowledge (do not invent beyond this):
 {clue}
@@ -580,6 +598,7 @@ def _llm_dialogue(
     memory=None,
     player_message: str = "",
     knowledge=None,
+    history: Optional[List[Dict[str, str]]] = None,
 ) -> Optional[Dict[str, Any]]:
     import time as _time
 
@@ -646,6 +665,7 @@ def _llm_dialogue(
         mem_hints=mem_hints,
         limits_block=limits_block,
         limits=limits,
+        history=history,
     )
 
     t0 = _time.perf_counter()
@@ -809,6 +829,7 @@ def _llm_dialogue(
         mem_hints=mem_hints,
         limits_block=limits_block,
         limits=limits,
+        history=history,
         retry_note=(
             f"IMPORTANT: Previous answer was invalid (placeholder or bad JSON). "
             f"Write a real in-character reply for {speaker_b} about the player's question. "
@@ -915,6 +936,8 @@ def generate_talk_dialogue(
     memory=None,
     force_mock: bool = False,
     player_message: str = "",
+    history: Optional[List[Dict[str, str]]] = None,
+    listener_speaks: bool = True,
 ) -> Dict[str, Any]:
     """
     返回:
@@ -982,6 +1005,19 @@ def generate_talk_dialogue(
             msg = ""
             utterance_source = "empty"
 
+    if not listener_speaks:
+        # 对方是玩家：只说发起方这一句，回话由玩家自己在对话框里打
+        return {
+            "summary": f"{speaker_a} spoke to {speaker_b}",
+            "lines": [{"speaker": speaker_a, "text": msg}] if msg else [],
+            "trust_delta": 0,
+            "trust": 0,
+            "source": "llm" if msg else "error",
+            "player_message": "",
+            "utterance_source": utterance_source,
+            "awaiting_reply": bool(msg),
+        }
+
     knowledge = load_npc_knowledge(
         world, speaker_b, memory=memory, player_message=msg
     )
@@ -995,6 +1031,7 @@ def generate_talk_dialogue(
         memory=memory,
         player_message=msg,
         knowledge=knowledge,
+        history=history,
     )
     if result is None:
         result = _llm_unavailable_result(
@@ -1095,6 +1132,8 @@ def handle_talk_dialogue(
     memory=None,
     force_mock: bool = False,
     player_message: str = "",
+    history: Optional[List[Dict[str, str]]] = None,
+    listener_speaks: bool = True,
 ) -> Dict[str, Any]:
     """生成对话、更新信任、写入记忆，并转移可分享事实。"""
     from npc_knowledge import transfer_shareable_facts
@@ -1107,6 +1146,8 @@ def handle_talk_dialogue(
         memory=memory,
         force_mock=force_mock,
         player_message=player_message,
+        history=history,
+        listener_speaks=listener_speaks,
     )
     lines = dialogue.get("lines") or []
     resolved_msg = (dialogue.get("player_message") or player_message or "").strip()

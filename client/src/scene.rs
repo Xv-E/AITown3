@@ -1,18 +1,41 @@
-use bevy::{math::Isometry2d, prelude::*};
+//! The seamless world: one big grid of cells. Regions (Forest, Clearing, …) are named
+//! areas on it with no walls between them; the player walks anywhere that is open.
 
-use crate::net::{Thing, WorldSnapshot};
+use bevy::{math::Isometry2d, prelude::*};
+use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
+use std::cmp::Reverse;
+use std::time::{Duration, Instant};
+
+use crate::icons::{icon_for, IconAtlas};
+use crate::net::{NetBridge, Thing, WorldSnapshot};
 use crate::ui::{NearbyInteract, UiState};
 
-pub const ROOM_HALF_W: f32 = 360.0;
-pub const ROOM_HALF_H: f32 = 210.0;
-pub const ROOM_CENTER: Vec2 = Vec2::new(0.0, -30.0);
-pub const PLAYER_SPEED: f32 = 220.0;
-pub const PLAYER_START: Vec3 = Vec3::new(0.0, -70.0, 10.0);
+/// Pixels per world cell.
+pub const TILE: f32 = 32.0;
+pub const PLAYER_SPEED: f32 = 8.0 * TILE;
+/// How often the player's cell is reported to the server while walking.
+const REPORT_EVERY: Duration = Duration::from_millis(200);
+/// The server put the player further than this (cells) from anywhere we reported recently:
+/// it moved them on purpose (world reload, a story teleport), so follow it.
+const SNAP_CELLS: i32 = 4;
+/// Pushed state can lag our reports by a second or more; positions we reported within this
+/// window are echoes of our own walking, not the server moving us.
+const ECHO_WINDOW: Duration = Duration::from_secs(5);
+const CAMERA_FOLLOW: f32 = 6.0;
+
+const REGION_COLORS: [(f32, f32, f32); 6] = [
+    (0.13, 0.17, 0.13),
+    (0.15, 0.14, 0.11),
+    (0.11, 0.15, 0.17),
+    (0.16, 0.12, 0.14),
+    (0.12, 0.13, 0.17),
+    (0.14, 0.16, 0.11),
+];
 
 #[derive(Component)]
 pub struct PlayerAvatar;
 
-/// Static room decoration (floor, exits, items); rebuilt on every state sync.
+/// Static world decoration (floors, items, labels); rebuilt on every state sync.
 #[derive(Component)]
 pub struct SceneEntity;
 
@@ -26,22 +49,137 @@ pub struct Interactive {
 
 #[derive(Clone)]
 pub enum TargetKind {
-    Exit { to: String },
     Person { name: String },
     Item { thing: Thing },
 }
 
-#[derive(Resource, Default)]
-pub struct SceneState {
-    revision: Option<u64>,
-    room: String,
+/// Centre of a world cell in screen space (cell y grows downwards, screen y upwards).
+pub fn cell_center(cell: IVec2) -> Vec2 {
+    Vec2::new((cell.x as f32 + 0.5) * TILE, -(cell.y as f32 + 0.5) * TILE)
 }
 
+pub fn cell_at(pos: Vec2) -> IVec2 {
+    IVec2::new((pos.x / TILE).floor() as i32, (-pos.y / TILE).floor() as i32)
+}
+
+fn footprint_center(cell: IVec2, size: IVec2) -> Vec2 {
+    Vec2::new(
+        (cell.x as f32 + size.x as f32 * 0.5) * TILE,
+        -(cell.y as f32 + size.y as f32 * 0.5) * TILE,
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Walkable cells (mirrors the server: all regions minus fixtures)
+// ---------------------------------------------------------------------------
+
+#[derive(Resource, Default)]
+pub struct WalkGrid {
+    revision: Option<u64>,
+    walkable: HashSet<IVec2>,
+}
+
+impl WalkGrid {
+    /// Offline / no layout yet: let the player roam freely.
+    pub fn is_open(&self, cell: IVec2) -> bool {
+        self.walkable.is_empty() || self.walkable.contains(&cell)
+    }
+
+    pub fn has_layout(&self) -> bool {
+        !self.walkable.is_empty()
+    }
+
+    /// A* over open cells (8 directions, no corner cutting); path excludes `from`.
+    pub fn path(&self, from: IVec2, goals: &HashSet<IVec2>) -> Option<Vec<IVec2>> {
+        let goals: HashSet<IVec2> = goals.iter().copied().filter(|g| self.is_open(*g)).collect();
+        if goals.is_empty() {
+            return None;
+        }
+        let h = |c: IVec2| goals.iter().map(|g| octile(c, *g)).fold(f32::MAX, f32::min);
+        let key = |f: f32| (f * 1000.0) as i64;
+        let mut open = BinaryHeap::from([Reverse((key(h(from)), from.x, from.y))]);
+        let mut came: HashMap<IVec2, IVec2> = HashMap::new();
+        let mut cost: HashMap<IVec2, f32> = HashMap::from([(from, 0.0)]);
+        while let Some(Reverse((_, x, y))) = open.pop() {
+            let cur = IVec2::new(x, y);
+            if goals.contains(&cur) {
+                let mut path = vec![cur];
+                while let Some(prev) = came.get(path.last().unwrap()) {
+                    if *prev == from {
+                        break;
+                    }
+                    path.push(*prev);
+                }
+                path.reverse();
+                return Some(path);
+            }
+            let g = cost[&cur];
+            for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)] {
+                let next = IVec2::new(cur.x + dx, cur.y + dy);
+                if !self.is_open(next) {
+                    continue;
+                }
+                if dx != 0 && dy != 0
+                    && (!self.is_open(IVec2::new(cur.x + dx, cur.y)) || !self.is_open(IVec2::new(cur.x, cur.y + dy)))
+                {
+                    continue;
+                }
+                let ng = g + if dx != 0 && dy != 0 { 1.4142 } else { 1.0 };
+                if ng < *cost.get(&next).unwrap_or(&f32::MAX) {
+                    cost.insert(next, ng);
+                    came.insert(next, cur);
+                    open.push(Reverse((key(ng + h(next)), next.x, next.y)));
+                }
+            }
+            if cost.len() > 20_000 {
+                break;
+            }
+        }
+        None
+    }
+}
+
+fn octile(a: IVec2, b: IVec2) -> f32 {
+    let d = (a - b).abs();
+    d.x.max(d.y) as f32 + 0.4142 * d.x.min(d.y) as f32
+}
+
+pub fn rebuild_walk_grid(world: Res<WorldSnapshot>, mut grid: ResMut<WalkGrid>) {
+    if grid.revision == Some(world.revision) {
+        return;
+    }
+    grid.revision = Some(world.revision);
+    let mut open = HashSet::new();
+    for r in &world.world.regions {
+        for x in r.x..r.x + r.w {
+            for y in r.y..r.y + r.h {
+                open.insert(IVec2::new(x, y));
+            }
+        }
+    }
+    for item in &world.world.items {
+        let Some(cell) = item.cell() else { continue };
+        if item.portable {
+            continue;
+        }
+        let size = item.footprint();
+        for dx in 0..size.x {
+            for dy in 0..size.y {
+                open.remove(&(cell + IVec2::new(dx, dy)));
+            }
+        }
+    }
+    grid.walkable = open;
+}
+
+// ---------------------------------------------------------------------------
+// Build placement grid: the region the player stands in (item cells are local to it)
+// ---------------------------------------------------------------------------
+
 const DEFAULT_GRID: IVec2 = IVec2::new(20, 12);
-/// Border cells kept free for exits (must match the server's EDGE_MARGIN).
+/// Border cells kept free (must match the server's EDGE_MARGIN).
 const GRID_MARGIN: i32 = 1;
 
-/// The current zone's cell grid, scaled to fit the room rectangle. Cell (0,0) is top-left.
 #[derive(Clone, Copy)]
 pub struct ZoneGrid {
     pub size: IVec2,
@@ -51,18 +189,17 @@ pub struct ZoneGrid {
 
 impl ZoneGrid {
     pub fn of(world: &WorldSnapshot) -> Self {
-        let loc = &world.current_location;
-        let size = if loc.grid_w > 0 && loc.grid_h > 0 {
-            IVec2::new(loc.grid_w, loc.grid_h)
-        } else {
-            DEFAULT_GRID
-        };
-        let tile = (ROOM_HALF_W * 2.0 / size.x as f32).min(ROOM_HALF_H * 2.0 / size.y as f32);
-        let px = size.as_vec2() * tile;
-        Self {
-            size,
-            tile,
-            origin: ROOM_CENTER + Vec2::new(-px.x * 0.5, px.y * 0.5),
+        match world.region(&world.current_location.name) {
+            Some(r) => Self {
+                size: IVec2::new(r.w, r.h),
+                tile: TILE,
+                origin: Vec2::new(r.x as f32 * TILE, -(r.y as f32) * TILE),
+            },
+            None => Self {
+                size: DEFAULT_GRID,
+                tile: TILE,
+                origin: Vec2::ZERO,
+            },
         }
     }
 
@@ -109,15 +246,24 @@ impl ZoneGrid {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Rendering the world
+// ---------------------------------------------------------------------------
+
+#[derive(Resource, Default)]
+pub struct SceneState {
+    revision: Option<u64>,
+}
+
 pub fn setup_scene(mut commands: Commands) {
     commands.spawn(Camera2d);
     commands.spawn((
         Sprite {
             color: Color::srgb(0.25, 0.72, 1.0),
-            custom_size: Some(Vec2::splat(28.0)),
+            custom_size: Some(Vec2::splat(TILE * 0.8)),
             ..default()
         },
-        Transform::from_translation(PLAYER_START),
+        Transform::from_xyz(0.0, 0.0, 10.0),
         PlayerAvatar,
     ));
 }
@@ -126,6 +272,7 @@ pub fn render_scene(
     mut commands: Commands,
     world: Res<WorldSnapshot>,
     mut scene: ResMut<SceneState>,
+    icons: Res<IconAtlas>,
     existing: Query<Entity, With<SceneEntity>>,
 ) {
     if scene.revision == Some(world.revision) {
@@ -136,143 +283,206 @@ pub fn render_scene(
         commands.entity(entity).despawn();
     }
 
-    let grid = ZoneGrid::of(&world);
-    spawn_block(
-        &mut commands,
-        ROOM_CENTER,
-        Vec2::new(ROOM_HALF_W * 2.0, ROOM_HALF_H * 2.0),
-        -4.0,
-        Color::srgb(0.08, 0.10, 0.12),
-        "",
-        None,
-    );
-    spawn_block(
-        &mut commands,
-        ROOM_CENTER,
-        grid.pixel_size(),
-        -3.0,
-        Color::srgb(0.12, 0.15, 0.18),
-        "",
-        None,
-    );
-
-    for (exit, position) in exit_layout(&world.adjacent) {
-        spawn_block(
-            &mut commands,
-            position,
-            Vec2::new(112.0, 42.0),
-            2.0,
-            Color::srgb(0.20, 0.37, 0.55),
-            &format!("Exit\n{exit}"),
-            Some(Interactive {
-                kind: TargetKind::Exit { to: exit.clone() },
-                prompt: format!("Exit to {exit}"),
-                name: exit.clone(),
-                radius: 78.0,
-            }),
-        );
+    if world.world.regions.is_empty() {
+        render_offline_room(&mut commands, &world, &icons);
+        return;
     }
 
-    let mut items = world.items_here.clone();
-    items.sort_by(|a, b| a.name.cmp(&b.name));
-    for (idx, thing) in items.iter().enumerate() {
-        let (position, size) = match thing.cell() {
-            Some(cell) if thing.is_fixture() => {
-                let fp = thing.footprint();
-                (grid.center_of(cell, fp), fp.as_vec2() * grid.tile - Vec2::splat(4.0))
-            }
-            Some(cell) => (grid.center_of(cell, IVec2::ONE), Vec2::splat(grid.tile * 0.7)),
-            None if thing.is_door() => (item_position(thing, idx), Vec2::new(78.0, 34.0)),
-            None => (item_position(thing, idx), Vec2::new(46.0, 46.0)),
-        };
-        let color = if thing.locked {
-            Color::srgb(0.74, 0.31, 0.18)
-        } else if thing.is_door() {
-            Color::srgb(0.33, 0.46, 0.58)
-        } else if thing.item_kind.eq_ignore_ascii_case("site") {
-            Color::srgb(0.62, 0.50, 0.28)
-        } else if thing.portable {
-            Color::srgb(0.31, 0.64, 0.38)
-        } else {
-            Color::srgb(0.48, 0.52, 0.56)
-        };
-        spawn_block(
-            &mut commands,
-            position,
-            size,
-            3.0,
-            color,
-            &item_label(thing),
-            Some(Interactive {
-                kind: TargetKind::Item {
-                    thing: thing.clone(),
-                },
-                prompt: thing.name.clone(),
-                name: thing.name.clone(),
-                radius: 50.0_f32.max(size.length() * 0.5 + 24.0),
-            }),
-        );
-    }
-}
-
-fn spawn_block(
-    commands: &mut Commands,
-    position: Vec2,
-    size: Vec2,
-    z: f32,
-    color: Color,
-    label: &str,
-    interaction: Option<Interactive>,
-) {
-    let mut entity = commands.spawn((
-        Sprite {
-            color,
-            custom_size: Some(size),
-            ..default()
-        },
-        Transform::from_xyz(position.x, position.y, z),
-        SceneEntity,
-    ));
-    if let Some(interaction) = interaction {
-        entity.insert(interaction);
-    }
-    if !label.is_empty() {
+    for (i, region) in world.world.regions.iter().enumerate() {
+        let (r, g, b) = REGION_COLORS[i % REGION_COLORS.len()];
+        let size = Vec2::new(region.w as f32, region.h as f32) * TILE;
+        let center = Vec2::new(region.x as f32 * TILE, -(region.y as f32) * TILE) + Vec2::new(size.x, -size.y) * 0.5;
         commands.spawn((
-            Text2d::new(label),
-            TextFont {
-                font_size: 11.0,
+            Sprite {
+                color: Color::srgb(r, g, b),
+                custom_size: Some(size),
                 ..default()
             },
-            TextColor(Color::srgb(0.92, 0.95, 0.92)),
-            Transform::from_xyz(position.x, position.y - size.y * 0.5 - 14.0, z + 0.2),
+            Transform::from_xyz(center.x, center.y, -4.0),
+            SceneEntity,
+        ));
+        let corner = Vec2::new(region.x as f32 * TILE, -(region.y as f32) * TILE);
+        commands.spawn((
+            Text2d::new(region.name.clone()),
+            TextFont {
+                font_size: 18.0,
+                ..default()
+            },
+            TextColor(Color::srgba(0.85, 0.90, 0.85, 0.55)),
+            Transform::from_xyz(corner.x + size.x * 0.5, corner.y - 16.0, -3.0),
             SceneEntity,
         ));
     }
+
+    let mut items = world.world.items.clone();
+    items.sort_by(|a, b| a.name.cmp(&b.name));
+    for thing in &items {
+        let Some(cell) = thing.cell() else { continue };
+        let (position, size) = if thing.is_fixture() {
+            let fp = thing.footprint();
+            (footprint_center(cell, fp), fp.as_vec2() * TILE - Vec2::splat(4.0))
+        } else {
+            (cell_center(cell), Vec2::splat(TILE * 0.6))
+        };
+        spawn_thing(&mut commands, &icons, thing, position, size);
+    }
 }
 
-/// When the player arrives in a new room, put them next to the exit they came through.
-pub fn place_player_in_room(
+/// Offline demo: no world layout from the server, just the snapshot's items in a row.
+fn render_offline_room(commands: &mut Commands, world: &WorldSnapshot, icons: &IconAtlas) {
+    let size = DEFAULT_GRID.as_vec2() * TILE;
+    commands.spawn((
+        Sprite {
+            color: Color::srgb(0.12, 0.15, 0.18),
+            custom_size: Some(size),
+            ..default()
+        },
+        Transform::from_xyz(0.0, 0.0, -4.0),
+        SceneEntity,
+    ));
+    for (i, thing) in world.items_here.iter().enumerate() {
+        let pos = Vec2::new(-size.x * 0.4 + i as f32 * TILE * 2.5, -TILE * 3.0);
+        spawn_thing(commands, icons, thing, pos, Vec2::splat(TILE * 0.8));
+    }
+}
+
+fn spawn_thing(commands: &mut Commands, icons: &IconAtlas, thing: &Thing, position: Vec2, size: Vec2) {
+    // Fixtures keep a faint footprint (where they stand); locked things get a red one.
+    let footing = if thing.locked {
+        Some(Color::srgba(0.74, 0.31, 0.18, 0.55))
+    } else if thing.is_fixture() && size.max_element() > TILE {
+        Some(Color::srgba(0.0, 0.0, 0.0, 0.18))
+    } else {
+        None
+    };
+    if let Some(color) = footing {
+        commands.spawn((
+            Sprite { color, custom_size: Some(size), ..default() },
+            Transform::from_xyz(position.x, position.y, 2.9),
+            SceneEntity,
+        ));
+    }
+    let side = if thing.is_fixture() { size.min_element().min(TILE * 2.0).max(TILE * 0.9) } else { TILE * 0.85 };
+    commands.spawn((
+        Sprite {
+            image: icons.get(icon_for(thing)),
+            custom_size: Some(Vec2::splat(side)),
+            ..default()
+        },
+        Transform::from_xyz(position.x, position.y, 3.0),
+        SceneEntity,
+        Interactive {
+            kind: TargetKind::Item { thing: thing.clone() },
+            prompt: thing.name.clone(),
+            name: thing.name.clone(),
+            radius: size.max_element() * 0.5 + TILE * 1.3,
+        },
+    ));
+    commands.spawn((
+        Text2d::new(item_label(thing)),
+        TextFont {
+            font_size: 11.0,
+            ..default()
+        },
+        TextColor(Color::srgb(0.92, 0.95, 0.92)),
+        Transform::from_xyz(position.x, position.y - size.y * 0.5 - 10.0, 3.2),
+        SceneEntity,
+    ));
+}
+
+fn item_label(thing: &Thing) -> String {
+    if thing.is_fixture() || thing.item_kind.is_empty() {
+        thing.name.clone()
+    } else if thing.locked {
+        format!("{} ({}, locked)", thing.name, thing.item_kind)
+    } else {
+        format!("{} ({})", thing.name, thing.item_kind)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Player: free walking, auto-walk, position sync, camera
+// ---------------------------------------------------------------------------
+
+#[derive(Resource)]
+pub struct PlayerSync {
+    /// Which world the avatar was placed in (rebuilding the world re-places it).
+    placed_in: Option<String>,
+    last_sent_cell: Option<IVec2>,
+    last_sent_at: Instant,
+    /// Cells reported recently (newest last), to recognise the server echoing them back.
+    recent: VecDeque<(IVec2, Instant)>,
+    /// Only compare when a new state arrives, not every frame against the same old one.
+    revision: Option<u64>,
+}
+
+impl Default for PlayerSync {
+    fn default() -> Self {
+        Self {
+            placed_in: None,
+            last_sent_cell: None,
+            last_sent_at: Instant::now(),
+            recent: VecDeque::new(),
+            revision: None,
+        }
+    }
+}
+
+impl PlayerSync {
+    fn remember(&mut self, cell: IVec2) {
+        self.recent.push_back((cell, Instant::now()));
+        while self.recent.front().is_some_and(|(_, at)| at.elapsed() > ECHO_WINDOW) {
+            self.recent.pop_front();
+        }
+    }
+
+    /// Is `server` just one of our own recent positions coming back (possibly late)?
+    fn is_echo(&self, server: IVec2) -> bool {
+        self.recent
+            .iter()
+            .any(|(cell, at)| at.elapsed() <= ECHO_WINDOW && (*cell - server).abs().max_element() <= SNAP_CELLS)
+    }
+}
+
+fn world_key(world: &WorldSnapshot) -> String {
+    let mut names: Vec<&str> = world.world.regions.iter().map(|r| r.name.as_str()).collect();
+    names.sort();
+    format!("{}|{}", world.player.name, names.join(","))
+}
+
+/// Put the avatar where the server says: on (re)load, or when the server moved the player.
+pub fn sync_player_from_server(
     world: Res<WorldSnapshot>,
-    mut scene: ResMut<SceneState>,
+    mut sync: ResMut<PlayerSync>,
     mut player: Query<&mut Transform, With<PlayerAvatar>>,
 ) {
-    if world.current_location.name == scene.room {
+    if !world.online || !world.found {
         return;
     }
-    let previous = std::mem::replace(&mut scene.room, world.current_location.name.clone());
-    let Ok(mut transform) = player.single_mut() else {
+    if sync.revision == Some(world.revision) {
         return;
-    };
-    let spot = exit_position_for(&world, &previous)
-        .map(|exit| exit + (ROOM_CENTER - exit).normalize_or_zero() * 70.0)
-        .unwrap_or(PLAYER_START.truncate());
-    transform.translation = spot.extend(PLAYER_START.z);
+    }
+    sync.revision = Some(world.revision);
+    let Some(server) = world.player_cell() else { return };
+    let Ok(mut transform) = player.single_mut() else { return };
+    let key = world_key(&world);
+    let here = cell_at(transform.translation.truncate());
+    let moved_by_server = (here - server).abs().max_element() > SNAP_CELLS && !sync.is_echo(server);
+    if sync.placed_in.as_deref() != Some(key.as_str()) || moved_by_server {
+        let pos = cell_center(server);
+        transform.translation = pos.extend(10.0);
+        sync.placed_in = Some(key);
+        sync.last_sent_cell = Some(server);
+        sync.recent.clear();
+        sync.remember(server);
+    }
 }
 
 pub fn player_input(
     keys: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
-    ui: Res<UiState>,
+    grid: Res<WalkGrid>,
+    mut ui: ResMut<UiState>,
     mut query: Query<&mut Transform, With<PlayerAvatar>>,
 ) {
     if ui.blocks_movement() {
@@ -281,6 +491,7 @@ pub fn player_input(
     let Ok(mut transform) = query.single_mut() else {
         return;
     };
+    let pos = transform.translation.truncate();
     let mut direction = Vec2::ZERO;
     if keys.pressed(KeyCode::KeyA) || keys.pressed(KeyCode::ArrowLeft) {
         direction.x -= 1.0;
@@ -295,22 +506,74 @@ pub fn player_input(
         direction.y -= 1.0;
     }
     if direction != Vec2::ZERO {
-        let delta = direction.normalize() * PLAYER_SPEED * time.delta_secs();
-        transform.translation.x += delta.x;
-        transform.translation.y += delta.y;
-        transform.translation = clamp_to_room(transform.translation.truncate())
-            .extend(transform.translation.z);
+        ui.cancel_travel();
+    } else if let Some(next) = ui.auto_walk.first().copied() {
+        let target = cell_center(next);
+        if pos.distance(target) < 3.0 {
+            ui.auto_walk.remove(0);
+            if ui.auto_walk.is_empty() {
+                if let Some(dest) = ui.travel_to.take() {
+                    ui.toast(format!("Arrived at {dest}."));
+                }
+            }
+            return;
+        }
+        direction = target - pos;
     }
+    if direction == Vec2::ZERO {
+        return;
+    }
+    let step = direction.normalize() * PLAYER_SPEED * time.delta_secs();
+    // Slide along walls: try each axis on its own.
+    let mut next = pos;
+    for delta in [Vec2::new(step.x, 0.0), Vec2::new(0.0, step.y)] {
+        let candidate = next + delta;
+        if grid.is_open(cell_at(candidate)) {
+            next = candidate;
+        }
+    }
+    transform.translation.x = next.x;
+    transform.translation.y = next.y;
 }
 
-pub fn clamp_to_room(pos: Vec2) -> Vec2 {
-    pos.clamp(
-        Vec2::new(-ROOM_HALF_W + 24.0, ROOM_CENTER.y - ROOM_HALF_H + 24.0),
-        Vec2::new(ROOM_HALF_W - 24.0, ROOM_CENTER.y + ROOM_HALF_H - 24.0),
-    )
+pub fn report_player_position(
+    world: Res<WorldSnapshot>,
+    grid: Res<WalkGrid>,
+    net: Res<NetBridge>,
+    mut sync: ResMut<PlayerSync>,
+    player: Query<&Transform, With<PlayerAvatar>>,
+) {
+    if !world.online || !world.found || !grid.has_layout() || sync.placed_in.is_none() {
+        return;
+    }
+    let Ok(transform) = player.single() else { return };
+    let cell = cell_at(transform.translation.truncate());
+    if sync.last_sent_cell == Some(cell) || sync.last_sent_at.elapsed() < REPORT_EVERY || !grid.is_open(cell) {
+        return;
+    }
+    net.report_position(cell);
+    sync.last_sent_cell = Some(cell);
+    sync.last_sent_at = Instant::now();
+    sync.remember(cell);
 }
 
-pub fn draw_room_gizmos(
+pub fn camera_follow(
+    time: Res<Time>,
+    player: Query<&Transform, (With<PlayerAvatar>, Without<Camera2d>)>,
+    mut camera: Query<&mut Transform, With<Camera2d>>,
+) {
+    let (Ok(player), Ok(mut camera)) = (player.single(), camera.single_mut()) else {
+        return;
+    };
+    let target = player.translation.truncate();
+    let current = camera.translation.truncate();
+    let t = (CAMERA_FOLLOW * time.delta_secs()).min(1.0);
+    let next = if current.distance(target) > TILE * 20.0 { target } else { current.lerp(target, t) };
+    camera.translation.x = next.x;
+    camera.translation.y = next.y;
+}
+
+pub fn draw_world_gizmos(
     mut gizmos: Gizmos,
     nearby: Res<NearbyInteract>,
     ui: Res<UiState>,
@@ -320,26 +583,29 @@ pub fn draw_room_gizmos(
     if ui.world_map.is_some() {
         return;
     }
-    gizmos.rect_2d(
-        Isometry2d::from_translation(ROOM_CENTER),
-        Vec2::new(ROOM_HALF_W * 2.0, ROOM_HALF_H * 2.0),
-        Color::srgb(0.36, 0.42, 0.49),
-    );
-    let grid = ZoneGrid::of(&world);
-    let line = Color::srgba(0.5, 0.6, 0.7, if ui.build.is_some() { 0.22 } else { 0.07 });
-    let top_left = grid.center_of(IVec2::ZERO, IVec2::ZERO);
-    let span = grid.pixel_size();
-    for x in 0..=grid.size.x {
-        let px = top_left.x + x as f32 * grid.tile;
-        gizmos.line_2d(Vec2::new(px, top_left.y), Vec2::new(px, top_left.y - span.y), line);
+    for region in &world.world.regions {
+        let size = Vec2::new(region.w as f32, region.h as f32) * TILE;
+        let center = Vec2::new(region.x as f32 * TILE + size.x * 0.5, -(region.y as f32) * TILE - size.y * 0.5);
+        gizmos.rect_2d(Isometry2d::from_translation(center), size, Color::srgba(0.5, 0.6, 0.7, 0.12));
     }
-    for y in 0..=grid.size.y {
-        let py = top_left.y - y as f32 * grid.tile;
-        gizmos.line_2d(Vec2::new(top_left.x, py), Vec2::new(top_left.x + span.x, py), line);
+    for cell in &ui.auto_walk {
+        gizmos.circle_2d(Isometry2d::from_translation(cell_center(*cell)), 3.0, Color::srgba(0.98, 0.80, 0.30, 0.6));
     }
     if let (Some(build), Ok(player)) = (ui.build.as_ref(), player.single()) {
+        let grid = ZoneGrid::of(&world);
+        let line = Color::srgba(0.5, 0.6, 0.7, 0.22);
+        let top_left = grid.center_of(IVec2::ZERO, IVec2::ZERO);
+        let span = grid.pixel_size();
+        for x in 0..=grid.size.x {
+            let px = top_left.x + x as f32 * grid.tile;
+            gizmos.line_2d(Vec2::new(px, top_left.y), Vec2::new(px, top_left.y - span.y), line);
+        }
+        for y in 0..=grid.size.y {
+            let py = top_left.y - y as f32 * grid.tile;
+            gizmos.line_2d(Vec2::new(top_left.x, py), Vec2::new(top_left.x + span.x, py), line);
+        }
         let fp = build.footprint();
-        let cell = grid.build_cell(player.translation.truncate(), fp);
+        let cell = grid.build_cell(ui.build_anchor(player.translation.truncate()), fp);
         let color = if grid.can_place(&world, cell, fp) {
             Color::srgb(0.35, 0.95, 0.45)
         } else {
@@ -354,119 +620,50 @@ pub fn draw_room_gizmos(
     if nearby.target.is_some() && !ui.blocks_movement() {
         gizmos.circle_2d(
             Isometry2d::from_translation(nearby.position),
-            34.0,
+            TILE * 1.1,
             Color::srgb(0.96, 0.78, 0.28),
         );
     }
 }
 
-pub fn exit_position_for(world: &WorldSnapshot, location: &str) -> Option<Vec2> {
-    exit_layout(&world.adjacent)
-        .into_iter()
-        .find(|(name, _)| name == location)
-        .map(|(_, pos)| pos)
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-/// Idle spot for an NPC: a free grid cell near a per-name preferred cell.
-pub fn npc_home(world: &WorldSnapshot, name: &str, idx: usize) -> Vec2 {
-    let grid = ZoneGrid::of(world);
-    let inner = (grid.size - IVec2::splat(GRID_MARGIN * 2 + 1)).max(IVec2::ONE);
-    let preferred = IVec2::new(
-        GRID_MARGIN + stable_slot(name, idx, inner.x as usize) as i32,
-        GRID_MARGIN + stable_slot(&format!("{name}#"), idx, inner.y as usize) as i32,
-    );
-    let mut best: Option<(i32, IVec2)> = None;
-    for x in GRID_MARGIN..grid.size.x - GRID_MARGIN {
-        for y in GRID_MARGIN..grid.size.y - GRID_MARGIN {
-            let cell = IVec2::new(x, y);
-            if !grid.can_place(world, cell, IVec2::ONE) {
-                continue;
-            }
-            let d = (cell - preferred).abs().element_sum();
-            if best.is_none_or(|(bd, _)| d < bd) {
-                best = Some((d, cell));
-            }
+    fn grid_of(cells: &[(i32, i32)]) -> WalkGrid {
+        WalkGrid {
+            revision: None,
+            walkable: cells.iter().map(|(x, y)| IVec2::new(*x, *y)).collect(),
         }
     }
-    best.map(|(_, cell)| grid.center_of(cell, IVec2::ONE))
-        .unwrap_or(ROOM_CENTER)
-}
 
-fn item_position(thing: &Thing, idx: usize) -> Vec2 {
-    if thing.is_door() {
-        return match stable_slot(&thing.name, idx, 4) {
-            0 => Vec2::new(205.0, ROOM_HALF_H - 86.0),
-            1 => Vec2::new(ROOM_HALF_W - 90.0, -88.0),
-            2 => Vec2::new(205.0, -ROOM_HALF_H - 4.0),
-            _ => Vec2::new(-ROOM_HALF_W + 90.0, -88.0),
-        };
-    }
-    let index = stable_slot(&thing.name, idx, 10);
-    let column = (index % 5) as f32;
-    let row = (index / 5) as f32;
-    Vec2::new(-265.0 + column * 74.0, -118.0 - row * 62.0)
-}
-
-/// Exits are spread over the four walls (least-used wall first, name hash as the
-/// tie-breaker) and spaced evenly along each wall, so they never overlap.
-fn exit_layout(exits: &[String]) -> Vec<(String, Vec2)> {
-    let mut names: Vec<&String> = exits.iter().collect();
-    names.sort();
-    names.dedup();
-
-    let mut walls: [Vec<&String>; 4] = Default::default();
-    for name in names {
-        let preferred = stable_slot(name, 0, 4);
-        let wall = (0..4)
-            .map(|step| (preferred + step) % 4)
-            .min_by_key(|&w| walls[w].len())
-            .unwrap_or(preferred);
-        walls[wall].push(name);
+    #[test]
+    fn late_echoes_of_our_own_walk_do_not_pull_the_player_back() {
+        let mut sync = PlayerSync::default();
+        for x in 10..30 {
+            sync.remember(IVec2::new(x, 5)); // walked 20 cells east
+        }
+        assert!(sync.is_echo(IVec2::new(12, 5)), "an old position coming back late");
+        assert!(!sync.is_echo(IVec2::new(50, 30)), "somewhere we never were: the server moved us");
     }
 
-    let top = ROOM_CENTER.y + ROOM_HALF_H;
-    let bottom = ROOM_CENTER.y - ROOM_HALF_H;
-    let mut out = Vec::new();
-    for (wall, members) in walls.iter().enumerate() {
-        let n = members.len();
-        for (i, name) in members.iter().enumerate() {
-            let t = (i as f32 + 1.0) / (n as f32 + 1.0);
-            let pos = match wall {
-                0 => Vec2::new(lerp(-ROOM_HALF_W + 120.0, ROOM_HALF_W - 120.0, t), top),
-                1 => Vec2::new(ROOM_HALF_W - 58.0, lerp(top - 80.0, bottom + 80.0, t)),
-                2 => Vec2::new(lerp(ROOM_HALF_W - 120.0, -ROOM_HALF_W + 120.0, t), bottom),
-                _ => Vec2::new(-ROOM_HALF_W + 58.0, lerp(bottom + 80.0, top - 80.0, t)),
-            };
-            out.push(((*name).clone(), pos));
+    #[test]
+    fn cell_and_pixel_round_trip() {
+        for cell in [IVec2::new(0, 0), IVec2::new(37, 12), IVec2::new(59, 39)] {
+            assert_eq!(cell_at(cell_center(cell)), cell);
         }
     }
-    out
-}
 
-fn lerp(a: f32, b: f32, t: f32) -> f32 {
-    a + (b - a) * t
-}
-
-fn stable_slot(name: &str, fallback_index: usize, modulo: usize) -> usize {
-    if modulo == 0 {
-        return 0;
-    }
-    let mut hash = 5381usize;
-    for byte in name.bytes() {
-        hash = hash.wrapping_mul(33).wrapping_add(byte as usize);
-    }
-    (hash.wrapping_add(fallback_index)) % modulo
-}
-
-fn item_label(thing: &Thing) -> String {
-    if thing.cell().is_some() && thing.is_fixture() {
-        return thing.name.clone();
-    }
-    if thing.item_kind.is_empty() {
-        thing.name.clone()
-    } else if thing.locked {
-        format!("{} ({}, locked)", thing.name, thing.item_kind)
-    } else {
-        format!("{} ({})", thing.name, thing.item_kind)
+    #[test]
+    fn path_goes_around_blocked_cells() {
+        // 3x3 room with the middle blocked: from left-middle to right-middle.
+        let open: Vec<(i32, i32)> = (0..3)
+            .flat_map(|x| (0..3).map(move |y| (x, y)))
+            .filter(|c| *c != (1, 1))
+            .collect();
+        let grid = grid_of(&open);
+        let path = grid.path(IVec2::new(0, 1), &HashSet::from([IVec2::new(2, 1)])).unwrap();
+        assert_eq!(path.last(), Some(&IVec2::new(2, 1)));
+        assert!(!path.contains(&IVec2::new(1, 1)));
     }
 }

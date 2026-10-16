@@ -1,17 +1,21 @@
 """
-物品交互 — LLM 用 Cypher 定义临时 Action，运行时挂到物品上再执行。
+物品交互 — 物品上能做的动作（声明式 requires / effects，见 ephemeral_action_dsl.py）。
 
-物品只需 behavior/lore 描述「这是什么」；
-「能做什么」由 LLM 写成 ephemeral Cypher action。
+来源（优先级从高到低）：
+  1. 作者写在物品脚本 script.actions 里的 —— 可预期，玩家每次看到的都一样
+  2. 之前发明并存在物品上的
+  3. 当场让 LLM 发明（AITOWN3_INVENT_ACTIONS=1 才开；默认关闭）
 
-PDDL：规划已有动作序列；交互语义在 Cypher 临时 Action 里发明。
+PDDL 编译器把这些动作和内容包动作一样编进规划。
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import os
 import re
+import threading
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 if TYPE_CHECKING:
@@ -21,6 +25,20 @@ logger = logging.getLogger(__name__)
 
 _LAST_RESULT: Optional[Dict[str, Any]] = None
 FORCE_MOCK: bool = False
+
+# 并行规划时多个 NPC 可能同时为同一物品生成临时 actions：每个物品只生成一次
+_item_locks: Dict[str, threading.Lock] = {}
+_item_locks_guard = threading.Lock()
+
+
+def _item_lock(item: str) -> threading.Lock:
+    with _item_locks_guard:
+        return _item_locks.setdefault(item, threading.Lock())
+
+
+def invention_enabled() -> bool:
+    """是否允许 LLM 当场为物品发明动作（默认关：世界要可预期）。"""
+    return os.environ.get("AITOWN3_INVENT_ACTIONS", "0") == "1"
 
 
 def take_last_interact_result() -> Optional[Dict[str, Any]]:
@@ -40,6 +58,8 @@ def is_interactive_item(world: "Neo4jWorld", name: str) -> bool:
     script = load_item_script(world, name)
     if not script:
         return False
+    if script.get("actions"):
+        return True
     if script.get("interactive") is True:
         return True
     if (script.get("behavior") or "").strip():
@@ -97,13 +117,12 @@ def generate_interaction_options(
         return {"ok": False, "error": f"{item} 不是可交互物品", "options": [], "actions": []}
 
     existing = load_actions_from_item(world, item)
-    if existing and not refresh:
-        options = [{"id": a.id, "label": a.label, "hint": "", "source_code": a.source_code} for a in existing]
+    if (existing and not refresh) or not invention_enabled():
         return {
             "ok": True,
-            "options": options,
+            "options": action_options(world, actor, item, existing),
             "actions": [a.to_dict() for a in existing],
-            "source": "cached",
+            "source": "authored_or_cached" if existing else "none",
             "state": item_state_snapshot(world, item),
         }
 
@@ -119,7 +138,9 @@ def generate_interaction_options(
     record_trace(
         kind="item_ephemeral_actions",
         prompt=f"synthesize actions for {item}",
-        response=(bundled.get("raw_code") or "")[:4000],
+        raw=(bundled.get("raw_code") or "")[:4000],
+        ok=bool(actions),
+        error=bundled.get("error") or "",
         meta={"actor": actor, "item": item, "source": bundled.get("source"), "n": len(actions)},
     )
     return {
@@ -133,6 +154,23 @@ def generate_interaction_options(
     }
 
 
+def action_options(world: "Neo4jWorld", actor: str, item: str, actions: List[Any]) -> List[Dict[str, Any]]:
+    """给 UI 的选项：每个动作此刻能不能做、为什么不能。"""
+    from ephemeral_action_dsl import check_ephemeral
+
+    out = []
+    for a in actions:
+        ok, why = check_ephemeral(world, a, actor=actor, target=item) if actor else (True, "ok")
+        out.append({
+            "id": a.id,
+            "label": a.label,
+            "available": ok,
+            "reason": "" if ok else why,
+            "source_code": a.source_code,
+        })
+    return out
+
+
 def ensure_ephemeral_actions(
     world: "Neo4jWorld",
     actor: str,
@@ -142,16 +180,17 @@ def ensure_ephemeral_actions(
     memory=None,
     refresh: bool = False,
 ) -> List[Any]:
-    """确保物品上已有临时 Cypher actions（有缓存则复用）。"""
+    """物品能做的动作：作者写的 / 已存的；都没有且允许发明时才让 LLM 当场写。"""
     from ephemeral_action_dsl import EphemeralAction, load_actions_from_item
 
-    if not refresh:
-        existing = load_actions_from_item(world, item)
-        if existing:
-            return existing
-    synth = synthesize_ephemeral_actions(
-        world, actor, item, force_mock=force_mock or FORCE_MOCK, memory=memory
-    )
+    with _item_lock(item):
+        if not refresh or not invention_enabled():
+            existing = load_actions_from_item(world, item)
+            if existing or not invention_enabled():
+                return existing
+        synth = synthesize_ephemeral_actions(
+            world, actor, item, force_mock=force_mock or FORCE_MOCK, memory=memory
+        )
     return [
         EphemeralAction.from_dict(a)
         for a in (synth.get("actions") or [])
@@ -427,37 +466,56 @@ def synthesize_ephemeral_actions(
     force_mock: bool = False,
     memory=None,
 ) -> Dict[str, Any]:
-    """让 LLM（或 mock）写出临时 Cypher action 并挂到物品上。"""
-    from ephemeral_action_dsl import (
-        parse_action_script,
-        store_actions_on_item,
-    )
+    """让 LLM（或 mock）为物品发明声明式临时 action（requires / effects），校验后挂到物品上。"""
+    from ephemeral_action_dsl import parse_action_json, store_actions_on_item
     from item_scripts import load_item_script
 
     script = load_item_script(world, item)
     state = item_state_snapshot(world, item)
-    actor_ctx = _actor_context(world, actor, memory=memory)
+    names = _world_entity_names(world)
+    archetypes = _archetype_names()
 
-    if force_mock:
-        code = _mock_action_code(item, script, state)
-        source = "mock"
-    else:
-        code, source, err = _llm_action_code(
-            actor=actor,
-            item=item,
-            script=script,
-            state=state,
-            actor_ctx=actor_ctx,
-        )
-        if err and not code.strip():
-            code = _mock_action_code(item, script, state)
-            source = "error_fallback"
-
-    actions = parse_action_script(code, host_item=item)
+    errors: List[str] = []
+    actions: List[Any] = []
+    code, source = "", "mock"
+    if not force_mock:
+        feedback = ""
+        # 校验不过的地方原样告诉 LLM，再让它改一次
+        for attempt in range(2):
+            code, source, err = _llm_action_code(
+                world,
+                actor=actor,
+                item=item,
+                script=script,
+                state=state,
+                feedback=feedback,
+            )
+            if err:
+                errors.append(err)
+                break
+            parsed, bad = parse_action_json(
+                code, host_item=item, entity_names=names, archetypes=archetypes
+            )
+            kept = {a.id for a in actions}
+            actions += [a for a in parsed if a.id not in kept]
+            if not bad:
+                break
+            errors += bad
+            feedback = (
+                "Your previous answer had problems; these actions were rejected:\n- "
+                + "\n- ".join(bad[:6])
+                + f"\nAlready accepted: {sorted(a.id for a in actions) or 'none'}. "
+                "Return the full corrected JSON again.\n\n"
+            )
+            source = "llm_repaired"
+        if not actions:
+            source = "error_fallback" if errors else "parse_fallback"
     if not actions:
-        code = _mock_action_code(item, script, state)
-        actions = parse_action_script(code, host_item=item)
-        source = "parse_fallback"
+        code = json.dumps({"actions": _mock_action_specs(script, state)}, ensure_ascii=False)
+        actions, bad = parse_action_json(
+            code, host_item=item, entity_names=names, archetypes=archetypes
+        )
+        errors += bad
 
     store_actions_on_item(world, item, actions)
     return {
@@ -465,6 +523,7 @@ def synthesize_ephemeral_actions(
         "actions": [a.to_dict() for a in actions],
         "raw_code": code,
         "source": source,
+        "error": "; ".join(errors[:4]),
     }
 
 
@@ -496,6 +555,10 @@ def resolve_interaction(
 
     force = force_mock or FORCE_MOCK
     actions = load_actions_from_item(world, item)
+    if not actions and not invention_enabled():
+        out = {"ok": False, "error": f"There is nothing to do with {item}", "options": []}
+        _LAST_RESULT = out
+        return out
     if not actions:
         synth = synthesize_ephemeral_actions(
             world, actor, item, force_mock=force, memory=memory
@@ -518,7 +581,10 @@ def resolve_interaction(
             }
             _LAST_RESULT = out
             return out
-        chosen = _pick_action_id(world, actor, item, actions, force_mock=force, memory=memory)
+        if invention_enabled() and not force:
+            chosen = _pick_action_id(world, actor, item, actions, force_mock=force, memory=memory)
+        else:
+            chosen = _first_doable(world, actor, item, actions)
         opt_id = chosen or (actions[0].id if actions else "")
     action = find_action(actions, opt_id)
     if action is None:
@@ -561,7 +627,8 @@ def resolve_interaction(
     record_trace(
         kind="item_ephemeral_exec",
         prompt=action.source_code,
-        response=json.dumps(
+        ok=bool(result.ok),
+        raw=json.dumps(
             {"ok": result.ok, "narrative": result.narrative, "ops": result.ops},
             ensure_ascii=False,
         )[:3000],
@@ -592,108 +659,168 @@ def interaction_success(world: "Neo4jWorld", item: str) -> bool:
 
 # ----- LLM / mock code gen -----
 
-_ACTION_SYSTEM = """You invent temporary interaction ACTIONS as Neo4j Cypher.
-Output ONLY action blocks (no markdown fences unless needed).
-Each action is registered at runtime on the item (not hardcoded).
+_ACTION_SYSTEM = """You invent temporary interaction ACTIONS for one object in a simulated world.
+Actions are data, not code: each one lists what must be true (requires) and what changes (effects),
+using ONLY the primitives below. A planner chains these actions with everyone else's, so effects must
+say exactly what changes in the world.
 
-Format:
-action <id>(actor, target):
-    \"\"\"short human label\"\"\"
-    <Cypher here>
-    RETURN <text> AS narrative, <text> AS memory
+Placeholders: @actor (the person acting), @target (this object), @here (where this object is).
+The engine already requires that @actor is alive and standing at @here next to @target.
+Values may read properties: "@target.<prop>" / "@actor.<prop>".
 
-Parameters (always available): $actor, $target, $target_loc
-Graph conventions in this world:
-- (:Person {name})-[:LOCATED_AT]->(:Location {name})
-- (:Item {name})-[:LOCATED_AT]->(:Location) when on ground
-- (:Person)-[:HAS_ITEM]->(:Item) when held
-- Item props: item_kind, value, portable, description, fuel, lit, facing, steps, solved, ...
+Conditions (requires, and optional "when" on an effect):
+  {"op": "prop_eq"|"prop_neq", "entity": E, "label": "Item"|"Person", "prop": P, "value": V}
+  {"op": "prop_gte"|"prop_lte", "entity": E, "label": ..., "prop": P, "value": number}
+  {"op": "prop_in", "entity": E, "prop": P, "values": [..]}
+  {"op": "has_item", "person": E, "item": E}           {"op": "not_held", "item": E}
+  {"op": "person_at", "person": E, "location": L}      {"op": "item_at", "entity": E, "location": L}
+  {"op": "any", "of": [conditions]}
+Effects:
+  {"op": "set_prop", "entity": E, "label": ..., "prop": P, "value": V}
+  {"op": "add_prop", "entity": E, "label": ..., "prop": P, "delta": number, "min": n, "max": n}
+  {"op": "spawn_item", "archetype": A, "held_by": "@actor"}   (or "located_at": "@here";
+       without an archetype give "name", "item_kind", "value")
+  {"op": "delete_entity", "entity": E}
+  {"op": "relocate", "entity": E, "to": L}
+  {"op": "link"|"unlink", "a": E, "b": E, "rel": "ADJACENT_TO", "bidirectional": true}
 
 Rules:
-- 2-4 actions that fit the object's behavior.
-- Prefer concrete verbs (chop, turn_clockwise, examine).
-- Use MATCH ... WHERE with $actor/$target; do not hardcode actor/item names if params exist.
-- For trees: chop CREATEs a wood Item and HAS_ITEM to the person.
-- For dials: SET t.facing / t.steps / t.solved as needed.
-- Always RETURN narrative (and optionally memory) as strings.
-- Forbidden: DROP DATABASE, LOAD CSV, CALL dbms.*, whole-graph DETACH DELETE.
+- 2-4 actions that make sense for THIS object's behaviour and lore; snake_case ids. Do not invent
+  actions the object could not support.
+- The actions belong to the object and must work for anyone: never require something about the
+  acting person's mood, personality or name (holding a tool with has_item is fine).
+- Where something is, is a relation, not a property: never test "location" or "name" with prop_*.
+  Do not re-check that @actor is next to @target; the engine does that.
+- Values are plain JSON numbers / strings / booleans. There are no expressions; use add_prop to count.
+- When an action produces something that matches an archetype listed below, spawn that archetype so
+  it works with the rest of the world.
+- Keep state in the object's own properties (see "Current properties"); add a counter property if an
+  action should not be repeatable forever.
+- A pure flavour action (looking, listening) may have no effects.
+- Only use entity names listed in the prompt or the placeholders.
+
+Respond with JSON only:
+{"actions": [{"id": "...", "label": "...", "requires": [...], "effects": [...],
+              "narrative": "@actor ... @target ..."}]}
 """
 
 
 def _llm_action_code(
+    world: "Neo4jWorld",
     *,
     actor: str,
     item: str,
     script: Dict[str, Any],
     state: Dict[str, Any],
-    actor_ctx: str,
+    feedback: str = "",
 ) -> tuple:
     try:
         from llm_router import invoke_primary
 
-        prompt = f"""Object: {item}
+        prompt = f"""{feedback}Object: {item}
 Behavior: {state.get('behavior') or script.get('behavior') or ''}
-Lore: {state.get('lore') or ''}
-State JSON: {json.dumps(state, ensure_ascii=False)}
+Lore: {state.get('lore') or script.get('lore') or ''}
+Current properties: {json.dumps(state, ensure_ascii=False)}
 
-Actor:
-{actor_ctx}
+Archetypes you can spawn:
+{_archetype_catalog()}
 
-Write temporary actions for THIS object now.
+Places: {', '.join(world.list_entities('Location') or [])}
+
+Write the actions for THIS object now.
 """
-        raw = invoke_primary(prompt, system=_ACTION_SYSTEM, max_tokens=900)
+        from model_instances import creative_model_name
+
+        raw = invoke_primary(prompt, system=_ACTION_SYSTEM, max_tokens=1200, model=creative_model_name())
         return str(raw or ""), "llm", ""
     except Exception as e:
         logger.warning("synthesize ephemeral actions failed: %s", e)
         return "", "error", str(e)
 
 
-def _mock_action_code(item: str, script: Dict[str, Any], state: Dict[str, Any]) -> str:
+def _mock_action_specs(script: Dict[str, Any], state: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """无 LLM 时的声明式动作（规则模式 / 测试 / LLM 输出不可用）。"""
     behavior = (script.get("behavior") or state.get("behavior") or "").lower()
     kind = str(state.get("item_kind") or "").lower()
-    chunks: List[str] = []
+    specs: List[Dict[str, Any]] = []
     if "tree" in kind or any(k in behavior for k in ("tree", "wood", "chop", "伐", "树")):
-        chunks.append(
-            '''action chop(actor, target):
-    """Chop for wood"""
-    MATCH (p:Person {name: $actor})-[:LOCATED_AT]->(loc:Location)<-[:LOCATED_AT]-(t:Item {name: $target})
-    CREATE (w:Item {
-      name: 'Wood',
-      item_kind: 'wood',
-      value: 8,
-      portable: true,
-      description: 'A freshly chopped log'
-    })
-    CREATE (p)-[:HAS_ITEM]->(w)
-    RETURN $actor + ' chops a dry log from ' + $target AS narrative,
-           $actor + ' got wood from ' + $target AS memory
-'''
+        wood = (
+            {"op": "spawn_item", "archetype": "firewood", "held_by": "@actor"}
+            if "firewood" in _archetype_names()
+            else {"op": "spawn_item", "name": "Wood", "item_kind": "wood", "value": 8,
+                  "held_by": "@actor"}
         )
+        specs.append({
+            "id": "chop",
+            "label": "Chop for wood",
+            "requires": [],
+            "effects": [wood],
+            "narrative": "@actor chops a dry log from @target",
+        })
     if any(k in behavior for k in ("dial", "turn", "rotate", "旋", "转")):
-        chunks.append(
-            '''action turn_clockwise(actor, target):
-    """Turn clockwise"""
-    MATCH (p:Person {name: $actor})-[:LOCATED_AT]->(:Location)<-[:LOCATED_AT]-(t:Item {name: $target})
-    SET t.facing = 'east', t.steps = coalesce(t.steps, 0) + 1
-    RETURN $actor + ' turns ' + $target + ' clockwise.' AS narrative
-'''
-        )
-        chunks.append(
-            '''action turn_counterclockwise(actor, target):
-    """Turn counterclockwise"""
-    MATCH (p:Person {name: $actor})-[:LOCATED_AT]->(:Location)<-[:LOCATED_AT]-(t:Item {name: $target})
-    SET t.facing = 'west', t.steps = coalesce(t.steps, 0) + 1
-    RETURN $actor + ' turns ' + $target + ' counterclockwise.' AS narrative
-'''
-        )
-    chunks.append(
-        '''action examine(actor, target):
-    """Examine closely"""
-    MATCH (p:Person {name: $actor}), (t:Item {name: $target})
-    RETURN $actor + ' examines ' + $target + ' carefully.' AS narrative
-'''
-    )
-    return "\n".join(chunks)
+        for aid, facing in (("turn_clockwise", "east"), ("turn_counterclockwise", "west")):
+            specs.append({
+                "id": aid,
+                "label": aid.replace("_", " ").capitalize(),
+                "requires": [],
+                "effects": [
+                    {"op": "set_prop", "entity": "@target", "prop": "facing", "value": facing},
+                    {"op": "add_prop", "entity": "@target", "prop": "steps", "delta": 1},
+                ],
+                "narrative": f"@actor turns @target to face {facing}",
+            })
+    specs.append({
+        "id": "examine",
+        "label": "Examine closely",
+        "requires": [],
+        "effects": [],
+        "narrative": "@actor examines @target carefully",
+    })
+    return specs
+
+
+def _world_entity_names(world: "Neo4jWorld") -> set:
+    names: set = set()
+    for label in ("Location", "Item", "Person"):
+        names.update(world.list_entities(label) or [])
+    return names
+
+
+def _archetype_names() -> set:
+    try:
+        from content import get_content
+
+        return set(get_content().archetypes)
+    except Exception:
+        return set()
+
+
+def _archetype_catalog(limit: int = 30) -> str:
+    try:
+        from content import get_content
+
+        archetypes = get_content().archetypes
+    except Exception:
+        return "- (none)"
+    lines = []
+    for name, spec in sorted(archetypes.items())[:limit]:
+        if spec.get("portable") is False:
+            continue  # 建筑 / 固定设施不由临时动作生成
+        uses = sorted({str(e.get("target")) for e in spec.get("effects_on") or [] if isinstance(e, dict)})
+        extra = f" (can be used on {', '.join(uses)})" if uses else ""
+        desc = str(spec.get("description") or "")[:70]
+        lines.append(f"- {name}: kind {spec.get('item_kind') or '?'}; {desc}{extra}")
+    return "\n".join(lines) or "- (none)"
+
+
+def _first_doable(world: "Neo4jWorld", actor: str, item: str, actions: List[Any]) -> str:
+    """可预期的 auto：第一个此刻能做的「有用」动作；没有就第一个能做的。"""
+    from ephemeral_action_dsl import check_ephemeral
+
+    doable = [a for a in actions if check_ephemeral(world, a, actor=actor, target=item)[0]]
+    useful = [a for a in doable if a.effects]
+    pick = (useful or doable or actions)
+    return pick[0].id if pick else ""
 
 
 def _pick_action_id(
@@ -734,20 +861,6 @@ Allowed: {ids}
         if "chop" in a.id:
             return a.id
     return actions[0].id
-
-
-def _actor_context(world: "Neo4jWorld", actor: str, *, memory=None) -> str:
-    from action import get_person_location, get_property
-
-    loc = get_person_location(world, actor) or "?"
-    lines = [
-        f"Name: {actor}",
-        f"Location: {loc}",
-        f"Personality: {get_property(world, actor, 'Person', 'personality') or ''}",
-        f"Mood: {get_property(world, actor, 'Person', 'mood') or ''}",
-        f"Goal: {get_property(world, actor, 'Person', 'goal') or ''}",
-    ]
-    return "\n".join(lines)
 
 
 def _item_loc(world: "Neo4jWorld", item: str) -> Optional[str]:

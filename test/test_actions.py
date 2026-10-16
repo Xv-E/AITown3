@@ -16,6 +16,8 @@ import os
 import sys
 from typing import Tuple
 
+import pytest
+
 # 把 neo4j/ 与 actions/ 都加到 sys.path（精确到子目录，避开 PyPI neo4j 包冲突）
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _AITOWN3 = os.path.abspath(os.path.join(_THIS_DIR, ".."))
@@ -59,6 +61,13 @@ def setup_world(world: Neo4jWorld) -> None:
     builder.build_world(world)
 
 
+@pytest.fixture(scope="module")
+def world(neo4j_world):
+    """pytest 下：整个模块共用一次建好的世界（各用例按顺序依赖前一步的状态）。"""
+    setup_world(neo4j_world)
+    return neo4j_world
+
+
 def test_introspection() -> bool:
     _hr("Introspection: 注册表中的动作")
     reg = get_registry()
@@ -72,7 +81,8 @@ def test_introspection() -> bool:
     for action in reg.all()[:2]:
         print(action.to_pddl())
         print()
-    return len(reg.names()) == 8
+    core = {"move", "pick_up", "drop", "give", "talk", "attack", "use_item", "use_on"}
+    return core <= set(reg.names())
 
 
 def test_happy_path(world: Neo4jWorld) -> bool:
@@ -148,7 +158,7 @@ def test_use_item(world: Neo4jWorld) -> bool:
     _hr("Use item: Merchant 用 Potion 自疗")
     all_ok = True
 
-    # Merchant 当前 hp=85，喝下 value=60 的 Potion 应当变 145
+    # Merchant 当前 hp=85，喝下 value=60 的 Potion；内容包 use_item 把 hp 封顶在 120
     rows = world.run_query("MATCH (n:Person {name:'Merchant'}) RETURN n.hp AS hp")
     before = rows[0]["hp"]
     ok, _ = run_action(world, "use_item", c="Merchant", i="Potion")
@@ -156,7 +166,8 @@ def test_use_item(world: Neo4jWorld) -> bool:
 
     rows = world.run_query("MATCH (n:Person {name:'Merchant'}) RETURN n.hp AS hp")
     after = rows[0]["hp"]
-    all_ok &= _expect(after == before + 60, f"Merchant.hp: {before} -> {after}（应 +60）")
+    expected = min(before + 60, 120)
+    all_ok &= _expect(after == expected, f"Merchant.hp: {before} -> {after}（应为 {expected}）")
 
     rows = world.run_query("MATCH (i:Item {name:'Potion'}) RETURN i")
     all_ok &= _expect(len(rows) == 0, "Potion 已被消耗（节点删除）")

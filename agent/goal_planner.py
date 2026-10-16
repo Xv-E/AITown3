@@ -308,6 +308,18 @@ def _plan_interact_with(
                         error=f"{target} has no ephemeral action '{option}' (available: {sorted(ids)})",
                         used_rule_based=True,
                     )
+            # 声明式动作自己的条件现在就不满足（走过去也没用）：别把做不了的目标交给执行
+            from ephemeral_action_dsl import check_requires, find_action
+
+            chosen = find_action(actions, option)
+            if chosen is not None:
+                ok, why = check_requires(world, chosen, actor=character, target=target)
+                if not ok:
+                    return PlanResult(
+                        success=False,
+                        error=f"Cannot {option} {target}: {why}",
+                        used_rule_based=True,
+                    )
         except Exception as e:
             return PlanResult(
                 success=False,

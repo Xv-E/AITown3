@@ -140,12 +140,15 @@ def remove_relationship(
 
 
 def get_property(world: "Neo4jWorld", name: str, label: str, prop: str):
-    """读取节点属性，节点不存在或属性缺失时返回 None。"""
+    """读取节点属性，节点不存在或属性缺失时返回 None。
+
+    整个节点的属性一次取回：tick 读缓存下，同一实体的其他属性直接命中缓存。
+    """
     rows = world.run_query(
-        f"MATCH (n:{label} {{name: $name}}) RETURN n.{prop} AS v LIMIT 1",
+        f"MATCH (n:{label} {{name: $name}}) RETURN properties(n) AS p LIMIT 1",
         name=name,
     )
-    return rows[0]["v"] if rows else None
+    return (rows[0]["p"] or {}).get(prop) if rows else None
 
 
 def set_property(world: "Neo4jWorld", name: str, label: str, prop: str, value) -> None:

@@ -23,8 +23,9 @@ def invoke_primary(
     system: Optional[str] = None,
     max_tokens: Optional[int] = None,
     timeout: Optional[float] = None,
+    model: Optional[str] = None,
 ) -> str:
-    """调用主模型（Qwen / OpenAI 兼容 API），无 GBNF。"""
+    """调用主模型（Qwen / OpenAI 兼容 API），无 GBNF。model 不给就用 OPENAI_MODEL。"""
     from model_instances import chat_completion
 
     messages = []
@@ -36,6 +37,8 @@ def invoke_primary(
         kwargs["max_tokens"] = max_tokens
     if timeout is not None:
         kwargs["timeout"] = timeout
+    if model:
+        kwargs["model"] = model
     return chat_completion(messages, **kwargs)
 
 
@@ -47,7 +50,7 @@ def invoke_local_gbnf(
 ) -> str:
     """本地 LlamaCpp + GBNF，仅用于格式修复。"""
     from llama_cpp import LlamaGrammar
-    from model_instances import get_llama_instance
+    from model_instances import get_llama_instance, llama_call_lock
 
     llm = get_llama_instance()
     grammar = LlamaGrammar.from_string(grammar_str)
@@ -55,10 +58,11 @@ def invoke_local_gbnf(
     if tokens is None:
         tokens = int(os.getenv("LLAMA_MAX_TOKENS", "768"))
     kwargs: Dict[str, Any] = {"grammar": grammar, "max_tokens": tokens}
-    try:
-        raw = llm.invoke(prompt, **kwargs)
-    except TypeError:
-        raw = llm.invoke(prompt, grammar=grammar)
+    with llama_call_lock:
+        try:
+            raw = llm.invoke(prompt, **kwargs)
+        except TypeError:
+            raw = llm.invoke(prompt, grammar=grammar)
     return raw if isinstance(raw, str) else str(raw)
 
 

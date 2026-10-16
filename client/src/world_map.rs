@@ -1,16 +1,18 @@
-//! World map overlay (M): zones at their map coordinates, routes between them,
-//! who is where. Pick a zone and the player walks there hop by hop.
+//! World map overlay (M): the whole seamless world to scale — regions, who is where.
+//! Click a region and the player walks there on their own (right-click / any move key stops it).
 
 use bevy::{math::Isometry2d, prelude::*};
-use std::{collections::HashMap, time::Duration, time::Instant};
+use std::collections::HashSet;
 
-use crate::net::{NetBridge, WorldSnapshot};
+use crate::net::{RegionView, WorldSnapshot};
+use crate::scene::WalkGrid;
 use crate::ui::UiState;
 
 const MAP_BOX: Vec2 = Vec2::new(900.0, 470.0);
 const MAP_CENTER: Vec2 = Vec2::new(0.0, -30.0);
 const MAP_Z: f32 = 40.0;
-const HOP_RETRY: Duration = Duration::from_secs(3);
+/// Walk to somewhere this close to the region's centre.
+const ARRIVE_RADIUS: i32 = 3;
 
 #[derive(Component)]
 pub struct WorldMapEntity;
@@ -20,44 +22,45 @@ pub struct WorldMapState {
     key: Option<(u64, String)>,
 }
 
-/// Screen positions of every zone (zones without map coordinates go on a ring).
-fn layout(world: &WorldSnapshot) -> Vec<(String, Vec2)> {
-    let mut zones: Vec<_> = world.map.locations.iter().collect();
-    zones.sort_by(|a, b| a.name.cmp(&b.name));
-    let placed: Vec<(String, Vec2)> = zones
-        .iter()
-        .filter_map(|z| Some((z.name.clone(), Vec2::new(z.map_x?, z.map_y?))))
-        .collect();
-    let mut out = Vec::new();
-    if !placed.is_empty() {
-        let min = placed.iter().fold(Vec2::splat(f32::MAX), |m, (_, p)| m.min(*p));
-        let max = placed.iter().fold(Vec2::splat(f32::MIN), |m, (_, p)| m.max(*p));
-        let span = (max - min).max(Vec2::splat(1.0));
-        let scale = (MAP_BOX.x / span.x).min(MAP_BOX.y / span.y);
-        let mid = (min + max) * 0.5;
-        for (name, p) in placed {
-            out.push((name, MAP_CENTER + (p - mid) * scale));
+/// World cell → overlay position (relative to the camera, which the overlay follows).
+struct MapFrame {
+    scale: f32,
+    origin: Vec2,
+}
+
+impl MapFrame {
+    fn of(world: &WorldSnapshot) -> Self {
+        let size = Vec2::new(world.world.width.max(1) as f32, world.world.height.max(1) as f32);
+        let scale = (MAP_BOX.x / size.x).min(MAP_BOX.y / size.y);
+        Self {
+            scale,
+            origin: MAP_CENTER + Vec2::new(-size.x, size.y) * scale * 0.5,
         }
     }
-    let unplaced: Vec<_> = zones
-        .iter()
-        .filter(|z| z.map_x.is_none() || z.map_y.is_none())
-        .collect();
-    let n = unplaced.len().max(1) as f32;
-    for (i, z) in unplaced.iter().enumerate() {
-        let a = i as f32 / n * std::f32::consts::TAU;
-        out.push((z.name.clone(), MAP_CENTER + Vec2::new(a.cos(), a.sin()) * MAP_BOX * 0.45));
+
+    fn point(&self, x: f32, y: f32) -> Vec2 {
+        self.origin + Vec2::new(x, -y) * self.scale
     }
-    out
+
+    fn region_rect(&self, r: &RegionView) -> (Vec2, Vec2) {
+        let size = Vec2::new(r.w as f32, r.h as f32) * self.scale;
+        (self.point(r.x as f32, r.y as f32) + Vec2::new(size.x, -size.y) * 0.5, size)
+    }
 }
 
 fn sorted_names(world: &WorldSnapshot) -> Vec<String> {
-    let mut names: Vec<String> = world.map.locations.iter().map(|z| z.name.clone()).collect();
+    let mut names: Vec<String> = world.world.regions.iter().map(|r| r.name.clone()).collect();
     names.sort();
     names
 }
 
-pub fn map_input(keys: &ButtonInput<KeyCode>, world: &WorldSnapshot, ui: &mut UiState) {
+pub fn map_input(
+    keys: &ButtonInput<KeyCode>,
+    world: &WorldSnapshot,
+    grid: &WalkGrid,
+    here: Option<IVec2>,
+    ui: &mut UiState,
+) {
     if keys.just_pressed(KeyCode::Escape) || keys.just_pressed(KeyCode::KeyM) {
         ui.world_map = None;
         return;
@@ -90,49 +93,44 @@ pub fn map_input(keys: &ButtonInput<KeyCode>, world: &WorldSnapshot, ui: &mut Ui
     }
     if keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::KeyE) {
         let target = view.selected.clone();
-        let here = world.current_location.name.clone();
-        match world.map.route(&here, &target) {
-            Some(route) if route.is_empty() => ui.toast(format!("You are already in {target}.")),
-            Some(route) => {
-                ui.toast(format!("Travelling to {target} via {}", route.join(" -> ")));
-                ui.travel = route;
-                ui.travel_sent = None;
-                ui.world_map = None;
-            }
-            None => ui.toast(format!("No known route to {target}.")),
-        }
+        walk_to_region(&target, world, grid, here, ui);
     }
 }
 
-/// Sends one `move` per hop; waits for the state sync to show the arrival before the next.
-pub fn drive_travel(world: Res<WorldSnapshot>, net: Res<NetBridge>, mut ui: ResMut<UiState>) {
-    let Some(next) = ui.travel.first().cloned() else {
+/// The region under an overlay point (cursor position relative to the camera).
+pub fn region_at(world: &WorldSnapshot, overlay: Vec2) -> Option<String> {
+    let frame = MapFrame::of(world);
+    world.world.regions.iter().find_map(|r| {
+        let (center, size) = frame.region_rect(r);
+        let d = (overlay - center).abs();
+        (d.x <= size.x * 0.5 && d.y <= size.y * 0.5).then(|| r.name.clone())
+    })
+}
+
+/// Close the map and walk to the middle of a region.
+pub fn walk_to_region(target: &str, world: &WorldSnapshot, grid: &WalkGrid, here: Option<IVec2>, ui: &mut UiState) {
+    let (Some(region), Some(here)) = (world.region(target), here) else {
         return;
     };
-    let here = world.current_location.name.clone();
-    if here == next {
-        ui.travel.remove(0);
-        ui.travel_sent = None;
-        if ui.travel.is_empty() {
-            ui.toast(format!("Arrived in {here}."));
+    if region.contains(here) {
+        ui.toast(format!("You are already in {target}."));
+        return;
+    }
+    let center = region.center();
+    let goals: HashSet<IVec2> = (-ARRIVE_RADIUS..=ARRIVE_RADIUS)
+        .flat_map(|dx| (-ARRIVE_RADIUS..=ARRIVE_RADIUS).map(move |dy| center + IVec2::new(dx, dy)))
+        .filter(|c| region.contains(*c))
+        .collect();
+    match grid.path(here, &goals) {
+        Some(path) => {
+            ui.cancel_travel();
+            ui.toast(format!("Walking to {target}..."));
+            ui.auto_walk = path;
+            ui.travel_to = Some(target.to_string());
+            ui.world_map = None;
         }
-        return;
+        None => ui.toast(format!("No way through to {target}.")),
     }
-    if ui.travel_sent.is_some_and(|t| t.elapsed() < HOP_RETRY) {
-        return;
-    }
-    if !world.adjacent.contains(&next) {
-        ui.cancel_travel();
-        ui.toast(format!("The way to {next} is blocked."));
-        return;
-    }
-    let params = HashMap::from([
-        ("c".to_string(), world.player.name.clone()),
-        ("from".to_string(), here),
-        ("to".to_string(), next),
-    ]);
-    net.execute("move", params);
-    ui.travel_sent = Some(Instant::now());
 }
 
 pub fn render_world_map(
@@ -141,6 +139,7 @@ pub fn render_world_map(
     ui: Res<UiState>,
     mut state: ResMut<WorldMapState>,
     existing: Query<Entity, With<WorldMapEntity>>,
+    camera: Query<Entity, With<Camera2d>>,
 ) {
     let key = ui.world_map.as_ref().map(|v| (world.revision, v.selected.clone()));
     if key == state.key {
@@ -150,105 +149,97 @@ pub fn render_world_map(
     for entity in &existing {
         commands.entity(entity).despawn();
     }
-    let Some(view) = ui.world_map.as_ref() else {
+    let (Some(view), Ok(camera)) = (ui.world_map.as_ref(), camera.single()) else {
         return;
     };
-
-    commands.spawn((
-        Sprite {
-            color: Color::srgba(0.03, 0.05, 0.07, 0.96),
-            custom_size: Some(Vec2::new(1400.0, 900.0)),
-            ..default()
-        },
-        Transform::from_xyz(0.0, 0.0, MAP_Z),
-        WorldMapEntity,
-    ));
-    spawn_label(
-        &mut commands,
-        Vec2::new(0.0, 300.0),
-        "WORLD MAP    [A/D] choose zone   [Enter] travel   [M/Esc] close",
-        18.0,
-        Color::srgb(0.98, 0.92, 0.70),
-    );
-
+    let frame = MapFrame::of(&world);
     let here = world.current_location.name.as_str();
-    for (name, pos) in layout(&world) {
-        let zone = world.map.locations.iter().find(|z| z.name == name);
-        let color = if name == here {
-            Color::srgb(0.25, 0.72, 1.0)
-        } else if name == view.selected {
-            Color::srgb(0.98, 0.80, 0.30)
-        } else {
-            Color::srgb(0.55, 0.60, 0.66)
-        };
-        commands.spawn((
+
+    // Children of the camera, so the overlay stays on screen wherever the player is.
+    commands.entity(camera).with_children(|parent| {
+        parent.spawn((
             Sprite {
-                color,
-                custom_size: Some(Vec2::splat(if name == view.selected { 30.0 } else { 22.0 })),
+                color: Color::srgba(0.03, 0.05, 0.07, 0.96),
+                custom_size: Some(Vec2::new(1400.0, 900.0)),
                 ..default()
             },
-            Transform::from_xyz(pos.x, pos.y, MAP_Z + 2.0),
+            Transform::from_xyz(0.0, 0.0, MAP_Z),
             WorldMapEntity,
         ));
-        let people = zone.map(|z| z.persons.join(", ")).unwrap_or_default();
-        let marker = if name == here { "  (you are here)" } else { "" };
-        let mut text = format!("{name}{marker}");
-        if !people.is_empty() {
-            text.push_str(&format!("\n{people}"));
+        label(parent, Vec2::new(0.0, 300.0), "WORLD MAP    click a region to walk there   right-click to close", 18.0);
+        for region in &world.world.regions {
+            let (center, size) = frame.region_rect(region);
+            let color = if region.name == view.selected {
+                Color::srgb(0.45, 0.38, 0.16)
+            } else if region.name == here {
+                Color::srgb(0.12, 0.30, 0.42)
+            } else {
+                Color::srgb(0.16, 0.19, 0.22)
+            };
+            parent.spawn((
+                Sprite {
+                    color,
+                    custom_size: Some(size - Vec2::splat(2.0)),
+                    ..default()
+                },
+                Transform::from_xyz(center.x, center.y, MAP_Z + 1.0),
+                WorldMapEntity,
+            ));
+            let marker = if region.name == here { "\n(you are here)" } else { "" };
+            label(parent, center, &format!("{}{marker}", region.name), 14.0);
         }
-        spawn_label(&mut commands, pos + Vec2::new(0.0, -36.0), &text, 14.0, Color::srgb(0.92, 0.95, 0.92));
-    }
-
-    if let Some(zone) = world.map.locations.iter().find(|z| z.name == view.selected) {
-        let route = world.map.route(here, &zone.name).map(|r| r.len()).unwrap_or(0);
-        let desc = if zone.description.is_empty() { "" } else { zone.description.as_str() };
-        spawn_label(
-            &mut commands,
-            Vec2::new(0.0, -300.0),
-            &format!("{}  -  {} hop(s) away\n{}", zone.name, route, desc),
-            15.0,
-            Color::srgb(0.85, 0.88, 0.92),
-        );
-    }
+        for person in &world.world.persons {
+            let Some(cell) = person.cell() else { continue };
+            let pos = frame.point(cell.x as f32 + 0.5, cell.y as f32 + 0.5);
+            let color = if person.name == world.player.name {
+                Color::srgb(0.25, 0.72, 1.0)
+            } else {
+                Color::srgb(0.85, 0.40, 0.50)
+            };
+            parent.spawn((
+                Sprite {
+                    color,
+                    custom_size: Some(Vec2::splat(8.0)),
+                    ..default()
+                },
+                Transform::from_xyz(pos.x, pos.y, MAP_Z + 2.0),
+                WorldMapEntity,
+            ));
+            label(parent, pos + Vec2::new(0.0, -10.0), &person.name, 10.0);
+        }
+        if let Some(region) = world.region(&view.selected) {
+            let desc = if region.description.is_empty() { "" } else { region.description.as_str() };
+            label(parent, Vec2::new(0.0, -300.0), &format!("{}\n{}", region.name, desc), 15.0);
+        }
+    });
 }
 
-fn spawn_label(commands: &mut Commands, pos: Vec2, text: &str, size: f32, color: Color) {
-    commands.spawn((
+fn label(parent: &mut ChildSpawnerCommands, pos: Vec2, text: &str, size: f32) {
+    parent.spawn((
         Text2d::new(text),
         TextFont {
             font_size: size,
             ..default()
         },
-        TextColor(color),
+        TextColor(Color::srgb(0.92, 0.95, 0.92)),
         Transform::from_xyz(pos.x, pos.y, MAP_Z + 3.0),
         WorldMapEntity,
     ));
 }
 
-pub fn draw_world_map_gizmos(mut gizmos: Gizmos, world: Res<WorldSnapshot>, ui: Res<UiState>) {
-    let Some(view) = ui.world_map.as_ref() else {
+pub fn draw_world_map_gizmos(
+    mut gizmos: Gizmos,
+    world: Res<WorldSnapshot>,
+    ui: Res<UiState>,
+    camera: Query<&Transform, With<Camera2d>>,
+) {
+    let (Some(view), Ok(camera)) = (ui.world_map.as_ref(), camera.single()) else {
         return;
     };
-    let positions: HashMap<String, Vec2> = layout(&world).into_iter().collect();
-    for edge in &world.map.edges {
-        if let (Some(a), Some(b)) = (positions.get(&edge.a), positions.get(&edge.b)) {
-            gizmos.line_2d(*a, *b, Color::srgb(0.40, 0.46, 0.52));
-        }
-    }
-    let here = world.current_location.name.as_str();
-    if let Some(route) = world.map.route(here, &view.selected) {
-        let mut prev = positions.get(here).copied();
-        for hop in &route {
-            let Some(next) = positions.get(hop).copied() else {
-                break;
-            };
-            if let Some(p) = prev {
-                gizmos.line_2d(p, next, Color::srgb(0.98, 0.80, 0.30));
-            }
-            prev = Some(next);
-        }
-    }
-    if let Some(sel) = positions.get(&view.selected) {
-        gizmos.circle_2d(Isometry2d::from_translation(*sel), 26.0, Color::srgb(0.98, 0.80, 0.30));
+    let frame = MapFrame::of(&world);
+    let offset = camera.translation.truncate();
+    if let Some(region) = world.region(&view.selected) {
+        let (center, size) = frame.region_rect(region);
+        gizmos.rect_2d(Isometry2d::from_translation(center + offset), size, Color::srgb(0.98, 0.80, 0.30));
     }
 }

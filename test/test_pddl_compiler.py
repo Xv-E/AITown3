@@ -61,7 +61,6 @@ def test_actions_compile_from_requires_and_effects():
     assert "(adjacent-to ?from ?to)" in c.domain
     assert "(not (held ?i))" in c.domain
     assert "use_on--log--workbench" in c.domain
-    assert "interact" in c.report.text()
 
 
 def test_relevance_prunes_actions_that_cannot_help():
@@ -183,3 +182,49 @@ def test_only_the_planning_character_acts():
                      config=PlanningConfig.from_dict({"drop_props": ["hp"]}))
     _, plan = _solve(c)
     assert plan and all(args[0] == "Oren" for _, args in plan)
+
+
+def _with_ephemeral(snap: Snapshot, item: str, actions) -> Snapshot:
+    label, props = snap.objects[item]
+    snap.objects[item] = (label, dict(props, ephemeral_actions=json.dumps(actions)))
+    return snap
+
+
+def test_llm_invented_actions_are_planned_with():
+    """物品上的声明式临时动作 = 普通 PDDL 动作：规划器能把它串进链里，解码回 interact。"""
+    snap = _village()
+    snap.objects["Tree"] = ("Item", {"item_kind": "tree", "portable": False, "logs": 2})
+    snap.location["Tree"] = "Forest"
+    del snap.location["Log1"], snap.location["Log2"]
+    del snap.objects["Log1"], snap.objects["Log2"]
+    _with_ephemeral(snap, "Tree", [
+        {"id": "chop", "requires": [{"op": "prop_gte", "entity": "@target", "prop": "logs", "value": 1}],
+         "effects": [{"op": "spawn_item", "archetype": "log", "held_by": "@actor"},
+                     {"op": "add_prop", "entity": "@target", "prop": "logs", "delta": -1}]},
+        {"id": "old_style", "cypher": "MATCH (n) RETURN n"},
+    ])
+    c = compile_pddl(snap, "Kai", [{"op": "has_item", "person": "@self", "item": "kind:plank"}],
+                     config=PlanningConfig())
+    assert "interact--Tree--chop" in c.domain
+    assert "legacy Cypher" in c.report.text()
+    _, plan = _solve(c)
+    assert ("interact", ["Kai", "Tree", "chop"]) in plan
+    assert plan[-1][0] == "use_on"
+
+
+def test_unchanging_ground_conditions_are_folded_away():
+    """全常量、且没有动作会改的条件编译期求值（ENHSP 会把它误判成无解）。"""
+    snap = _village()
+    snap.objects["Kai"] = ("Person", dict(snap.objects["Kai"][1], mood="calm"))
+    snap.objects["Tree"] = ("Item", {"item_kind": "tree", "portable": False})
+    snap.location["Tree"] = "Village"
+    _with_ephemeral(snap, "Tree", [
+        {"id": "hug", "requires": [{"op": "prop_eq", "entity": "@actor", "label": "Person",
+                                    "prop": "mood", "value": "calm"}],
+         "effects": [{"op": "set_prop", "entity": "@target", "prop": "hugged", "value": True}]},
+    ])
+    goal = [{"op": "prop_eq", "entity": "Tree", "prop": "hugged", "value": True}]
+    c = compile_pddl(snap, "Kai", goal, config=PlanningConfig())
+    assert "mood-is" not in c.domain.split("(:action interact")[1]
+    _, plan = _solve(c)
+    assert plan == [("interact", ["Kai", "Tree", "hug"])]
