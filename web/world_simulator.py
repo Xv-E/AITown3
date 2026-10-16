@@ -443,6 +443,22 @@ class WorldSimulator:
             return []
         return list(reversed(loop.chronicle[-max(1, int(limit)):]))
 
+    def director_view(self, world=None) -> Dict[str, Any]:
+        """导演选项卡：故事走向、最近出手、下一次什么时候、冲突与仇怨、任务线进度。"""
+        from director_view import build_director_view
+
+        loop = self._game_loop
+        world = world if world is not None else (loop.world if loop else None)
+        return build_director_view(loop, world)
+
+    def nudge_story(self) -> bool:
+        """让导演下一拍就出手（不等到点）。"""
+        loop = self._game_loop
+        if loop is None or loop.storyteller is None:
+            return False
+        loop.storyteller.last_at = -1e9
+        return True
+
     def chat(self, npc: str, player: str, *, ended: bool = False) -> None:
         """玩家在和 npc 聊天：npc 站着等回话；ended=True 时放开。模拟没启动时什么都不做。"""
         loop = self._game_loop

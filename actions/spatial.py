@@ -345,26 +345,166 @@ def region_at(areas: Dict[str, Area], cell: Cell) -> Optional[str]:
 
 
 def walkable_cells(world: "Neo4jWorld", areas: Optional[Dict[str, Area]] = None) -> Set[Cell]:
-    """所有区域的格子，去掉固定物占的格子。区域之间没有墙。"""
+    """所有区域形状里的格子，去掉固定物占的格子。区域之间没有墙（相接处有通道）。"""
     areas = areas if areas is not None else region_areas(world)
+    item_cells, blocked = _item_cells(world, areas)
     out: Set[Cell] = set()
-    for ax, ay, aw, ah in areas.values():
-        out.update(cells(ax, ay, aw, ah))
+    for shape in region_shapes(world, areas, item_cells).values():
+        out |= shape
+    return out - blocked
+
+
+# ---------------------------------------------------------------------
+# 区域形状：在矩形范围里长出一块圆润、边缘起伏的地（按名字固定，不随机变）。
+# 矩形之间相接的地方留通道，地上的东西也一定连得到中心，所以哪儿都走得到。
+# ---------------------------------------------------------------------
+
+SHAPE_POWER = 2.2        # 越大越接近方形，2 = 椭圆
+SHAPE_EDGE = 0.95        # 形状占矩形的比例
+SHAPE_WOBBLE = ((2, 0.08), (3, 0.07), (4, 0.05))  # (起伏频率, 幅度)
+SHAPE_SMOOTH = 2         # 平滑几遍：去掉孤零零的尖角、补上小坑
+LINK_HALF = 1            # 区域之间的通道：中线两侧各几格
+
+
+def _carve_line(out: Set[Cell], a: Cell, b: Cell, area: Area, radius: int = 1) -> None:
+    """a → b 的直线连同两侧 radius 格并入 out（只在矩形范围里）。"""
+    x0, y0, w, h = area
+    steps = max(abs(b[0] - a[0]), abs(b[1] - a[1]), 1)
+    for i in range(steps + 1):
+        cx = round(a[0] + (b[0] - a[0]) * i / steps)
+        cy = round(a[1] + (b[1] - a[1]) * i / steps)
+        for dx in range(-radius, radius + 1):
+            for dy in range(-radius, radius + 1):
+                x, y = cx + dx, cy + dy
+                if x0 <= x < x0 + w and y0 <= y < y0 + h:
+                    out.add((x, y))
+
+
+def _smooth(shape: Set[Cell], area: Area) -> Set[Cell]:
+    """多数表决：8 邻里 5 个以上是地就算地，2 个以下就不算。"""
+    x0, y0, w, h = area
+    out: Set[Cell] = set()
+    for x in range(x0, x0 + w):
+        for y in range(y0, y0 + h):
+            n = sum((x + dx, y + dy) in shape for dx in (-1, 0, 1) for dy in (-1, 0, 1) if dx or dy)
+            if n >= 5 or ((x, y) in shape and n >= 3):
+                out.add((x, y))
+    return out
+
+
+def region_shape(name: str, area: Area, anchors: Iterable[Cell] = ()) -> Set[Cell]:
+    """这块区域实际的地（世界格子）。anchors：必须连到中心的格子（通道口、物品）。"""
+    x0, y0, w, h = area
+    if w <= 0 or h <= 0:
+        return set()
+    seed = _stable_hash(name)
+    phases = [((seed >> (8 * i)) & 0xFF) / 255.0 * 2 * math.pi for i in range(len(SHAPE_WOBBLE))]
+    cx, cy = x0 + w / 2.0, y0 + h / 2.0
+    out: Set[Cell] = set()
+    for x in range(x0, x0 + w):
+        for y in range(y0, y0 + h):
+            u = (x + 0.5 - cx) / (w / 2.0)
+            v = (y + 0.5 - cy) / (h / 2.0)
+            r = (abs(u) ** SHAPE_POWER + abs(v) ** SHAPE_POWER) ** (1.0 / SHAPE_POWER)
+            angle = math.atan2(v, u)
+            limit = SHAPE_EDGE + sum(amp * math.sin(k * angle + ph) for (k, amp), ph in zip(SHAPE_WOBBLE, phases))
+            if r <= limit:
+                out.add((x, y))
+    for _ in range(SHAPE_SMOOTH):
+        out = _smooth(out, area)
+    center = (x0 + w // 2, y0 + h // 2)
+    for a in anchors:
+        _carve_line(out, a, center, area)
+    return out
+
+
+def region_links(areas: Dict[str, Area]) -> Dict[str, List[Cell]]:
+    """相接的两块矩形：各自在交界线中点留一个通道口（格子在自己那一侧）。"""
+    out: Dict[str, List[Cell]] = {n: [] for n in areas}
+    names = sorted(areas)
+    for i, a in enumerate(names):
+        ax, ay, aw, ah = areas[a]
+        for b in names[i + 1:]:
+            bx, by, bw, bh = areas[b]
+            if ax + aw == bx or bx + bw == ax:  # 左右相接
+                lo, hi = max(ay, by), min(ay + ah, by + bh)
+                if hi - lo >= 1:
+                    mid = (lo + hi) // 2
+                    a_x, b_x = (ax + aw - 1, bx) if ax + aw == bx else (ax, bx + bw - 1)
+                    for d in range(-LINK_HALF, LINK_HALF + 1):
+                        if lo <= mid + d < hi:
+                            out[a].append((a_x, mid + d))
+                            out[b].append((b_x, mid + d))
+            if ay + ah == by or by + bh == ay:  # 上下相接
+                lo, hi = max(ax, bx), min(ax + aw, bx + bw)
+                if hi - lo >= 1:
+                    mid = (lo + hi) // 2
+                    a_y, b_y = (ay + ah - 1, by) if ay + ah == by else (ay, by + bh - 1)
+                    for d in range(-LINK_HALF, LINK_HALF + 1):
+                        if lo <= mid + d < hi:
+                            out[a].append((mid + d, a_y))
+                            out[b].append((mid + d, b_y))
+    return out
+
+
+def _item_cells(world: "Neo4jWorld", areas: Dict[str, Area]) -> Tuple[Dict[str, List[Cell]], Set[Cell]]:
+    """每个区域里物品占的世界格子；以及固定物（挡路）占的格子。"""
     rows = world.run_query(
         """
         MATCH (i:Item)-[:LOCATED_AT]->(l:Location)
-        WHERE coalesce(i.portable, true) = false AND i.x IS NOT NULL AND i.y IS NOT NULL
-        RETURN l.name AS loc, i.x AS x, i.y AS y,
+        WHERE i.x IS NOT NULL AND i.y IS NOT NULL
+        RETURN l.name AS loc, i.x AS x, i.y AS y, coalesce(i.portable, true) AS portable,
                coalesce(i.footprint_w, 1) AS w, coalesce(i.footprint_h, 1) AS h
         """
     ) or []
+    per: Dict[str, List[Cell]] = {n: [] for n in areas}
+    blocked: Set[Cell] = set()
     for r in rows:
         area = areas.get(r["loc"])
-        if area:
-            out.difference_update(
-                cells(area[0] + _int(r["x"]), area[1] + _int(r["y"]), _int(r["w"], 1), _int(r["h"], 1))
-            )
-    return out
+        if not area:
+            continue
+        footprint = list(cells(area[0] + _int(r["x"]), area[1] + _int(r["y"]), _int(r["w"], 1), _int(r["h"], 1)))
+        per[r["loc"]].extend(footprint)
+        if not r.get("portable", True):
+            blocked.update(footprint)
+    return per, blocked
+
+
+_SHAPE_CACHE: Dict[Any, Dict[str, Set[Cell]]] = {}
+
+
+def region_shapes(world: "Neo4jWorld", areas: Optional[Dict[str, Area]] = None,
+                  item_cells: Optional[Dict[str, List[Cell]]] = None) -> Dict[str, Set[Cell]]:
+    """所有区域的形状（同样的布局 + 物品位置只算一次）。"""
+    areas = areas if areas is not None else region_areas(world)
+    if item_cells is None:
+        item_cells, _ = _item_cells(world, areas)
+    key = (
+        tuple(sorted(areas.items())),
+        tuple(sorted((n, tuple(sorted(c))) for n, c in item_cells.items())),
+    )
+    hit = _SHAPE_CACHE.get(key)
+    if hit is not None:
+        return hit
+    links = region_links(areas)
+    shapes = {
+        name: region_shape(name, area, list(links.get(name, [])) + list(item_cells.get(name, [])))
+        for name, area in areas.items()
+    }
+    if len(_SHAPE_CACHE) > 64:
+        _SHAPE_CACHE.clear()
+    _SHAPE_CACHE[key] = shapes
+    return shapes
+
+
+def shape_rows(shape: Set[Cell], area: Area) -> List[str]:
+    """给客户端：每行一串 '#'（地）/ '.'（空）。"""
+    x0, y0, w, h = area
+    return ["".join("#" if (x, y) in shape else "." for x in range(x0, x0 + w)) for y in range(y0, y0 + h)]
+
+
+def nearest_walkable(walkable: Set[Cell], cell: Cell) -> Optional[Cell]:
+    return min(walkable, key=lambda c: (_octile(c, cell), c)) if walkable else None
 
 
 def find_path(walkable: Set[Cell], start: Cell, goals: Set[Cell]) -> Optional[List[Cell]]:
@@ -450,11 +590,12 @@ def person_cell(world: "Neo4jWorld", name: str) -> Optional[Cell]:
     area = areas.get(r.get("loc") or "")
     if area is None:
         return None
+    walkable = walkable_cells(world, areas)
     if r.get("x") is not None and r.get("y") is not None:
         cell = (_int(r["x"]), _int(r["y"]))
-        if region_at({r["loc"]: area}, cell):
+        if region_at({r["loc"]: area}, cell) and cell in walkable:
             return cell
-    spot = resting_spot(walkable_cells(world, areas), area, name)
+    spot = resting_spot(walkable, area, name)
     if spot:
         set_person_cell(world, name, spot)
     return spot

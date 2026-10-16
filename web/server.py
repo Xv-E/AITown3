@@ -919,6 +919,22 @@ async def api_simulation_stop():
     return {"ok": True, "running": False}
 
 
+@app.get("/api/director")
+def director_status():
+    """导演选项卡：故事走向、最近几拍、冲突仇怨、任务线进度。"""
+    try:
+        world = get_world()
+    except Exception:  # noqa: BLE001
+        world = None
+    return get_world_simulator().director_view(world)
+
+
+@app.post("/api/director/nudge")
+def director_nudge():
+    """让导演下一拍就出手。"""
+    return {"ok": get_world_simulator().nudge_story()}
+
+
 @app.get("/api/simulation/status")
 def api_simulation_status():
     mgr = get_plan_manager()

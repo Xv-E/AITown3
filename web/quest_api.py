@@ -46,6 +46,9 @@ def make_router(get_world: Callable[[], Any], story_arc: Callable[[], str]) -> A
         body = _result_body(result)
         if result.ok:
             last["patch"] = result.patch.to_dict()
+        from director_view import draft_summary
+
+        body["summary"] = draft_summary(body)
         return body
 
     @router.post("/apply")

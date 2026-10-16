@@ -3,6 +3,7 @@ mod icons;
 mod net;
 mod scene;
 mod speech;
+mod terrain;
 mod ui;
 mod world_map;
 
@@ -23,6 +24,8 @@ fn main() {
         .insert_resource(net)
         .insert_resource(WorldSnapshot::offline())
         .insert_resource(SceneState::default())
+        .insert_resource(terrain::RegionImages::default())
+        .insert_resource(ClearColor(terrain::WILDERNESS))
         .insert_resource(WalkGrid::default())
         .insert_resource(PlayerSync::default())
         .insert_resource(speech::SpeechPlayer::default())
@@ -46,6 +49,7 @@ fn main() {
                 net::schedule_state_sync,
                 net::receive_network_messages,
                 speech::update_speech,
+                terrain::sync_region_images,
                 ui::ui_buttons,
                 ui::chat_typing,
                 ui::npc_chat_requests,
@@ -85,6 +89,10 @@ fn main() {
                 ui::update_night_overlay,
             )
                 .after(ui::interaction_input),
+        )
+        .add_systems(
+            Update,
+            (ui::update_director_panel, ui::poll_director, ui::director_wheel).after(ui::interaction_input),
         )
         .run();
 }

@@ -139,6 +139,24 @@ impl NetBridge {
         let _ = self.position_tx.send(cell);
     }
 
+    pub fn fetch_director(&self) {
+        self.send(NetRequestKind::FetchDirector);
+    }
+
+    /// Ask the storyteller to act on the next tick instead of waiting.
+    pub fn nudge_director(&self) {
+        self.send(NetRequestKind::NudgeDirector);
+    }
+
+    /// Have the LLM write a questline and check it with the planner (slow: up to a few minutes).
+    pub fn draft_questline(&self) {
+        self.send(NetRequestKind::DraftQuestline);
+    }
+
+    pub fn apply_questline(&self) {
+        self.send(NetRequestKind::ApplyQuestline);
+    }
+
     pub fn fetch_history(&self, name: &str) {
         self.send(NetRequestKind::FetchHistory {
             name: name.to_string(),
@@ -178,6 +196,10 @@ enum NetRequestKind {
     AdvanceTime {
         hours: f32,
     },
+    FetchDirector,
+    NudgeDirector,
+    DraftQuestline,
+    ApplyQuestline,
     FetchHistory {
         name: String,
     },
@@ -204,6 +226,9 @@ enum NetResponse {
     Build(Result<(bool, String), String>),
     /// Fire-and-forget requests: nothing to show.
     Done,
+    Director(Result<DirectorData, String>),
+    Draft(Result<DraftSummary, String>),
+    Applied(Result<String, String>),
 }
 
 fn handle_request(request: NetRequest) -> NetResponse {
@@ -261,6 +286,26 @@ fn handle_request(request: NetRequest) -> NetResponse {
                     .to_string()
             }))
         }
+        NetRequestKind::FetchDirector => NetResponse::Director(
+            http_json(server, "GET", "/api/director", None).and_then(|v| {
+                serde_json::from_value::<DirectorData>(v).map_err(|err| format!("Bad director JSON: {err}"))
+            }),
+        ),
+        NetRequestKind::NudgeDirector => {
+            let _ = http_json(server, "POST", "/api/director/nudge", Some("{}".to_string()));
+            NetResponse::Done
+        }
+        NetRequestKind::DraftQuestline => NetResponse::Draft(
+            http_json(server, "POST", "/api/questlines/draft", Some("{}".to_string())).and_then(|v| {
+                serde_json::from_value::<DraftSummary>(v.get("summary").cloned().unwrap_or(Value::Null))
+                    .map_err(|err| format!("Bad draft JSON: {err}"))
+            }),
+        ),
+        NetRequestKind::ApplyQuestline => NetResponse::Applied(
+            http_json(server, "POST", "/api/questlines/apply", Some("{}".to_string())).map(|v| {
+                v.get("message").and_then(Value::as_str).unwrap_or("Questline added to the world.").to_string()
+            }),
+        ),
         NetRequestKind::FetchHistory { name } => {
             let path = format!("/api/characters/{name}/history?limit=80");
             let result = http_json(server, "GET", &path, None).and_then(|value| {
@@ -530,6 +575,40 @@ pub fn receive_network_messages(
             }
             NetResponse::Blueprints(Ok(list)) => ui.open_build_menu(list),
             NetResponse::Done => {}
+            NetResponse::Director(result) => {
+                if let Some(view) = ui.director.as_mut() {
+                    view.in_flight = false;
+                    match result {
+                        Ok(data) => {
+                            view.data = Some(data);
+                            view.error.clear();
+                        }
+                        Err(err) => view.error = err,
+                    }
+                }
+            }
+            NetResponse::Draft(result) => {
+                if let Some(view) = ui.director.as_mut() {
+                    view.drafting = false;
+                    match result {
+                        Ok(draft) => view.draft = Some(draft),
+                        Err(err) => view.error = format!("Drafting failed: {err}"),
+                    }
+                }
+            }
+            NetResponse::Applied(result) => {
+                if let Some(view) = ui.director.as_mut() {
+                    view.applying = false;
+                    view.last_fetch = None;
+                    if result.is_ok() {
+                        view.draft = None;
+                    }
+                }
+                match result {
+                    Ok(msg) => ui.toast(msg),
+                    Err(err) => ui.toast(format!("Couldn't add the questline: {err}")),
+                }
+            }
             NetResponse::Blueprints(Err(err)) => ui.toast(format!("Can't load blueprints: {err}")),
             NetResponse::Build(Ok((success, message))) => {
                 net.refresh_now();
@@ -830,13 +909,24 @@ pub struct RegionView {
     pub w: i32,
     #[serde(default)]
     pub h: i32,
+    /// Shape inside the area: one string per row, '#' = ground (empty = the whole rectangle).
+    #[serde(default)]
+    pub rows: Vec<String>,
     #[serde(default, deserialize_with = "lenient_string")]
     pub description: String,
 }
 
 impl RegionView {
+    /// On this region's ground (inside its shape, not just its bounding rectangle).
     pub fn contains(&self, cell: IVec2) -> bool {
-        cell.x >= self.x && cell.x < self.x + self.w && cell.y >= self.y && cell.y < self.y + self.h
+        let inside = cell.x >= self.x && cell.x < self.x + self.w && cell.y >= self.y && cell.y < self.y + self.h;
+        if !inside || self.rows.is_empty() {
+            return inside;
+        }
+        self.rows
+            .get((cell.y - self.y) as usize)
+            .and_then(|row| row.as_bytes().get((cell.x - self.x) as usize))
+            .is_some_and(|c| *c == b'#')
     }
 
     pub fn center(&self) -> IVec2 {
@@ -1129,7 +1219,8 @@ fn http_json(
 
     let mut stream = TcpStream::connect((host, port))
         .map_err(|err| format!("Could not connect to {host}:{port}: {err}"))?;
-    let read_timeout = if method == "POST" { 90 } else { 15 };
+    // Writing a questline is several LLM rounds plus planning: give it time.
+    let read_timeout = if path.contains("/questlines/") { 300 } else if method == "POST" { 90 } else { 15 };
     stream
         .set_read_timeout(Some(Duration::from_secs(read_timeout)))
         .map_err(|err| err.to_string())?;
@@ -1455,3 +1546,70 @@ mod tests {
     }
 }
 
+
+/// Director tab: the storyteller's arc and recent moves, conflicts, grudges, questlines.
+#[derive(Deserialize, Clone, Default)]
+pub struct DirectorData {
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub mode: String,
+    #[serde(default)]
+    pub thinking: bool,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub arc: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub next_clock: String,
+    #[serde(default)]
+    pub next_in_hours: Option<f32>,
+    #[serde(default)]
+    pub beats: Vec<DirectorLine>,
+    #[serde(default)]
+    pub conflicts: Vec<DirectorLine>,
+    #[serde(default)]
+    pub tensions: Vec<DirectorLine>,
+    #[serde(default)]
+    pub chronicle: Vec<DirectorLine>,
+    #[serde(default)]
+    pub questlines: Vec<QuestlineView>,
+}
+
+#[derive(Deserialize, Clone, Default)]
+pub struct DirectorLine {
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub clock: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub line: String,
+}
+
+#[derive(Deserialize, Clone, Default)]
+pub struct QuestlineView {
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub title: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub premise: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub state: String,
+    #[serde(default)]
+    pub stages: Vec<QuestStageView>,
+}
+
+#[derive(Deserialize, Clone, Default)]
+pub struct QuestStageView {
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub title: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub objective: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub giver: String,
+    /// "done" | "current" | "todo"
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub state: String,
+}
+
+/// A questline the LLM just wrote (not in the world until applied).
+#[derive(Deserialize, Clone, Default)]
+pub struct DraftSummary {
+    #[serde(default)]
+    pub ok: bool,
+    #[serde(default)]
+    pub lines: Vec<String>,
+}

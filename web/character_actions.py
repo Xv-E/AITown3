@@ -707,15 +707,18 @@ def get_character_actions(world, person: str) -> Dict[str, Any]:
 
 def world_view(world, viewer: Optional[str]) -> Dict[str, Any]:
     """无缝世界的全貌（世界格子坐标）：区域范围、地上的东西、所有人站在哪。"""
-    from spatial import person_cell, region_areas
+    from spatial import person_cell, region_areas, region_shapes, shape_rows
 
     areas = region_areas(world)
+    shapes = region_shapes(world, areas)
     regions = []
     items: List[Dict[str, Any]] = []
     for name, (ax, ay, aw, ah) in sorted(areas.items()):
         info = get_location_info(world, name) or {}
         regions.append({
             "name": name, "x": ax, "y": ay, "w": aw, "h": ah,
+            # 形状：每行一串 '#'（地）/ '.'（空），区域不再是方方正正的
+            "rows": shape_rows(shapes.get(name, set()), (ax, ay, aw, ah)),
             "description": info.get("description") or "",
             "tags": info.get("tags") or "",
         })

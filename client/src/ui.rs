@@ -7,7 +7,7 @@ use std::{
 };
 
 use crate::adapter::thought_line;
-use crate::net::{trim_line, Blueprint, History, HistoryEntry, NetBridge, WorldSnapshot};
+use crate::net::{trim_line, Blueprint, DirectorData, DraftSummary, History, HistoryEntry, NetBridge, WorldSnapshot};
 use crate::scene::{cell_at, cell_center, Interactive, PlayerAvatar, TargetKind, WalkGrid, ZoneGrid, TILE};
 
 const TOAST_DURATION: Duration = Duration::from_secs(4);
@@ -32,6 +32,8 @@ pub struct UiState {
     pub dialogue: Option<DialogueView>,
     pub menu: Option<Menu>,
     pub history: Option<HistoryView>,
+    /// Director tab (same panel spot as the NPC history; tabs switch between them).
+    pub director: Option<DirectorView>,
     pub sim_running: bool,
     /// Blueprint being placed: the ghost follows the player until E / Esc.
     pub build: Option<BuildPlacement>,
@@ -59,6 +61,7 @@ impl Default for UiState {
             dialogue: None,
             menu: None,
             history: None,
+            director: None,
             sim_running: false,
             build: None,
             world_map: None,
@@ -126,7 +129,11 @@ impl UiState {
     }
 
     pub fn blocks_movement(&self) -> bool {
-        self.menu.is_some() || self.dialogue.is_some() || self.history.is_some() || self.world_map.is_some()
+        self.menu.is_some()
+            || self.dialogue.is_some()
+            || self.history.is_some()
+            || self.director.is_some()
+            || self.world_map.is_some()
     }
 
     pub fn travelling(&self) -> bool {
@@ -487,6 +494,15 @@ pub fn interaction_input(
         }
         // Clicked somewhere else: close the menu and handle the click below.
         ui.menu = None;
+    }
+
+    if ui.director.is_some() {
+        if left || right || keys.just_pressed(KeyCode::Escape) {
+            ui.director = None;
+            return;
+        }
+        global_keys(&keys, &mut ui, &mut net);
+        return;
     }
 
     if ui.history.is_some() {
@@ -922,6 +938,9 @@ pub struct ClockText;
 #[derive(Component)]
 pub struct HistoryPanel;
 
+#[derive(Component)]
+pub struct DirectorPanel;
+
 pub fn setup_ui(mut commands: Commands) {
     commands.spawn((
         Node {
@@ -1084,6 +1103,27 @@ pub fn setup_ui(mut commands: Commands) {
         GlobalZIndex(5),
         Visibility::Hidden,
         HistoryPanel,
+    ));
+    commands.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            top: px(70),
+            left: percent(5),
+            width: percent(70),
+            bottom: px(64),
+            flex_direction: FlexDirection::Column,
+            padding: UiRect::all(px(12)),
+            border: UiRect::all(px(2)),
+            overflow: Overflow::clip(),
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.05, 0.04, 0.08, 0.96)),
+        BorderColor::all(Color::srgb(0.75, 0.55, 0.85)),
+        Interaction::default(),
+        FocusPolicy::Block,
+        GlobalZIndex(5),
+        Visibility::Hidden,
+        DirectorPanel,
     ));
     commands.spawn((
         Node {
@@ -1416,6 +1456,13 @@ pub enum UiAction {
     ToggleEntry(String),
     HistoryStep(isize),
     CloseHistory,
+    /// Panel tabs: NPC history / director.
+    TabNpcs,
+    TabDirector,
+    NudgeDirector,
+    DraftQuestline,
+    ApplyQuestline,
+    DiscardDraft,
     CloseDialogue,
 }
 
@@ -1539,7 +1586,55 @@ fn run_ui_action(action: UiAction, world: &WorldSnapshot, nearby: &NearbyInterac
                 *view = HistoryView::new(names[next].clone());
             }
         }
-        UiAction::CloseHistory => ui.history = None,
+        UiAction::CloseHistory => {
+            ui.history = None;
+            ui.director = None;
+        }
+        UiAction::TabNpcs => {
+            ui.director = None;
+            if ui.history.is_none() {
+                if let Some(name) = npc_names(world).into_iter().next() {
+                    ui.history = Some(HistoryView::new(name));
+                }
+            }
+        }
+        UiAction::TabDirector => {
+            ui.history = None;
+            ui.menu = None;
+            ui.world_map = None;
+            if ui.director.is_none() {
+                ui.director = Some(DirectorView::default());
+            }
+        }
+        UiAction::NudgeDirector => {
+            net.nudge_director();
+            ui.toast("The director will make a move on the next tick (if NPCs are running).");
+            if let Some(view) = ui.director.as_mut() {
+                view.last_fetch = None;
+            }
+        }
+        UiAction::DraftQuestline => {
+            if let Some(view) = ui.director.as_mut() {
+                if !view.drafting {
+                    view.drafting = true;
+                    view.draft = None;
+                    net.draft_questline();
+                }
+            }
+        }
+        UiAction::ApplyQuestline => {
+            if let Some(view) = ui.director.as_mut() {
+                if view.draft.as_ref().is_some_and(|d| d.ok) && !view.applying {
+                    view.applying = true;
+                    net.apply_questline();
+                }
+            }
+        }
+        UiAction::DiscardDraft => {
+            if let Some(view) = ui.director.as_mut() {
+                view.draft = None;
+            }
+        }
         UiAction::CloseDialogue => {
             if ui.dialogue.as_ref().is_some_and(|d| !d.waiting && !d.chat) {
                 ui.dialogue = None;
@@ -1573,6 +1668,7 @@ pub fn update_toolbar(
         button(p, "Build", UiAction::Build, 15.0, false, false);
         button(p, "Map", UiAction::Map, 15.0, false, false);
         button(p, "History", UiAction::History, 15.0, false, false);
+        button(p, "Director", UiAction::TabDirector, 15.0, false, false);
         if ui.sim_running {
             button(p, "Pause NPCs", UiAction::Sim { llm: false }, 15.0, true, false);
         } else {
@@ -1733,6 +1829,7 @@ pub fn update_history_panel(
     let view = &*view;
     commands.entity(entity).despawn_related::<Children>();
     commands.entity(entity).with_children(|p| {
+        tab_row(p, false);
         p.spawn(Node { flex_direction: FlexDirection::Row, align_items: AlignItems::Center, column_gap: px(8), ..default() })
             .with_children(|row| {
                 button(row, "<", UiAction::HistoryStep(-1), 16.0, false, false);
@@ -2049,4 +2146,225 @@ fn entry_reason_line(e: &HistoryEntry, max: usize) -> String {
         parts.push(format!("why: {}", e.why));
     }
     trim_line(&parts.join("  ·  "), max)
+}
+
+/// Director tab state: what the server last said, plus a questline draft being reviewed.
+#[derive(Default)]
+pub struct DirectorView {
+    pub data: Option<DirectorData>,
+    pub error: String,
+    pub in_flight: bool,
+    pub last_fetch: Option<Instant>,
+    pub draft: Option<DraftSummary>,
+    pub drafting: bool,
+    pub applying: bool,
+    pub scroll: usize,
+}
+
+const DIRECTOR_POLL: Duration = Duration::from_secs(2);
+
+/// "NPCs | Director" tabs at the top of the big panel.
+fn tab_row(p: &mut ChildSpawnerCommands, director: bool) {
+    p.spawn(Node { flex_direction: FlexDirection::Row, column_gap: px(4), margin: UiRect::bottom(px(6)), ..default() })
+        .with_children(|row| {
+            button(row, "NPCs", UiAction::TabNpcs, 15.0, !director, false);
+            button(row, "Director", UiAction::TabDirector, 15.0, director, false);
+            row.spawn(Node { flex_grow: 1.0, ..default() });
+            button(row, "Close", UiAction::CloseHistory, 15.0, false, false);
+        });
+}
+
+/// Re-fetch the director tab every couple of seconds while it is open.
+pub fn poll_director(net: Res<NetBridge>, mut ui: ResMut<UiState>) {
+    let Some(view) = ui.director.as_mut() else { return };
+    if view.in_flight || view.last_fetch.is_some_and(|t| t.elapsed() < DIRECTOR_POLL) {
+        return;
+    }
+    view.in_flight = true;
+    view.last_fetch = Some(Instant::now());
+    net.fetch_director();
+}
+
+/// Mouse wheel scrolls the director tab (one line-group per notch).
+pub fn director_wheel(scroll: Res<AccumulatedMouseScroll>, mut ui: ResMut<UiState>) {
+    let Some(view) = ui.director.as_mut() else { return };
+    if scroll.delta.y > 0.0 {
+        view.scroll = view.scroll.saturating_sub(1);
+    } else if scroll.delta.y < 0.0 {
+        view.scroll += 1;
+    }
+}
+
+fn section(p: &mut ChildSpawnerCommands, title: &str) {
+    p.spawn((
+        Text::new(title.to_string()),
+        TextFont { font_size: 16.0, ..default() },
+        TextColor(TITLE),
+        Node { margin: UiRect::top(px(10)), ..default() },
+    ));
+}
+
+fn line(p: &mut ChildSpawnerCommands, text: String, color: Color, size: f32) {
+    p.spawn((Text::new(text), TextFont { font_size: size, ..default() }, TextColor(color)));
+}
+
+fn director_signature(view: &DirectorView) -> String {
+    let Some(d) = view.data.as_ref() else {
+        return format!("loading|{}|{}", view.error, view.scroll);
+    };
+    let lines = |v: &Vec<crate::net::DirectorLine>| v.iter().map(|l| format!("{}{}", l.clock, l.line)).collect::<Vec<_>>().join(";");
+    let quests: Vec<String> = d
+        .questlines
+        .iter()
+        .map(|q| format!("{}{}{}", q.title, q.state, q.stages.iter().map(|s| s.state.as_str()).collect::<String>()))
+        .collect();
+    format!(
+        "{}|{}|{}|{}|{:?}|{}|{}|{}|{}|{}|{}|{}|{}|{:?}|{}",
+        d.mode,
+        d.thinking,
+        d.arc,
+        d.next_clock,
+        d.next_in_hours.map(|h| (h * 4.0) as i32),
+        lines(&d.beats),
+        lines(&d.conflicts),
+        lines(&d.tensions),
+        lines(&d.chronicle),
+        quests.join(";"),
+        view.error,
+        view.drafting,
+        view.applying,
+        view.draft.as_ref().map(|dr| dr.lines.join(";")),
+        view.scroll,
+    )
+}
+
+pub fn update_director_panel(
+    mut commands: Commands,
+    ui: Res<UiState>,
+    mut panel: Query<(Entity, &mut Visibility), With<DirectorPanel>>,
+    mut shown: Local<String>,
+) {
+    let Ok((entity, mut vis)) = panel.single_mut() else { return };
+    let Some(view) = ui.director.as_ref() else {
+        set_visible(&mut vis, false);
+        if !shown.is_empty() {
+            shown.clear();
+            commands.entity(entity).despawn_related::<Children>();
+        }
+        return;
+    };
+    set_visible(&mut vis, true);
+    let signature = director_signature(view);
+    if *shown == signature {
+        return;
+    }
+    *shown = signature;
+    commands.entity(entity).despawn_related::<Children>();
+    commands.entity(entity).with_children(|p| {
+        tab_row(p, true);
+        // Everything below scrolls with the wheel.
+        p.spawn(Node {
+            flex_direction: FlexDirection::Column,
+            top: px(-(view.scroll as f32) * 48.0),
+            ..default()
+        })
+        .with_children(|body| director_body(body, view));
+    });
+}
+
+fn director_body(p: &mut ChildSpawnerCommands, view: &DirectorView) {
+    if !view.error.is_empty() {
+        line(p, view.error.clone(), Color::srgb(0.95, 0.5, 0.45), 14.0);
+    }
+    let Some(d) = view.data.as_ref() else {
+        line(p, "Loading...".into(), MUTED, 15.0);
+        return;
+    };
+
+    // The storyteller: where the story is going, when it acts next.
+    let mode = match d.mode.as_str() {
+        "llm" => "LLM storyteller",
+        "template" => "template storyteller (no LLM: run NPCs in LLM mode for a real one)",
+        _ => "not running - start the NPCs to wake the storyteller",
+    };
+    line(p, format!("Storyteller: {mode}"), MUTED, 14.0);
+    let arc = if d.arc.is_empty() { "(no story arc yet)" } else { d.arc.as_str() };
+    line(p, format!("Story so far: {arc}"), TEXT, 17.0);
+    if d.thinking {
+        line(p, "The storyteller is thinking about the next move...".into(), SAID, 14.0);
+    } else if let Some(hours) = d.next_in_hours {
+        line(p, format!("Next move around {} (in {:.1} game hours)", d.next_clock, hours), MUTED, 14.0);
+    }
+    p.spawn(Node { flex_direction: FlexDirection::Row, column_gap: px(6), margin: UiRect::top(px(4)), ..default() })
+        .with_children(|row| {
+            if d.mode != "off" {
+                button(row, "Make a move now", UiAction::NudgeDirector, 14.0, false, false);
+            }
+            let label = if view.drafting { "Writing a questline... (can take a minute)" } else { "Write a new questline" };
+            button(row, label, UiAction::DraftQuestline, 14.0, view.drafting, false);
+        });
+
+    // A questline draft to review before it goes into the world.
+    if let Some(draft) = view.draft.as_ref() {
+        section(p, if draft.ok { "Draft questline (checked: it can be completed)" } else { "Draft questline (has problems)" });
+        for (i, text) in draft.lines.iter().enumerate() {
+            let color = if text.starts_with("Problem:") { Color::srgb(0.95, 0.6, 0.5) } else if i == 0 { SAID } else { TEXT };
+            line(p, format!("  {text}"), color, 14.0);
+        }
+        p.spawn(Node { flex_direction: FlexDirection::Row, column_gap: px(6), margin: UiRect::top(px(4)), ..default() })
+            .with_children(|row| {
+                if draft.ok {
+                    let label = if view.applying { "Adding..." } else { "Add to the world" };
+                    button(row, label, UiAction::ApplyQuestline, 14.0, true, false);
+                }
+                button(row, "Discard", UiAction::DiscardDraft, 14.0, false, false);
+            });
+    }
+
+    section(p, "Questlines");
+    if d.questlines.is_empty() {
+        line(p, "  (none yet - write one above)".into(), MUTED, 14.0);
+    }
+    for q in &d.questlines {
+        line(p, format!("  {}  [{}]", q.title, q.state), SAID, 15.0);
+        if !q.premise.is_empty() {
+            line(p, format!("    {}", trim_line(&q.premise, 220)), MUTED, 13.0);
+        }
+        for s in &q.stages {
+            let mark = match s.state.as_str() {
+                "done" => "[x]",
+                "current" => "[>]",
+                _ => "[ ]",
+            };
+            let giver = if s.giver.is_empty() { String::new() } else { format!("  (from {})", s.giver) };
+            let color = if s.state == "done" { MUTED } else { TEXT };
+            line(p, format!("    {mark} {}{giver}: {}", s.title, s.objective), color, 14.0);
+        }
+    }
+
+    section(p, "Recent moves");
+    if d.beats.is_empty() {
+        line(p, "  (nothing yet)".into(), MUTED, 14.0);
+    }
+    for b in &d.beats {
+        line(p, format!("  {}   {}", b.clock, trim_line(&b.line, 200)), TEXT, 14.0);
+    }
+
+    section(p, "Conflicts");
+    if d.conflicts.is_empty() && d.tensions.is_empty() {
+        line(p, "  (everyone gets along, for now)".into(), MUTED, 14.0);
+    }
+    for c in &d.conflicts {
+        line(p, format!("  {}   {}", c.clock, c.line), TEXT, 14.0);
+    }
+    for t in &d.tensions {
+        line(p, format!("  grudge: {}", t.line), MUTED, 14.0);
+    }
+
+    if !d.chronicle.is_empty() {
+        section(p, "Village news");
+        for c in &d.chronicle {
+            line(p, format!("  {}   {}", c.clock, trim_line(&c.line, 200)), TEXT, 14.0);
+        }
+    }
 }

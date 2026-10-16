@@ -115,3 +115,31 @@ def test_does_not_repeat_last_rounds_whisper_or_adjust():
     assert parse_plan(raw, digest)["beats"] == []
     raw = _plan({"op": "whisper", "to": "Sage", "text": "your turn"})
     assert parse_plan(raw, digest)["beats"][0]["to"] == "Sage"
+
+
+def test_the_director_tab_says_what_the_storyteller_did():
+    from unittest.mock import MagicMock
+
+    from director_view import beat_line, build_director_view, draft_summary
+    from game_loop import GameLoop
+    from storyteller import Storyteller
+
+    loop = GameLoop(MagicMock(), verbose=False)
+    loop.storyteller = Storyteller(interval=60.0, use_llm=False)
+    loop.storyteller.arc = "Wood is running out before the cold night."
+    loop.storyteller.beats = [
+        {"clock": "08:00", "op": "whisper", "to": "Reed", "text": "Ash took your wood.", "urgent": True},
+        {"clock": "09:00", "op": "adjust", "item": "Campfire", "prop": "fuel", "from": 5, "to": 2, "why": "wind"},
+    ]
+    loop.sim_time = 30.0
+    view = build_director_view(loop, None)
+    assert view["arc"] == "Wood is running out before the cold night." and view["mode"] == "template"
+    assert [b["line"] for b in view["beats"]] == [
+        "Changed Campfire's fuel 5 -> 2 - wind",
+        "Whispered to Reed (urgent - interrupts their plan): Ash took your wood.",
+    ]
+    assert view["next_in_hours"] is not None and view["next_in_hours"] > 0
+    assert beat_line({"op": "announce", "text": "A trader arrives."}) == "Announced to everyone: A trader arrives."
+    summary = draft_summary({"ok": True, "patch": {"title": "Lost Seal", "stages": [
+        {"title": "Ask around", "objective": "Talk to Sage", "giver": "Reed"}]}})
+    assert summary["lines"] == ["Lost Seal", "1. Ask around (from Reed): Talk to Sage"]

@@ -5,6 +5,7 @@ use bevy::{math::Isometry2d, prelude::*};
 use std::collections::HashSet;
 
 use crate::net::{RegionView, WorldSnapshot};
+use crate::terrain::RegionImages;
 use crate::scene::WalkGrid;
 use crate::ui::UiState;
 
@@ -140,6 +141,7 @@ pub fn render_world_map(
     mut state: ResMut<WorldMapState>,
     existing: Query<Entity, With<WorldMapEntity>>,
     camera: Query<Entity, With<Camera2d>>,
+    ground: Res<RegionImages>,
 ) {
     let key = ui.world_map.as_ref().map(|v| (world.revision, v.selected.clone()));
     if key == state.key {
@@ -178,8 +180,9 @@ pub fn render_world_map(
             };
             parent.spawn((
                 Sprite {
+                    image: ground.get(&region.name).unwrap_or_default(),
                     color,
-                    custom_size: Some(size - Vec2::splat(2.0)),
+                    custom_size: Some(size),
                     ..default()
                 },
                 Transform::from_xyz(center.x, center.y, MAP_Z + 1.0),

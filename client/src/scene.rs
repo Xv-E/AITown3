@@ -7,6 +7,7 @@ use std::cmp::Reverse;
 use std::time::{Duration, Instant};
 
 use crate::icons::{icon_for, IconAtlas};
+use crate::terrain::RegionImages;
 use crate::net::{NetBridge, Thing, WorldSnapshot};
 use crate::ui::{NearbyInteract, UiState};
 
@@ -153,7 +154,10 @@ pub fn rebuild_walk_grid(world: Res<WorldSnapshot>, mut grid: ResMut<WalkGrid>) 
     for r in &world.world.regions {
         for x in r.x..r.x + r.w {
             for y in r.y..r.y + r.h {
-                open.insert(IVec2::new(x, y));
+                let cell = IVec2::new(x, y);
+                if r.contains(cell) {
+                    open.insert(cell);
+                }
             }
         }
     }
@@ -236,6 +240,15 @@ impl ZoneGrid {
         {
             return false;
         }
+        // Every cell of it on the region's ground, not in a cut-away corner.
+        if let Some(region) = world.region(&world.current_location.name) {
+            let corner = IVec2::new(region.x, region.y) + cell;
+            let on_ground = (0..footprint.x)
+                .all(|dx| (0..footprint.y).all(|dy| region.contains(corner + IVec2::new(dx, dy))));
+            if !on_ground {
+                return false;
+            }
+        }
         world.items_here.iter().filter(|t| t.is_fixture()).all(|t| {
             let Some(other) = t.cell() else {
                 return true;
@@ -273,6 +286,7 @@ pub fn render_scene(
     world: Res<WorldSnapshot>,
     mut scene: ResMut<SceneState>,
     icons: Res<IconAtlas>,
+    ground: Res<RegionImages>,
     existing: Query<Entity, With<SceneEntity>>,
 ) {
     if scene.revision == Some(world.revision) {
@@ -294,6 +308,7 @@ pub fn render_scene(
         let center = Vec2::new(region.x as f32 * TILE, -(region.y as f32) * TILE) + Vec2::new(size.x, -size.y) * 0.5;
         commands.spawn((
             Sprite {
+                image: ground.get(&region.name).unwrap_or_default(),
                 color: Color::srgb(r, g, b),
                 custom_size: Some(size),
                 ..default()
@@ -524,11 +539,12 @@ pub fn player_input(
         return;
     }
     let step = direction.normalize() * PLAYER_SPEED * time.delta_secs();
-    // Slide along walls: try each axis on its own.
+    // Slide along walls: try each axis on its own. Stuck off the ground: walk freely back onto it.
+    let stranded = !grid.is_open(cell_at(pos));
     let mut next = pos;
     for delta in [Vec2::new(step.x, 0.0), Vec2::new(0.0, step.y)] {
         let candidate = next + delta;
-        if grid.is_open(cell_at(candidate)) {
+        if stranded || grid.is_open(cell_at(candidate)) {
             next = candidate;
         }
     }
@@ -582,11 +598,6 @@ pub fn draw_world_gizmos(
 ) {
     if ui.world_map.is_some() {
         return;
-    }
-    for region in &world.world.regions {
-        let size = Vec2::new(region.w as f32, region.h as f32) * TILE;
-        let center = Vec2::new(region.x as f32 * TILE + size.x * 0.5, -(region.y as f32) * TILE - size.y * 0.5);
-        gizmos.rect_2d(Isometry2d::from_translation(center), size, Color::srgba(0.5, 0.6, 0.7, 0.12));
     }
     for cell in &ui.auto_walk {
         gizmos.circle_2d(Isometry2d::from_translation(cell_center(*cell)), 3.0, Color::srgba(0.98, 0.80, 0.30, 0.6));
