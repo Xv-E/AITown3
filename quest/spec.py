@@ -38,6 +38,8 @@ class PersonSpec:
     secret: str = ""
     speech_style: str = ""
     role: str = "npc"
+    # 每日日程（同 routine.py 的槽位：start / end 小时、location、activity）；没有就只靠自己决策
+    routine: List[Dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -215,6 +217,19 @@ def validate(patch: QuestlinePatch, known: KnownWorld) -> List[str]:
     for p in patch.persons:
         if p.located_at not in regions:
             errors.append(f"person {p.name}: located_at {p.located_at!r} is not a region")
+        for i, slot in enumerate(p.routine or []):
+            where = f"person {p.name}: routine slot {i + 1}"
+            if not isinstance(slot, dict):
+                errors.append(f"{where} must be an object")
+                continue
+            if slot.get("location") not in regions:
+                errors.append(f"{where}: location {slot.get('location')!r} is not a region")
+            try:
+                ok = 0 <= float(slot.get("start")) <= 24 and 0 <= float(slot.get("end")) <= 24
+            except (TypeError, ValueError):
+                ok = False
+            if not ok:
+                errors.append(f"{where}: start and end are hours 0-24")
         if p.role != "npc":
             errors.append(f"person {p.name}: new people are NPCs (role npc); the player already exists")
     for u in patch.person_updates:
@@ -321,3 +336,23 @@ def substitute(value: Any, placeholder: str, replacement: str) -> Any:
     if isinstance(value, dict):
         return {k: substitute(v, placeholder, replacement) for k, v in value.items()}
     return value
+
+
+# 「完整任务包」：手动让导演写任务时，要它自带新的地点、人物、物品（不只是借用现有的）
+MIN_NEW_PEOPLE, MAX_NEW_PEOPLE = 1, 3
+
+
+def completeness_problems(patch: QuestlinePatch) -> List[str]:
+    out: List[str] = []
+    if not patch.regions:
+        out.append("add at least one new region (a place this story happens in)")
+    if not (MIN_NEW_PEOPLE <= len(patch.persons) <= MAX_NEW_PEOPLE):
+        out.append(f"add {MIN_NEW_PEOPLE}-{MAX_NEW_PEOPLE} new people who belong to this story")
+    if not patch.items:
+        out.append("add the items this story needs (at least one)")
+    for p in patch.persons:
+        if len(p.routine or []) < 2:
+            out.append(f"person {p.name}: give a daily routine of 2-4 slots (start, end, location, activity)")
+    if patch.stages and not patch.stages[0].giver:
+        out.append("the first stage needs a giver (who asks the player for help)")
+    return out

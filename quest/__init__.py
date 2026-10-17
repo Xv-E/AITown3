@@ -21,7 +21,8 @@ from .spec import QuestlinePatch, validate
 from .verify import Verification, verify
 
 
-def draft_questline(world, theme: str = "", *, story_arc: str = "", llm=None, max_attempts: int = 4) -> AuthorResult:
+def draft_questline(world, theme: str = "", *, story_arc: str = "", llm=None, max_attempts: int = 4,
+                    complete: bool = False) -> AuthorResult:
     """读世界 → LLM 写 → 校验 + PDDL 验证。不写数据库。"""
     from compiler import load_snapshot
 
@@ -34,6 +35,7 @@ def draft_questline(world, theme: str = "", *, story_arc: str = "", llm=None, ma
         digest, theme, llm=llm,
         verify_fn=lambda patch: verify(snap, patch, digest.player),
         max_attempts=max_attempts,
+        complete=complete,
     )
 
 
@@ -41,7 +43,7 @@ def _default_llm(system: str, prompt: str) -> str:
     from llm_router import invoke_primary
     from model_instances import creative_model_name
 
-    return invoke_primary(prompt, system=system, max_tokens=3000, timeout=120, model=creative_model_name())
+    return invoke_primary(prompt, system=system, max_tokens=5000, timeout=180, model=creative_model_name())
 
 
 __all__ = [

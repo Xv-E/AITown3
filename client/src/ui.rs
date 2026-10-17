@@ -7,7 +7,7 @@ use std::{
 };
 
 use crate::adapter::thought_line;
-use crate::net::{trim_line, Blueprint, DirectorData, DraftSummary, History, HistoryEntry, NetBridge, WorldSnapshot};
+use crate::net::{trim_line, Blueprint, MindData, SaveInfo, DirectorData, DraftSummary, History, HistoryEntry, NetBridge, WorldSnapshot};
 use crate::scene::{cell_at, cell_center, Interactive, PlayerAvatar, TargetKind, WalkGrid, ZoneGrid, TILE};
 
 const TOAST_DURATION: Duration = Duration::from_secs(4);
@@ -17,6 +17,8 @@ const HISTORY_ENTRIES: usize = 40;
 /// How close (px) a click must land to a person / thing to count as clicking it.
 const CLICK_RADIUS: f32 = 40.0;
 const MENU_WIDTH: f32 = 320.0;
+/// Manual save slots (the server also keeps an "autosave").
+const SAVE_SLOTS: [&str; 3] = ["slot1", "slot2", "slot3"];
 /// Chat lines kept on screen (older ones scroll away).
 const CHAT_SHOWN: usize = 12;
 /// Longest line the player can type.
@@ -105,6 +107,27 @@ pub struct HistoryView {
     pub last_fetch: Option<Instant>,
     /// Entries clicked open (by key): they show what was said, why, the plan...
     pub expanded: HashSet<String>,
+    /// History / Memories / Knows.
+    pub page: NpcPage,
+    pub mind: Option<MindData>,
+    pub mind_error: String,
+    pub mind_in_flight: bool,
+    pub mind_fetch: Option<Instant>,
+    /// Memory filter: one type ("" = all) and a search typed by the player.
+    pub mind_kind: String,
+    pub mind_query: String,
+    /// The search box has the keyboard.
+    pub searching: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum NpcPage {
+    Profile,
+    /// What they have been doing (decisions, steps, conversations).
+    #[default]
+    History,
+    Memories,
+    Knows,
 }
 
 impl HistoryView {
@@ -118,6 +141,14 @@ impl HistoryView {
             in_flight: false,
             last_fetch: None,
             expanded: HashSet::new(),
+            page: NpcPage::History,
+            mind: None,
+            mind_error: String::new(),
+            mind_in_flight: false,
+            mind_fetch: None,
+            mind_kind: String::new(),
+            mind_query: String::new(),
+            searching: false,
         }
     }
 }
@@ -154,6 +185,34 @@ impl UiState {
     fn open_menu(&mut self, menu: Menu, anchor: Option<Vec2>) {
         self.menu = Some(menu);
         self.menu_anchor = anchor;
+    }
+
+    /// Save into one of the slots, or load any save (autosave included) after a confirmation.
+    pub fn open_save_menu(&mut self, saves: Vec<SaveInfo>) {
+        let describe = |s: &SaveInfo| {
+            let when = s.saved_at.replace('T', " ");
+            let who = if s.player.is_empty() { String::new() } else { format!("{}, ", s.player) };
+            if s.clock.is_empty() { format!("{who}{when}") } else { format!("{who}{}  ·  saved {when}", s.clock) }
+        };
+        let mut menu = Menu::new("Save / Load", "Saves keep the world, what every NPC is doing, and their memories");
+        for slot in SAVE_SLOTS {
+            let label = match saves.iter().find(|s| s.slot == slot) {
+                Some(s) => format!("Save to {slot}  (overwrite: {})", describe(s)),
+                None => format!("Save to {slot}  (empty)"),
+            };
+            menu.add(label, Command::SaveGame(slot.to_string()));
+        }
+        for s in &saves {
+            let mut confirm = Menu::new(
+                format!("Load {}?", s.slot),
+                "This replaces the current world, NPC progress and memories.",
+            );
+            confirm.add("Yes, load it", Command::LoadGame(s.slot.clone()));
+            confirm.add("Back", Command::Back);
+            menu.add(format!("Load {}  ({})", s.slot, describe(s)), Command::Submenu(Box::new(confirm)));
+        }
+        menu.add("Close", Command::Close);
+        self.open_menu(menu, None);
     }
 
     pub fn open_build_menu(&mut self, blueprints: Vec<Blueprint>) {
@@ -251,6 +310,8 @@ enum Command {
         person: String,
     },
     StartBuild(BuildPlacement),
+    SaveGame(String),
+    LoadGame(String),
     Submenu(Box<Menu>),
     Back,
     Close,
@@ -497,6 +558,15 @@ pub fn interaction_input(
     }
 
     if ui.director.is_some() {
+        if ui.director.as_ref().is_some_and(|d| d.typing_theme) {
+            // Typing the questline theme: keys belong to the box (see text_box_typing).
+            if left || right {
+                if let Some(view) = ui.director.as_mut() {
+                    view.typing_theme = false;
+                }
+            }
+            return;
+        }
         if left || right || keys.just_pressed(KeyCode::Escape) {
             ui.director = None;
             return;
@@ -506,6 +576,15 @@ pub fn interaction_input(
     }
 
     if ui.history.is_some() {
+        if ui.history.as_ref().is_some_and(|v| v.searching) {
+            // Typing a memory search: keys belong to the search box (see mind_search_typing).
+            if left || right {
+                if let Some(view) = ui.history.as_mut() {
+                    view.searching = false;
+                }
+            }
+            return;
+        }
         if left || right {
             ui.history = None;
             return;
@@ -733,7 +812,9 @@ fn history_input(keys: &ButtonInput<KeyCode>, world: &WorldSnapshot, ui: &mut Ui
     if step != 0 && !names.is_empty() {
         let idx = names.iter().position(|n| *n == view.name).unwrap_or(0) as isize;
         let next = (idx + step).rem_euclid(names.len() as isize) as usize;
+        let page = view.page;
         *view = HistoryView::new(names[next].clone());
+        view.page = page;
         return;
     }
     if keys.just_pressed(KeyCode::KeyW) || keys.just_pressed(KeyCode::ArrowUp) {
@@ -846,6 +927,21 @@ fn choose_menu_option(index: usize, world: &WorldSnapshot, ui: &mut UiState, net
     let command = menu.options[selected].command.clone();
     match command {
         Command::Close => ui.menu = None,
+        Command::SaveGame(slot) => {
+            ui.menu = None;
+            if ensure_online(world, ui) {
+                net.save_game(&slot);
+                ui.toast(format!("Saving to {slot}..."));
+            }
+        }
+        Command::LoadGame(slot) => {
+            ui.menu = None;
+            ui.cancel_travel();
+            if ensure_online(world, ui) {
+                net.load_game(&slot);
+                ui.toast(format!("Loading {slot}..."));
+            }
+        }
         Command::Back => ui.menu = menu.parent.take().map(|parent| *parent),
         Command::Submenu(mut sub) => {
             sub.parent = ui.menu.take().map(Box::new);
@@ -1232,14 +1328,12 @@ pub fn update_clock(
     let total_minutes = (clock.hour.rem_euclid(24.0) * 60.0).floor() as u32;
     let state = if ui.sim_running { "" } else { "  (paused)" };
     let arc = &world.simulation.story.arc;
-    let mut story = if arc.is_empty() {
+    // Quests stay in the Director tab; the HUD only shows the time and where the story is going.
+    let story = if arc.is_empty() {
         String::new()
     } else {
         format!("\nStory: {}", trim_line(arc, 90))
     };
-    if let Some(quest) = world.current_objective() {
-        story.push_str(&format!("\nQuest - {}: {}", quest.stage, trim_line(&quest.objective, 90)));
-    }
     set_text(
         &mut text,
         format!(
@@ -1446,6 +1540,7 @@ const SAID: Color = Color::srgb(0.98, 0.86, 0.55);
 pub enum UiAction {
     MenuOption(usize),
     Bag,
+    SaveMenu,
     Build,
     Map,
     History,
@@ -1459,7 +1554,13 @@ pub enum UiAction {
     /// Panel tabs: NPC history / director.
     TabNpcs,
     TabDirector,
+    /// NPC tab pages and the memory filter / search box.
+    NpcPage(NpcPage),
+    MemoryKind(String),
+    MemorySearch,
+    ClearMemorySearch,
     NudgeDirector,
+    ThemeBox,
     DraftQuestline,
     ApplyQuestline,
     DiscardDraft,
@@ -1531,6 +1632,11 @@ fn run_ui_action(action: UiAction, world: &WorldSnapshot, nearby: &NearbyInterac
                 ui.open_menu(menu, None);
             }
         }
+        UiAction::SaveMenu => {
+            if ensure_online(world, ui) {
+                net.fetch_saves();
+            }
+        }
         UiAction::Build => {
             if ensure_online(world, ui) {
                 net.fetch_blueprints();
@@ -1583,12 +1689,44 @@ fn run_ui_action(action: UiAction, world: &WorldSnapshot, nearby: &NearbyInterac
             if let (Some(view), false) = (ui.history.as_mut(), names.is_empty()) {
                 let idx = names.iter().position(|n| *n == view.name).unwrap_or(0) as isize;
                 let next = (idx + step).rem_euclid(names.len() as isize) as usize;
+                let page = view.page;
                 *view = HistoryView::new(names[next].clone());
+                view.page = page;
             }
         }
         UiAction::CloseHistory => {
             ui.history = None;
             ui.director = None;
+        }
+        UiAction::NpcPage(page) => {
+            if let Some(view) = ui.history.as_mut() {
+                view.page = page;
+                view.searching = false;
+                view.mind_fetch = None;
+                view.scroll = 0;
+            }
+        }
+        UiAction::MemoryKind(kind) => {
+            if let Some(view) = ui.history.as_mut() {
+                view.mind_kind = kind;
+                view.mind_fetch = None;
+                view.scroll = 0;
+            }
+        }
+        UiAction::MemorySearch => {
+            if let Some(view) = ui.history.as_mut() {
+                view.searching = !view.searching;
+                if !view.searching {
+                    view.mind_fetch = None;
+                }
+            }
+        }
+        UiAction::ClearMemorySearch => {
+            if let Some(view) = ui.history.as_mut() {
+                view.mind_query.clear();
+                view.searching = false;
+                view.mind_fetch = None;
+            }
         }
         UiAction::TabNpcs => {
             ui.director = None;
@@ -1613,12 +1751,18 @@ fn run_ui_action(action: UiAction, world: &WorldSnapshot, nearby: &NearbyInterac
                 view.last_fetch = None;
             }
         }
+        UiAction::ThemeBox => {
+            if let Some(view) = ui.director.as_mut() {
+                view.typing_theme = !view.typing_theme;
+            }
+        }
         UiAction::DraftQuestline => {
             if let Some(view) = ui.director.as_mut() {
                 if !view.drafting {
                     view.drafting = true;
+                    view.typing_theme = false;
                     view.draft = None;
-                    net.draft_questline();
+                    net.draft_questline(view.theme.trim());
                 }
             }
         }
@@ -1667,7 +1811,7 @@ pub fn update_toolbar(
         button(p, format!("Bag ({bag})"), UiAction::Bag, 15.0, false, false);
         button(p, "Build", UiAction::Build, 15.0, false, false);
         button(p, "Map", UiAction::Map, 15.0, false, false);
-        button(p, "History", UiAction::History, 15.0, false, false);
+        button(p, "People", UiAction::History, 15.0, false, false);
         button(p, "Director", UiAction::TabDirector, 15.0, false, false);
         if ui.sim_running {
             button(p, "Pause NPCs", UiAction::Sim { llm: false }, 15.0, true, false);
@@ -1676,6 +1820,7 @@ pub fn update_toolbar(
             button(p, "Run NPCs (LLM)", UiAction::Sim { llm: true }, 15.0, false, false);
         }
         button(p, "+1 hour", UiAction::AdvanceTime, 15.0, false, false);
+        button(p, "Save / Load", UiAction::SaveMenu, 15.0, false, false);
     });
 }
 
@@ -1803,6 +1948,27 @@ pub fn update_history_panel(
         return;
     };
     set_visible(&mut vis, true);
+    if view.page != NpcPage::History {
+        let rows = view.mind.as_ref().map_or(0, |d| d.memories.len().max(d.knows.seen.len()));
+        view.scroll = view.scroll.min(rows.saturating_sub(1));
+        let signature = mind_signature(view);
+        if *shown == signature {
+            return;
+        }
+        *shown = signature;
+        let view = &*view;
+        commands.entity(entity).despawn_related::<Children>();
+        commands.entity(entity).with_children(|p| {
+            tab_row(p, false);
+            npc_header(p, &view.name, view.page);
+            match view.page {
+                NpcPage::Profile => profile_page(p, view),
+                NpcPage::Memories => memories_page(p, view),
+                _ => knows_page(p, view),
+            }
+        });
+        return;
+    }
     let entries = view.data.as_ref().map(listed_entries).unwrap_or_default();
     view.scroll = view.scroll.min(entries.len().saturating_sub(1));
     let end = (view.scroll + HISTORY_ENTRIES).min(entries.len());
@@ -1830,14 +1996,7 @@ pub fn update_history_panel(
     commands.entity(entity).despawn_related::<Children>();
     commands.entity(entity).with_children(|p| {
         tab_row(p, false);
-        p.spawn(Node { flex_direction: FlexDirection::Row, align_items: AlignItems::Center, column_gap: px(8), ..default() })
-            .with_children(|row| {
-                button(row, "<", UiAction::HistoryStep(-1), 16.0, false, false);
-                row.spawn((Text::new(name.clone()), TextFont { font_size: 20.0, ..default() }, TextColor(TITLE)));
-                button(row, ">", UiAction::HistoryStep(1), 16.0, false, false);
-                row.spawn(Node { flex_grow: 1.0, ..default() });
-                button(row, "Close", UiAction::CloseHistory, 15.0, false, false);
-            });
+        npc_header(p, &name, view.page);
         p.spawn((
             Text::new("Newest first. Click an entry to see what was said and why; scroll with the wheel."),
             TextFont { font_size: 13.0, ..default() },
@@ -1943,9 +2102,11 @@ pub fn chat_typing(
     use bevy::window::Ime;
 
     let chatting = ui.dialogue.as_ref().is_some_and(|d| d.chat);
+    let searching = ui.history.as_ref().is_some_and(|v| v.searching)
+        || ui.director.as_ref().is_some_and(|v| v.typing_theme);
     if let Ok(mut window) = windows.single_mut() {
-        if window.ime_enabled != chatting {
-            window.ime_enabled = chatting;
+        if window.ime_enabled != (chatting || searching) {
+            window.ime_enabled = chatting || searching;
         }
         if chatting {
             let at = Vec2::new(window.width() * 0.12, window.height() - 60.0);
@@ -2159,6 +2320,9 @@ pub struct DirectorView {
     pub drafting: bool,
     pub applying: bool,
     pub scroll: usize,
+    /// What the player wants the questline to be about, and whether its box has the keyboard.
+    pub theme: String,
+    pub typing_theme: bool,
 }
 
 const DIRECTOR_POLL: Duration = Duration::from_secs(2);
@@ -2167,7 +2331,7 @@ const DIRECTOR_POLL: Duration = Duration::from_secs(2);
 fn tab_row(p: &mut ChildSpawnerCommands, director: bool) {
     p.spawn(Node { flex_direction: FlexDirection::Row, column_gap: px(4), margin: UiRect::bottom(px(6)), ..default() })
         .with_children(|row| {
-            button(row, "NPCs", UiAction::TabNpcs, 15.0, !director, false);
+            button(row, "People", UiAction::TabNpcs, 15.0, !director, false);
             button(row, "Director", UiAction::TabDirector, 15.0, director, false);
             row.spawn(Node { flex_grow: 1.0, ..default() });
             button(row, "Close", UiAction::CloseHistory, 15.0, false, false);
@@ -2219,7 +2383,7 @@ fn director_signature(view: &DirectorView) -> String {
         .map(|q| format!("{}{}{}", q.title, q.state, q.stages.iter().map(|s| s.state.as_str()).collect::<String>()))
         .collect();
     format!(
-        "{}|{}|{}|{}|{:?}|{}|{}|{}|{}|{}|{}|{}|{}|{:?}|{}",
+        "{}|{}|{}|{}|{:?}|{}|{}|{}|{}|{}|{}|{}|{}|{:?}|{}|{}",
         d.mode,
         d.thinking,
         d.arc,
@@ -2233,7 +2397,13 @@ fn director_signature(view: &DirectorView) -> String {
         view.error,
         view.drafting,
         view.applying,
-        view.draft.as_ref().map(|dr| dr.lines.join(";")),
+        view.draft.as_ref().map(|dr| format!(
+            "{}{}{}",
+            dr.lines.join(";"),
+            dr.sections.iter().map(|s| s.lines.join(";")).collect::<String>(),
+            dr.problems.join(";")
+        )),
+        format!("{}{}", view.theme, view.typing_theme),
         view.scroll,
     )
 }
@@ -2300,16 +2470,56 @@ fn director_body(p: &mut ChildSpawnerCommands, view: &DirectorView) {
             if d.mode != "off" {
                 button(row, "Make a move now", UiAction::NudgeDirector, 14.0, false, false);
             }
-            let label = if view.drafting { "Writing a questline... (can take a minute)" } else { "Write a new questline" };
+        });
+
+    // The quest designer: a whole questline with its own places, people and items.
+    section(p, "Quest designer");
+    line(
+        p,
+        "Writes a complete questline - new places, people (with their own day), items, clues and stages - \
+         then checks with the planner that it can really be finished.".into(),
+        MUTED,
+        13.0,
+    );
+    p.spawn(Node { flex_direction: FlexDirection::Row, column_gap: px(6), margin: UiRect::top(px(4)), ..default() })
+        .with_children(|row| {
+            let caret = if view.typing_theme { "|" } else { "" };
+            let theme = if view.theme.is_empty() && !view.typing_theme {
+                "Theme (optional): click and type, e.g. a missing child".to_string()
+            } else {
+                format!("Theme: {}{caret}", view.theme)
+            };
+            button(row, theme, UiAction::ThemeBox, 14.0, view.typing_theme, false);
+            let label = if view.drafting { "Designing... (a minute or two)" } else { "Design a questline" };
             button(row, label, UiAction::DraftQuestline, 14.0, view.drafting, false);
         });
 
     // A questline draft to review before it goes into the world.
     if let Some(draft) = view.draft.as_ref() {
-        section(p, if draft.ok { "Draft questline (checked: it can be completed)" } else { "Draft questline (has problems)" });
-        for (i, text) in draft.lines.iter().enumerate() {
-            let color = if text.starts_with("Problem:") { Color::srgb(0.95, 0.6, 0.5) } else if i == 0 { SAID } else { TEXT };
-            line(p, format!("  {text}"), color, 14.0);
+        let tries = draft.attempts.map(|n| format!(", {n} tries")).unwrap_or_default();
+        section(p, &if draft.ok {
+            format!("Draft: checked, it can be completed{tries}")
+        } else {
+            format!("Draft: could not make it work{tries}")
+        });
+        if !draft.title.is_empty() {
+            line(p, format!("  {}", draft.title), SAID, 17.0);
+        }
+        if !draft.premise.is_empty() {
+            line(p, format!("  {}", draft.premise), TEXT, 14.0);
+        }
+        if !draft.hook.is_empty() {
+            line(p, format!("  How it starts: {}", draft.hook), MUTED, 13.0);
+        }
+        for sec in &draft.sections {
+            line(p, format!("  {}", sec.title), TITLE, 14.0);
+            for text in &sec.lines {
+                let color = if text.starts_with("    ") { MUTED } else { TEXT };
+                line(p, format!("    {text}"), color, 13.0);
+            }
+        }
+        for problem in &draft.problems {
+            line(p, format!("  Problem: {problem}"), Color::srgb(0.95, 0.6, 0.5), 13.0);
         }
         p.spawn(Node { flex_direction: FlexDirection::Row, column_gap: px(6), margin: UiRect::top(px(4)), ..default() })
             .with_children(|row| {
@@ -2367,4 +2577,270 @@ fn director_body(p: &mut ChildSpawnerCommands, view: &DirectorView) {
             line(p, format!("  {}   {}", c.clock, trim_line(&c.line, 200)), TEXT, 14.0);
         }
     }
+}
+
+const MIND_POLL: Duration = Duration::from_secs(3);
+/// Memory types in the order the filter shows them (others follow alphabetically).
+const MEMORY_KINDS: [&str; 5] = ["dialogue", "fact", "action", "conflict", "event"];
+
+/// "< Sage >" and the History / Memories / Knows page buttons.
+fn npc_header(p: &mut ChildSpawnerCommands, name: &str, page: NpcPage) {
+    p.spawn(Node { flex_direction: FlexDirection::Row, align_items: AlignItems::Center, column_gap: px(8), ..default() })
+        .with_children(|row| {
+            button(row, "<", UiAction::HistoryStep(-1), 16.0, false, false);
+            row.spawn((Text::new(name.to_string()), TextFont { font_size: 20.0, ..default() }, TextColor(TITLE)));
+            button(row, ">", UiAction::HistoryStep(1), 16.0, false, false);
+            row.spawn(Node { width: px(16), ..default() });
+            for (label, which) in [
+                ("Profile", NpcPage::Profile),
+                ("Activity", NpcPage::History),
+                ("Memories", NpcPage::Memories),
+                ("Knows", NpcPage::Knows),
+            ] {
+                button(row, label, UiAction::NpcPage(which), 15.0, page == which, false);
+            }
+        });
+}
+
+/// Fetch memories / knowledge for the open NPC page every few seconds (and right after a filter change).
+pub fn poll_mind(net: Res<NetBridge>, mut ui: ResMut<UiState>) {
+    let Some(view) = ui.history.as_mut() else { return };
+    if view.page == NpcPage::History || view.searching || view.mind_in_flight {
+        return;
+    }
+    if view.mind_fetch.is_some_and(|t| t.elapsed() < MIND_POLL) {
+        return;
+    }
+    view.mind_in_flight = true;
+    view.mind_fetch = Some(Instant::now());
+    net.fetch_mind(&view.name, &view.mind_query, &view.mind_kind);
+}
+
+/// Typing into a text box: the memory search or the questline theme
+/// (letters, IME, Backspace; Enter / Esc finishes).
+pub fn mind_search_typing(
+    mut keys: MessageReader<bevy::input::keyboard::KeyboardInput>,
+    mut ime: MessageReader<bevy::window::Ime>,
+    mut ui: ResMut<UiState>,
+) {
+    // Which box has the keyboard: the memory search or the questline theme.
+    if let Some(view) = ui.history.as_mut().filter(|v| v.searching) {
+        if type_into(&mut keys, &mut ime, &mut view.mind_query, 80) {
+            view.searching = false;
+            view.mind_fetch = None;
+        }
+    } else if let Some(view) = ui.director.as_mut().filter(|v| v.typing_theme) {
+        if type_into(&mut keys, &mut ime, &mut view.theme, 160) {
+            view.typing_theme = false;
+        }
+    } else {
+        keys.clear();
+        ime.clear();
+    }
+}
+
+/// Feed typed text (IME included) into `text`; true when Enter / Esc ends the typing.
+fn type_into(
+    keys: &mut MessageReader<bevy::input::keyboard::KeyboardInput>,
+    ime: &mut MessageReader<bevy::window::Ime>,
+    text: &mut String,
+    max: usize,
+) -> bool {
+    use bevy::input::keyboard::Key;
+    use bevy::window::Ime;
+
+    for event in ime.read() {
+        if let Ime::Commit { value, .. } = event {
+            text.push_str(value);
+        }
+    }
+    let mut finished = false;
+    for event in keys.read() {
+        if !event.state.is_pressed() {
+            continue;
+        }
+        match &event.logical_key {
+            Key::Enter | Key::Escape => finished = true,
+            Key::Backspace => {
+                text.pop();
+            }
+            _ => {
+                if let Some(typed) = &event.text {
+                    if typed.chars().all(|c| !c.is_control()) && text.chars().count() < max {
+                        text.push_str(typed);
+                    }
+                }
+            }
+        }
+    }
+    finished
+}
+
+fn mind_signature(view: &HistoryView) -> String {
+    let data = view.mind.as_ref().map(|d| {
+        let mems: Vec<String> = d.memories.iter().map(|m| format!("{}{}", m.time, m.text)).collect();
+        let k = &d.knows;
+        let profile: Vec<String> = d.profile.fields.iter().map(|f| f.value.clone()).chain(d.profile.status.clone()).collect();
+        let routine: Vec<String> = d.routine.slots.iter().map(|s| format!("{}{}{}{}", s.hours, s.what, s.now, s.done)).collect();
+        format!(
+            "{}|{}|{}|{}|{:?}|{}|{}|{}|{}|{}|{:?}",
+            profile.join(";"),
+            routine.join(";"),
+            d.routine.state,
+            d.total,
+            d.types,
+            mems.join(";"),
+            k.facts.iter().map(|f| f.text.as_str()).collect::<Vec<_>>().join(";"),
+            k.places.join(","),
+            k.seen.join(";"),
+            k.grudges.join(";"),
+            k.trust,
+        )
+    });
+    format!(
+        "{}|{:?}|{}|{}|{}|{}|{}|{:?}",
+        view.name, view.page, view.mind_kind, view.mind_query, view.searching, view.mind_error,
+        view.scroll, data
+    )
+}
+
+fn memories_page(p: &mut ChildSpawnerCommands, view: &HistoryView) {
+    let Some(data) = view.mind.as_ref() else {
+        let text = if view.mind_error.is_empty() { "Loading...".to_string() } else { format!("Error: {}", view.mind_error) };
+        line(p, text, MUTED, 15.0);
+        return;
+    };
+    if !data.available {
+        line(p, "Memory store is not available on the server.".into(), MUTED, 15.0);
+        return;
+    }
+    // Filter by type.
+    p.spawn(Node { flex_direction: FlexDirection::Row, flex_wrap: FlexWrap::Wrap, column_gap: px(4), margin: UiRect::top(px(6)), ..default() })
+        .with_children(|row| {
+            button(row, format!("All ({})", data.total), UiAction::MemoryKind(String::new()), 13.0, view.mind_kind.is_empty(), false);
+            let mut kinds: Vec<&String> = data.types.keys().collect();
+            kinds.sort_by_key(|k| (MEMORY_KINDS.iter().position(|m| m == k).unwrap_or(99), k.to_string()));
+            for kind in kinds {
+                let n = data.types.get(kind).copied().unwrap_or(0);
+                button(row, format!("{kind} ({n})"), UiAction::MemoryKind(kind.clone()), 13.0, view.mind_kind == *kind, false);
+            }
+        });
+    // Search by meaning: the same lookup the NPC does when deciding.
+    p.spawn(Node { flex_direction: FlexDirection::Row, column_gap: px(6), margin: UiRect::vertical(px(4)), ..default() })
+        .with_children(|row| {
+            let caret = if view.searching { "|" } else { "" };
+            let label = if view.mind_query.is_empty() && !view.searching {
+                "Search memories by meaning (click, type, Enter)".to_string()
+            } else {
+                format!("Search: {}{caret}", view.mind_query)
+            };
+            button(row, label, UiAction::MemorySearch, 14.0, view.searching, false);
+            if !view.mind_query.is_empty() {
+                button(row, "Clear", UiAction::ClearMemorySearch, 14.0, false, false);
+            }
+        });
+    let how = if view.mind_query.is_empty() {
+        "Newest first.".to_string()
+    } else {
+        format!("Closest in meaning to \"{}\" - what they would recall when this comes up.", view.mind_query)
+    };
+    line(p, how, MUTED, 13.0);
+    if data.memories.is_empty() {
+        line(p, "  (nothing remembered yet)".into(), MUTED, 14.0);
+    }
+    for m in data.memories.iter().skip(view.scroll) {
+        p.spawn(Node { flex_direction: FlexDirection::Column, padding: UiRect::axes(px(8), px(3)), ..default() })
+            .with_children(|b| {
+                line(b, m.text.clone(), TEXT, 15.0);
+                let place = if m.location.is_empty() { String::new() } else { format!("  ·  {}", m.location) };
+                line(b, format!("      {}{place}  ·  {}", m.kind, m.time), MUTED, 12.0);
+            });
+    }
+}
+
+fn knows_page(p: &mut ChildSpawnerCommands, view: &HistoryView) {
+    let Some(data) = view.mind.as_ref() else {
+        let text = if view.mind_error.is_empty() { "Loading...".to_string() } else { format!("Error: {}", view.mind_error) };
+        line(p, text, MUTED, 15.0);
+        return;
+    };
+    let k = &data.knows;
+    if let Some(trust) = k.trust {
+        section(p, "Feelings about the player");
+        let feel = match trust {
+            t if t >= 5 => "trusts them a lot",
+            t if t >= 2 => "likes them",
+            t if t <= -2 => "distrusts them",
+            _ => "doesn't know them well yet",
+        };
+        line(p, format!("  {} {feel} (trust {trust})", if k.player.is_empty() { "The player:" } else { k.player.as_str() }), TEXT, 15.0);
+    }
+    section(p, "Facts and rumours");
+    if k.facts.is_empty() {
+        line(p, "  (none yet - they learn facts when someone tells them)".into(), MUTED, 14.0);
+    }
+    for f in &k.facts {
+        let (tag, color) = if f.kind == "rumor" { ("rumour", MUTED) } else { ("fact", TEXT) };
+        line(p, format!("  [{tag}] {}", f.text), color, 14.0);
+    }
+    section(p, "Grudges");
+    if k.grudges.is_empty() {
+        line(p, "  (none)".into(), MUTED, 14.0);
+    }
+    for g in &k.grudges {
+        line(p, format!("  {g}"), TEXT, 14.0);
+    }
+    section(p, "Places they know");
+    if k.omniscient {
+        line(p, "  Knows the whole world.".into(), MUTED, 14.0);
+    } else if k.places.is_empty() {
+        line(p, "  (none)".into(), MUTED, 14.0);
+    } else {
+        line(p, format!("  {}", k.places.join(", ")), TEXT, 14.0);
+    }
+    if !k.seen.is_empty() {
+        section(p, "Where they think things are (may be out of date)");
+        for s in k.seen.iter().skip(view.scroll) {
+            line(p, format!("  {s}"), TEXT, 14.0);
+        }
+    }
+}
+
+/// Profile page: who they are (as written), how they are now, and their day.
+fn profile_page(p: &mut ChildSpawnerCommands, view: &HistoryView) {
+    let Some(data) = view.mind.as_ref() else {
+        let text = if view.mind_error.is_empty() { "Loading...".to_string() } else { format!("Error: {}", view.mind_error) };
+        line(p, text, MUTED, 15.0);
+        return;
+    };
+    let mut now = data.profile.status.join("  ·  ");
+    if !data.routine.state.is_empty() {
+        now = format!("{}  ·  {now}", data.routine.state);
+    }
+    if !now.is_empty() {
+        line(p, now, SAID, 15.0);
+    }
+    section(p, "Character");
+    if data.profile.fields.is_empty() {
+        line(p, "  (nothing written about them)".into(), MUTED, 14.0);
+    }
+    for f in &data.profile.fields {
+        p.spawn(Node { flex_direction: FlexDirection::Column, padding: UiRect::axes(px(8), px(2)), ..default() })
+            .with_children(|b| {
+                line(b, f.label.clone(), MUTED, 12.0);
+                line(b, f.value.clone(), TEXT, 15.0);
+            });
+    }
+    section(p, "Daily routine");
+    if data.routine.slots.is_empty() {
+        line(p, "  (no routine: they decide everything themselves)".into(), MUTED, 14.0);
+    }
+    for s in &data.routine.slots {
+        let mark = if s.now { ">" } else { " " };
+        let notes = if s.notes.is_empty() { String::new() } else { format!("  ({})", s.notes) };
+        let done = if s.done { "  - done today" } else { "" };
+        let color = if s.now { SAID } else if s.done { MUTED } else { TEXT };
+        line(p, format!(" {mark} {}   {} - {}{notes}{done}", s.hours, s.r#where, s.what), color, 14.0);
+    }
+    line(p, "The routine is a default: news, requests and emergencies can make them do something else.".into(), MUTED, 12.0);
 }

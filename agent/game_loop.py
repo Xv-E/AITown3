@@ -38,6 +38,11 @@ ENGAGE_MARGIN = 3.0
 ENGAGE_WAIT = 20.0
 # 和玩家聊天：NPC 站着等玩家回话（每说一句重新计时；玩家关掉对话框就放开）
 PLAYER_REPLY_WAIT = 45.0
+# 聊完之后要不要改主意：玩家说的话能打断计划（≥ INTERRUPT_PRIORITY），NPC 之间的闲聊等手上这步做完
+TALK_PRIORITY = 0.55
+PLAYER_TALK_PRIORITY = 0.85
+# 决策时「刚才说过的话」看多久以内的（模拟秒；一天 = 300）
+RECENT_TALK_WINDOW = 25.0
 
 
 def reading_seconds(text: str) -> float:
@@ -993,6 +998,14 @@ class GameLoop:
                 )
 
         if action_name == act("converse") and action_result.success and len(args) >= 2:
+            # 两个人聊完都想一想要不要改主意（对方是玩家时等玩家回话，回了再说）
+            a_name, b_name = args[0], args[1]
+            b_state = self.get_agent_state(b_name)
+            to_player = b_state is not None and self._is_player(b_state)
+            if not to_player:
+                self.heard(a_name, b_name, lines or [])
+                self.heard(b_name, a_name, lines or [])
+        if action_name == act("converse") and action_result.success and len(args) >= 2:
             other = args[1] if args[0] == agent.name else args[0]
             if other and other != agent.name:
                 state.recent_talk_targets = [
@@ -1716,6 +1729,50 @@ class GameLoop:
         })
         del self.conversations[:-CONVERSATION_LIMIT]
 
+    def heard(self, name: str, other: str, lines: List[Any]) -> bool:
+        """name 刚和 other 说完话：推一个「要不要因此改主意」的触发器（带上说了什么）。"""
+        from triggers import Trigger
+
+        state = self.get_agent_state(name)
+        if state is None or self._is_player(state):
+            return False
+        other_state = self.get_agent_state(other)
+        from_player = other_state is not None and self._is_player(other_state)
+        said = [
+            f'{ln.get("speaker")}: "{ln.get("text")}"'
+            for ln in (lines or [])[-6:]
+            if isinstance(ln, dict) and ln.get("text")
+        ]
+        if said:
+            text = f"You just talked with {other}: " + " / ".join(said)
+        else:
+            text = f"You just talked with {other}."
+        if from_player:
+            text += f" If {other} asked you for something, decide whether to do it."
+        # 同一个人的新一轮对话替换旧的（别让聊天把触发器队列塞满）
+        state.pending_triggers = [
+            t for t in state.pending_triggers
+            if not (t.kind == "conversation" and (t.data or {}).get("with") == other)
+        ]
+        prio = PLAYER_TALK_PRIORITY if from_player else TALK_PRIORITY
+        self._push_triggers(state, [Trigger("event", "conversation", text[:600], prio, self.sim_time, {"with": other})])
+        return True
+
+    def recent_talk(self, name: str) -> str:
+        """决策用：最近和谁说过什么（逐句原话）。"""
+        out = []
+        for c in reversed(self.conversations):
+            if self.sim_time - float(c.get("t") or 0.0) > RECENT_TALK_WINDOW:
+                break
+            if name not in (c.get("a"), c.get("b")):
+                continue
+            other = c["b"] if c.get("a") == name else c.get("a")
+            said = "\n".join(f'  {ln.get("speaker")}: "{ln.get("text")}"' for ln in c.get("lines") or [])
+            out.append(f"With {other} at {c.get('location') or 'here'}:\n{said}")
+            if len(out) >= 2:
+                break
+        return "\n".join(reversed(out))
+
     def engage(self, name: str, by: str, seconds: float) -> bool:
         """让 name 站着陪 by 说话 seconds 模拟秒（不开始新步骤 / 不做新决策）。"""
         state = self.get_agent_state(name)
@@ -1891,6 +1948,7 @@ class GameLoop:
         state.last_triggers = [t.to_dict() for t in triggers]
         state.last_decision_at = self.sim_time
         agent._trigger_context = describe_triggers(triggers)  # noqa: SLF001
+        agent._recent_talk = self.recent_talk(agent.name)  # noqa: SLF001
         in_plan = bool(state.current_plan and state.plan_index < len(state.current_plan))
         if self.verbose and triggers:
             print(f"   triggered by: {', '.join(t.kind for t in triggers)}")

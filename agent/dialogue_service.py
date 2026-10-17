@@ -502,6 +502,19 @@ def _llm_speaker_utterance(
 HISTORY_TURNS = 8
 
 
+def _is_player_name(world, name: str) -> bool:
+    if world is None or not name:
+        return False
+    try:
+        rows = world.run_query(
+            "MATCH (p:Person {name: $n}) RETURN coalesce(p.is_player, false) AS pl, coalesce(p.role, '') AS role",
+            n=name,
+        ) or []
+    except Exception:  # noqa: BLE001
+        return False
+    return bool(rows) and (bool(rows[0].get("pl")) or rows[0].get("role") == "player")
+
+
 def history_block(history: Optional[List[Dict[str, str]]]) -> str:
     """这段对话里之前说过的话（玩家在对话框里连着聊时，NPC 要接得上）。"""
     turns = [
@@ -529,6 +542,7 @@ def _build_dialogue_prompt(
     limits: Dict[str, Any],
     retry_note: str = "",
     history: Optional[List[Dict[str, str]]] = None,
+    speaker_is_player: bool = True,
 ) -> str:
     """尽量短的对话 prompt，降低 DashScope 超时概率。"""
     retry = f"{retry_note}\n" if retry_note else ""
@@ -539,7 +553,7 @@ def _build_dialogue_prompt(
     if len(clue) > 600:
         clue = clue[:600] + "…"
     return f"""{retry}You are {speaker_b} at {location}. Stay in character. Reply in the language the player writes in (English if unsure).
-{so_far}Player ({speaker_a}): "{safe_msg or '(greets you)'}"
+{so_far}{'Player (' + speaker_a + ')' if speaker_is_player else speaker_a}: "{safe_msg or '(greets you)'}"
 Profile: {agent_b.personality}; {agent_b.background}; mood={agent_b.mood}; style={style}
 Knowledge (do not invent beyond this):
 {clue}
@@ -666,6 +680,7 @@ def _llm_dialogue(
         limits_block=limits_block,
         limits=limits,
         history=history,
+        speaker_is_player=_is_player_name(world, speaker_a),
     )
 
     t0 = _time.perf_counter()
@@ -830,6 +845,7 @@ def _llm_dialogue(
         limits_block=limits_block,
         limits=limits,
         history=history,
+        speaker_is_player=_is_player_name(world, speaker_a),
         retry_note=(
             f"IMPORTANT: Previous answer was invalid (placeholder or bad JSON). "
             f"Write a real in-character reply for {speaker_b} about the player's question. "
@@ -1058,6 +1074,8 @@ def generate_talk_dialogue(
             pass
 
     delta = int(result.get("trust_delta") or 0)
+    if not _is_player_name(world, speaker_a):
+        delta = 0  # trust_toward_player 只记对玩家的信任；NPC 之间的好恶走 TENSION
     if world is not None and delta and result.get("source") == "llm":
         new_trust = adjust_trust(world, speaker_b, delta)
     else:
@@ -1172,6 +1190,19 @@ def handle_talk_dialogue(
         gained = transfer_facts_from_dialogue(
             world, speaker_b, speaker_a, lines
         )
+        # 反过来也一样：发起的人说出口的事实，对方也就知道了
+        told = transfer_facts_from_dialogue(world, speaker_a, speaker_b, lines)
+        if told:
+            dialogue["facts_told"] = told
+            if memory is not None:
+                memory.add(
+                    speaker_b,
+                    f"Learned from what {speaker_a} said: {', '.join(told)}",
+                    type="fact",
+                    location=location,
+                    actor=speaker_a,
+                    facts=told,
+                )
         if gained:
             dialogue["facts_gained"] = gained
             if memory is not None:

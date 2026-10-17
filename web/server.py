@@ -177,6 +177,10 @@ _sim_started_at: Optional[str] = None
 _sim_last_result: Optional[Dict[str, Any]] = None
 # Simulation ticks may overlap with dialogue/planning; too few workers can block move completion
 _executor = ThreadPoolExecutor(max_workers=4)
+# 一拍模拟和存档 / 读档互斥：存档不会拍到半拍的状态，读档时不会有一拍在跑
+_tick_lock = threading.Lock()
+# 模拟运行时每隔这么多真实秒自动存一次（0 = 不自动存）
+AUTOSAVE_SECONDS = float(os.environ.get("AITOWN3_AUTOSAVE_SECONDS", "120"))
 
 
 def _build_stream_state() -> Dict[str, Any]:
@@ -494,8 +498,13 @@ async def api_execute(req: ExecuteActionRequest):
                 loop = asyncio.get_running_loop()
                 dialogue = await loop.run_in_executor(_executor, _talk)
                 # 玩家自己说的那句也放进去：先玩家头上冒，再是 NPC 的回话
-                said = ([{"speaker": a, "text": msg}] if msg else []) + list(dialogue.get("lines") or [])
+                lines_out = list(dialogue.get("lines") or [])
+                # 对话服务已经把玩家这句放在最前面了；没放才补上（免得同一句冒两次泡）
+                already = bool(lines_out) and lines_out[0].get("speaker") == a and (lines_out[0].get("text") or "").strip() == msg
+                said = ([{"speaker": a, "text": msg}] if msg and not already else []) + lines_out
                 get_world_simulator().record_conversation(world, a, b, loc, said)
+                # 聊完 NPC 要想想要不要照你说的做（带上前面几句，知道在聊什么）
+                get_world_simulator().heard(b, a, list(req.history or [])[-4:] + said)
             except Exception as e:
                 dialogue = {
                     "summary": "dialogue failed",
@@ -628,6 +637,19 @@ def api_character_memories(name: str, limit: int = 50, query: Optional[str] = No
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/api/characters/{name}/mind")
+def api_character_mind(name: str, query: str = "", kind: str = "", limit: int = 80):
+    """NPC 选项卡「记忆 / 知道的事」：记忆（按类型筛 / 按意思搜）+ 事实、地点、矛盾、信任。"""
+    from mind_view import mind_view
+    from llm_service import get_web_memory
+
+    world = get_world()
+    if name not in {c["name"] for c in list_characters(world)}:
+        raise HTTPException(status_code=404, detail=f"Character not found: {name}")
+    return mind_view(world, get_web_memory(), name, query=query, kind=kind, limit=limit,
+                     loop=get_world_simulator()._game_loop)
 
 
 @app.delete("/api/characters/{name}/memories")
@@ -775,6 +797,11 @@ _TICK_OVERHEAD = 0.2
 
 
 def _run_simulation_tick() -> Dict[str, Any]:
+    with _tick_lock:
+        return _run_simulation_tick_locked()
+
+
+def _run_simulation_tick_locked() -> Dict[str, Any]:
     mgr = get_plan_manager()
     # 模拟节奏 → 说话的人要站多少模拟秒才对得上客户端的气泡
     get_world_simulator()._ensure_loop(get_world()).sim_per_wall = _sim_dt / max(_sim_interval + _TICK_OVERHEAD, 0.05)
@@ -792,12 +819,16 @@ def _run_simulation_tick() -> Dict[str, Any]:
 
 async def _simulation_loop() -> None:
     global _sim_running, _sim_last_result
+    last_autosave = datetime.now(timezone.utc)
     while _sim_running:
         try:
             loop = asyncio.get_event_loop()
             result = await loop.run_in_executor(_executor, _run_simulation_tick)
             _sim_last_result = result
             _state_hub.mark_dirty()
+            if AUTOSAVE_SECONDS > 0 and (datetime.now(timezone.utc) - last_autosave).total_seconds() >= AUTOSAVE_SECONDS:
+                last_autosave = datetime.now(timezone.utc)
+                await loop.run_in_executor(_executor, _autosave_quietly)
             if isinstance(result, dict) and result.get("missions_complete"):
                 _sim_last_result = {
                     **result,
@@ -915,8 +946,111 @@ async def api_build(req: BuildRequest):
 @app.post("/api/simulation/stop")
 async def api_simulation_stop():
     async with _sim_lock:
+        was_running = _sim_running
         await _stop_simulation()
+    if was_running:
+        await asyncio.get_running_loop().run_in_executor(_executor, _autosave_quietly)
     return {"ok": True, "running": False}
+
+
+# ----- 存档 -----
+
+def _save_now(slot: str) -> Dict[str, Any]:
+    from savegame import save_game
+    from llm_service import get_web_memory
+
+    with _tick_lock:
+        return save_game(slot, get_world(), get_world_simulator()._game_loop, get_web_memory())
+
+
+def _autosave_quietly() -> None:
+    from savegame import AUTOSAVE
+
+    try:
+        _save_now(AUTOSAVE)
+    except Exception as e:  # noqa: BLE001
+        print(f"[WARN] autosave failed: {e}")
+
+
+def _restore_sim(world, sim_body: Dict[str, Any]) -> None:
+    """把存档里的模拟进度（时间、计划、历史、导演……）填进一个新建的 GameLoop。"""
+    from savegame import restore_loop
+
+    sim = get_world_simulator()
+    sim.sync_agents(world, force_mock=_sim_force_mock or not _sim_use_llm)
+    restore_loop(sim._game_loop, sim_body)
+    sim.sim_time = sim._game_loop.sim_time
+    sim.tick_count = sim.turn_count = sim._game_loop.tick_count
+
+
+def _load_now(slot: str) -> Dict[str, Any]:
+    from savegame import read_save, restore_graph, restore_memory
+    from llm_service import get_web_memory
+
+    body = read_save(slot)
+    world = get_world()
+    with _tick_lock:
+        counts = restore_graph(world, body.get("world") or {})
+        get_plan_manager().reset_all()
+        get_world_simulator().reset()
+        restore_memory(get_web_memory(), body.get("memory") or {})
+        if body.get("sim"):
+            _restore_sim(world, body["sim"])
+    return {**(body.get("meta") or {}), **counts}
+
+
+@app.on_event("startup")
+def _resume_last_session() -> None:
+    """重启服务器：数据库里还是上次存下的那个世界，就接着那次的进度（NPC 的计划、历史……）。"""
+    from savegame import matching_save
+
+    try:
+        world = get_world()
+        body = matching_save(world)
+        if body is None:
+            return
+        with _tick_lock:
+            _restore_sim(world, body["sim"])
+        meta = body.get("meta") or {}
+        print(f"[RESUME] continued from save {meta.get('slot')} ({meta.get('clock')})")
+    except Exception as e:  # noqa: BLE001
+        print(f"[WARN] could not resume the last session: {e}")
+
+
+@app.on_event("shutdown")
+def _save_on_exit() -> None:
+    """关服务器前存一次，下次启动就能接着来。"""
+    if get_world_simulator()._game_loop is not None:
+        _autosave_quietly()
+
+
+@app.get("/api/saves")
+def api_list_saves():
+    from savegame import list_saves
+
+    return {"saves": list_saves()}
+
+
+@app.post("/api/saves/{slot}")
+async def api_save(slot: str):
+    try:
+        meta = await asyncio.get_running_loop().run_in_executor(_executor, _save_now, slot)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"ok": True, "message": f"Saved to {slot} ({meta.get('clock')})", **meta}
+
+
+@app.post("/api/saves/{slot}/load")
+async def api_load_save(slot: str):
+    async with _sim_lock:
+        await _stop_simulation()
+    try:
+        meta = await asyncio.get_running_loop().run_in_executor(_executor, _load_now, slot)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"ok": True, "message": f"Loaded {slot} ({meta.get('clock')})", **meta}
 
 
 @app.get("/api/director")

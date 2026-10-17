@@ -443,6 +443,12 @@ class WorldSimulator:
             return []
         return list(reversed(loop.chronicle[-max(1, int(limit)):]))
 
+    def heard(self, name: str, other: str, lines: List[Dict[str, str]]) -> None:
+        """玩家和 name 聊了几句：name 之后要想想要不要因此改主意（模拟没启动时什么都不做）。"""
+        loop = self._game_loop
+        if loop is not None:
+            loop.heard(name, other, lines)
+
     def director_view(self, world=None) -> Dict[str, Any]:
         """导演选项卡：故事走向、最近出手、下一次什么时候、冲突与仇怨、任务线进度。"""
         from director_view import build_director_view

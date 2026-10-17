@@ -181,3 +181,48 @@ def test_a_stage_already_met_by_the_previous_one_is_rejected():
     ]
     result = verify(_camp(), _patch(stages=stages), "Traveler")
     assert not result.ok and result.failed_stage == 2 and "completes the moment stage 1 does" in result.reason
+
+
+def test_a_complete_package_brings_its_own_place_people_and_things():
+    from quest.spec import QuestlinePatch, completeness_problems
+
+    bare = QuestlinePatch.from_dict({"title": "Lost Seal", "stages": [{"id": "s1", "title": "Ask", "objective": "x",
+                                                                      "complete_when": []}]})
+    problems = " | ".join(completeness_problems(bare))
+    assert "new region" in problems and "new people" in problems and "items" in problems and "giver" in problems
+
+    full = QuestlinePatch.from_dict({
+        "title": "Lost Seal",
+        "regions": [{"name": "OldMine", "next_to": "Forest"}],
+        "persons": [{"name": "Hollis", "located_at": "OldMine", "routine": [
+            {"start": 6, "end": 18, "location": "OldMine", "activity": "dig"},
+            {"start": 18, "end": 6, "location": "OldMine", "activity": "rest"}]}],
+        "items": [{"name": "MineKey", "held_by": "Hollis"}],
+        "stages": [{"id": "s1", "title": "Ask", "objective": "x", "giver": "Hollis", "complete_when": []}],
+    })
+    assert completeness_problems(full) == []
+    assert full.persons[0].routine[0]["activity"] == "dig", "routines survive parsing"
+
+
+def test_the_draft_preview_details_every_new_thing():
+    from director_view import draft_summary
+
+    body = {"ok": True, "attempts": 2, "patch": {
+        "title": "Lost Seal", "premise": "Someone stole the seal.",
+        "regions": [{"name": "OldMine", "next_to": "Forest", "description": "A dark shaft."}],
+        "persons": [{"name": "Hollis", "located_at": "OldMine", "personality": "gruff", "secret": "He took it.",
+                     "routine": [{"start": 6, "end": 18, "location": "OldMine", "activity": "dig"}]}],
+        "items": [{"name": "MineKey", "held_by": "Hollis", "item_kind": "key",
+                   "actions": []}],
+        "stages": [{"title": "Ask around", "giver": "Reed", "objective": "Talk to Hollis",
+                    "reward": [{"op": "link", "a": "@player", "b": "MineKey", "rel": "HAS_ITEM"}],
+                    "news": "Hollis confesses."}],
+    }}
+    summary = draft_summary(body)
+    sections = {s["title"]: s["lines"] for s in summary["sections"]}
+    assert sections["New places"] == ["OldMine (next to Forest): A dark shaft."]
+    assert "    Secret: He took it." in sections["New people"]
+    assert "    Day: 06-18 dig @ OldMine" in sections["New people"]
+    assert sections["New items"] == ["MineKey (key) - held by Hollis."]
+    assert sections["Stages"] == ["1. Ask around (from Reed): Talk to Hollis", "    Reward: gets MineKey",
+                                  "    Then everyone hears: Hollis confesses."]

@@ -38,6 +38,19 @@ class PromptBuilder:
                 "If your current goal is still best, choose it again.",
                 "",
             ]
+        talk = getattr(agent, "_recent_talk", "") or ""
+        if talk:
+            parts += [
+                "=== What Was Just Said ===",
+                talk,
+                "If you were asked for something or promised something, decide now whether to do it; "
+                "if you learned something useful, act on it. Your feelings about the speaker matter. "
+                "Don't go back to talk about the same thing again unless something new happened.",
+                "",
+            ]
+        feeling = self._get_player_feeling_text(agent)
+        if feeling:
+            parts += ["=== How You Feel About the Player ===", feeling, ""]
         tensions = self._get_tensions_text(agent)
         if tensions:
             parts += [
@@ -127,6 +140,36 @@ Respond with a JSON object:
 }}
 """
         return prompt
+
+    def _get_player_feeling_text(self, agent: "AgentProfile") -> str:
+        """NPC 对玩家的信任（对话里攒下来的），让它也影响「要不要帮玩家」。"""
+        if self.world is None:
+            return ""
+        try:
+            rows = self.world.run_query(
+                """
+                MATCH (p:Person) WHERE coalesce(p.is_player, false) OR p.role = 'player'
+                MATCH (me:Person {name: $me})
+                RETURN p.name AS player, coalesce(me.trust_toward_player, 0) AS trust,
+                       coalesce(me.is_player, false) OR me.role = 'player' AS me_player
+                LIMIT 1
+                """,
+                me=agent.name,
+            ) or []
+        except Exception:
+            return ""
+        if not rows or rows[0].get("me_player"):
+            return ""
+        player, trust = rows[0]["player"], int(rows[0].get("trust") or 0)
+        if trust >= 5:
+            feel = f"You trust {player} a lot and are glad to help them."
+        elif trust >= 2:
+            feel = f"You like {player}; helping them is reasonable if it doesn't cost you much."
+        elif trust <= -2:
+            feel = f"You distrust {player}; you are reluctant to do what they ask."
+        else:
+            feel = f"You don't know {player} well yet."
+        return f"{feel} (trust {trust})"
 
     def _get_tensions_text(self, agent: "AgentProfile") -> str:
         if self.world is None:
@@ -421,13 +464,27 @@ Respond with a JSON object:
                 lines.append(f"- {text}")
                 seen.add(text)
 
-        # 优先对话 / 事实记忆（比 talk->ok 动作日志更有决策价值）
+        # 先放最近的几段对话（按时间，不靠语义碰运气），再按眼下的情况去检索
         if mem is not None:
             try:
+                talks = [m for m in mem.list(agent.name) if (m.get("metadata") or {}).get("type") == "dialogue"]
+                talks.sort(key=lambda m: str((m.get("metadata") or {}).get("timestamp") or ""), reverse=True)
+                for m in talks[:6]:
+                    _add(m.get("text") or "")
+            except Exception:
+                pass
+            focus = " ".join(
+                str(x) for x in (
+                    (getattr(agent, "_trigger_context", "") or "")[:300],
+                    getattr(agent, "goal", "") or "",
+                    getattr(agent, "location", "") or "",
+                ) if x
+            ) or f"what matters to {agent.name} right now"
+            try:
                 for q, where in (
-                    ("what people told me about cure herbs items", {"type": "dialogue"}),
-                    ("learned facts clues", {"type": "fact"}),
-                    ("recent actions", {"type": "action"}),
+                    (f"what people told me about: {focus}", {"type": "dialogue"}),
+                    (f"facts and clues about: {focus}", {"type": "fact"}),
+                    (f"what I did recently: {focus}", {"type": "action"}),
                 ):
                     hits = mem.search(agent.name, q, top_k=limit, where=where) or []
                     for hit in hits:

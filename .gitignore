@@ -13,3 +13,6 @@ hs_err_pid*.log
 
 # Runtime data: NPC memory store
 data/chroma/
+
+# Save games
+saves/

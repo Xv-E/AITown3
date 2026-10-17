@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
 from .digest import WorldDigest
-from .spec import MAX_STAGES, MIN_STAGES, QuestlinePatch, normalize, validate
+from .spec import MAX_STAGES, MIN_STAGES, QuestlinePatch, completeness_problems, normalize, validate
 from .verify import Verification
 
 LLM = Callable[[str, str], str]  # (system, prompt) -> text
@@ -37,7 +37,9 @@ SCHEMA = """Respond with ONE JSON object:
   "title": "...", "premise": "1-2 sentences", "hook": "how the player first hears of it",
   "regions": [{"name": "OldMine", "next_to": "<existing region>", "description": "...", "tags": "a,b", "w": 18, "h": 14}],
   "persons": [{"name": "Hollis", "located_at": "<region>", "personality": "...", "background": "...",
-               "goal": "...", "secret": "...", "mood": "wary", "speech_style": "..."}],
+               "goal": "...", "secret": "...", "mood": "wary", "speech_style": "...",
+               "routine": [{"start": 6, "end": 18, "location": "<region>", "activity": "dig for ore"},
+                           {"start": 18, "end": 6, "location": "<region>", "activity": "rest"}]}],
   "person_updates": [{"name": "<existing NPC>", "goal": "...", "secret": "..."}],
   "items": [{"name": "MineKey", "located_at": "<region>" OR "held_by": "<NPC>", "item_kind": "key",
              "description": "...", "portable": true, "value": 5, "archetype": "<optional>",
@@ -146,11 +148,20 @@ def render_digest(d: WorldDigest) -> str:
 {archetypes}"""
 
 
-def build_prompt(digest: WorldDigest, theme: str, feedback: str = "") -> str:
+COMPLETE = """This questline must bring its own cast and setting (a complete package):
+- at least one NEW region where the story happens, next to an existing region;
+- 1-3 NEW people who belong to the story, each with personality, goal, a secret and a daily routine
+  of 2-4 slots (hours 0-24, a region, an activity) so they live their own lives;
+- the NEW items the story needs, each starting somewhere (a region or a person);
+- tie it to the existing world: someone already here is involved, or it grows from a grudge/shortage."""
+
+
+def build_prompt(digest: WorldDigest, theme: str, feedback: str = "", *, complete: bool = False) -> str:
     ask = f"Theme from the designer: {theme}" if theme.strip() else "Pick a theme that fits this world."
+    package = f"\n\n{COMPLETE}" if complete else ""
     return f"""{feedback}{render_digest(digest)}
 
-{ask}
+{ask}{package}
 Write a questline of {MIN_STAGES + 1}-{min(5, MAX_STAGES)} stages for the player ({digest.player}).
 
 {VOCAB}
@@ -176,6 +187,7 @@ def author_questline(
     llm: LLM,
     verify_fn: VerifyFn,
     max_attempts: int = 4,
+    complete: bool = False,
 ) -> AuthorResult:
     known = digest.known()
     fixes: List[str] = []
@@ -185,13 +197,13 @@ def author_questline(
     verification: Optional[Verification] = None
     raw = ""
     for attempt in range(1, max_attempts + 1):
-        raw = llm(SYSTEM, build_prompt(digest, theme, feedback))
+        raw = llm(SYSTEM, build_prompt(digest, theme, feedback, complete=complete))
         patch = parse(raw)
         if patch is None:
             problems = ["the answer was not a JSON object"]
         else:
             fixes = normalize(patch, known)
-            problems = validate(patch, known)
+            problems = validate(patch, known) + (completeness_problems(patch) if complete else [])
             if not problems:
                 verification = verify_fn(patch)
                 if verification.ok:

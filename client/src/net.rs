@@ -139,6 +139,19 @@ impl NetBridge {
         let _ = self.position_tx.send(cell);
     }
 
+    pub fn fetch_saves(&self) {
+        self.send(NetRequestKind::FetchSaves);
+    }
+
+    pub fn save_game(&self, slot: &str) {
+        self.send(NetRequestKind::SaveGame { slot: slot.to_string() });
+    }
+
+    /// Replace the whole world (and NPC progress / memories) with a save.
+    pub fn load_game(&self, slot: &str) {
+        self.send(NetRequestKind::LoadGame { slot: slot.to_string() });
+    }
+
     pub fn fetch_director(&self) {
         self.send(NetRequestKind::FetchDirector);
     }
@@ -149,12 +162,18 @@ impl NetBridge {
     }
 
     /// Have the LLM write a questline and check it with the planner (slow: up to a few minutes).
-    pub fn draft_questline(&self) {
-        self.send(NetRequestKind::DraftQuestline);
+    /// `theme`: what the player wants it to be about ("" = let the designer pick).
+    pub fn draft_questline(&self, theme: &str) {
+        self.send(NetRequestKind::DraftQuestline { theme: theme.to_string() });
     }
 
     pub fn apply_questline(&self) {
         self.send(NetRequestKind::ApplyQuestline);
+    }
+
+    /// Memories (optionally one type, or searched by meaning) and what `name` knows.
+    pub fn fetch_mind(&self, name: &str, query: &str, kind: &str) {
+        self.send(NetRequestKind::FetchMind { name: name.to_string(), query: query.to_string(), kind: kind.to_string() });
     }
 
     pub fn fetch_history(&self, name: &str) {
@@ -196,9 +215,23 @@ enum NetRequestKind {
     AdvanceTime {
         hours: f32,
     },
+    FetchMind {
+        name: String,
+        query: String,
+        kind: String,
+    },
+    FetchSaves,
+    SaveGame {
+        slot: String,
+    },
+    LoadGame {
+        slot: String,
+    },
     FetchDirector,
     NudgeDirector,
-    DraftQuestline,
+    DraftQuestline {
+        theme: String,
+    },
     ApplyQuestline,
     FetchHistory {
         name: String,
@@ -227,6 +260,10 @@ enum NetResponse {
     /// Fire-and-forget requests: nothing to show.
     Done,
     Director(Result<DirectorData, String>),
+    Saves(Result<Vec<SaveInfo>, String>),
+    Mind(String, Result<MindData, String>),
+    Saved(Result<String, String>),
+    Loaded(Result<String, String>),
     Draft(Result<DraftSummary, String>),
     Applied(Result<String, String>),
 }
@@ -286,6 +323,31 @@ fn handle_request(request: NetRequest) -> NetResponse {
                     .to_string()
             }))
         }
+        NetRequestKind::FetchMind { name, query, kind } => {
+            let path = format!(
+                "/api/characters/{}/mind?query={}&kind={}&limit=80",
+                url_encode(&name),
+                url_encode(&query),
+                url_encode(&kind)
+            );
+            let result = http_json(server, "GET", &path, None)
+                .and_then(|v| serde_json::from_value::<MindData>(v).map_err(|err| format!("Bad memory JSON: {err}")));
+            NetResponse::Mind(name, result)
+        }
+        NetRequestKind::FetchSaves => NetResponse::Saves(
+            http_json(server, "GET", "/api/saves", None).and_then(|v| {
+                serde_json::from_value::<Vec<SaveInfo>>(v.get("saves").cloned().unwrap_or(Value::Array(Vec::new())))
+                    .map_err(|err| format!("Bad saves JSON: {err}"))
+            }),
+        ),
+        NetRequestKind::SaveGame { slot } => NetResponse::Saved(
+            http_json(server, "POST", &format!("/api/saves/{slot}"), Some("{}".to_string()))
+                .map(|v| v.get("message").and_then(Value::as_str).unwrap_or("Saved.").to_string()),
+        ),
+        NetRequestKind::LoadGame { slot } => NetResponse::Loaded(
+            http_json(server, "POST", &format!("/api/saves/{slot}/load"), Some("{}".to_string()))
+                .map(|v| v.get("message").and_then(Value::as_str).unwrap_or("Loaded.").to_string()),
+        ),
         NetRequestKind::FetchDirector => NetResponse::Director(
             http_json(server, "GET", "/api/director", None).and_then(|v| {
                 serde_json::from_value::<DirectorData>(v).map_err(|err| format!("Bad director JSON: {err}"))
@@ -295,8 +357,14 @@ fn handle_request(request: NetRequest) -> NetResponse {
             let _ = http_json(server, "POST", "/api/director/nudge", Some("{}".to_string()));
             NetResponse::Done
         }
-        NetRequestKind::DraftQuestline => NetResponse::Draft(
-            http_json(server, "POST", "/api/questlines/draft", Some("{}".to_string())).and_then(|v| {
+        NetRequestKind::DraftQuestline { theme } => NetResponse::Draft(
+            http_json(
+                server,
+                "POST",
+                "/api/questlines/draft",
+                Some(json!({ "theme": theme, "complete": true }).to_string()),
+            )
+            .and_then(|v| {
                 serde_json::from_value::<DraftSummary>(v.get("summary").cloned().unwrap_or(Value::Null))
                     .map_err(|err| format!("Bad draft JSON: {err}"))
             }),
@@ -574,6 +642,32 @@ pub fn receive_network_messages(
                 }
             }
             NetResponse::Blueprints(Ok(list)) => ui.open_build_menu(list),
+            NetResponse::Saves(Ok(list)) => ui.open_save_menu(list),
+            NetResponse::Mind(name, result) => {
+                if let Some(view) = ui.history.as_mut().filter(|v| v.name == name) {
+                    view.mind_in_flight = false;
+                    match result {
+                        Ok(data) => {
+                            view.mind = Some(data);
+                            view.mind_error.clear();
+                        }
+                        Err(err) => view.mind_error = err,
+                    }
+                }
+            }
+            NetResponse::Saves(Err(err)) => ui.toast(format!("Can't list saves: {err}")),
+            NetResponse::Saved(result) => ui.toast(match result {
+                Ok(msg) => msg,
+                Err(err) => format!("Save failed: {err}"),
+            }),
+            NetResponse::Loaded(result) => {
+                net.refresh_now();
+                ui.sim_running = false;
+                ui.toast(match result {
+                    Ok(msg) => format!("{msg} - NPCs are paused; start them from the bar."),
+                    Err(err) => format!("Load failed: {err}"),
+                });
+            }
             NetResponse::Done => {}
             NetResponse::Director(result) => {
                 if let Some(view) = ui.director.as_mut() {
@@ -676,7 +770,6 @@ pub struct WorldSnapshot {
     pub simulation: Simulation,
     /// The seamless world: regions, everything on the ground and everyone, in world cells.
     pub world: WorldView,
-    pub quests: Vec<QuestView>,
     pub online: bool,
     pub revision: u64,
 }
@@ -719,7 +812,6 @@ impl WorldSnapshot {
             characters: Vec::new(),
             simulation: Simulation::default(),
             world: WorldView::default(),
-            quests: Vec::new(),
             online: false,
             revision: 0,
         }
@@ -828,7 +920,6 @@ impl From<PlayState> for WorldSnapshot {
             characters: state.characters.unwrap_or_default(),
             simulation: state.simulation.unwrap_or_default(),
             world: state.world.unwrap_or_default(),
-            quests: state.quests,
             online: true,
             revision: 0,
         }
@@ -859,27 +950,6 @@ struct PlayState {
     simulation: Option<Simulation>,
     #[serde(default)]
     world: Option<WorldView>,
-    #[serde(default)]
-    quests: Vec<QuestView>,
-}
-
-#[derive(Deserialize, Clone, Default)]
-pub struct QuestView {
-    #[serde(default, deserialize_with = "lenient_string")]
-    pub stage: String,
-    #[serde(default, deserialize_with = "lenient_string")]
-    pub state: String,
-    #[serde(default, deserialize_with = "lenient_string")]
-    pub objective: String,
-}
-
-impl WorldSnapshot {
-    /// The quest objective to show the player (first active quest that has one).
-    pub fn current_objective(&self) -> Option<&QuestView> {
-        self.quests
-            .iter()
-            .find(|q| q.state.eq_ignore_ascii_case("active") && !q.objective.is_empty())
-    }
 }
 
 #[derive(Deserialize, Clone, Default)]
@@ -1220,7 +1290,7 @@ fn http_json(
     let mut stream = TcpStream::connect((host, port))
         .map_err(|err| format!("Could not connect to {host}:{port}: {err}"))?;
     // Writing a questline is several LLM rounds plus planning: give it time.
-    let read_timeout = if path.contains("/questlines/") { 300 } else if method == "POST" { 90 } else { 15 };
+    let read_timeout = if path.contains("/questlines/") { 900 } else if method == "POST" { 90 } else { 15 };
     stream
         .set_read_timeout(Some(Duration::from_secs(read_timeout)))
         .map_err(|err| err.to_string())?;
@@ -1612,4 +1682,162 @@ pub struct DraftSummary {
     pub ok: bool,
     #[serde(default)]
     pub lines: Vec<String>,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub title: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub premise: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub hook: String,
+    /// New places / people / items / clues / stages, each with its details.
+    #[serde(default)]
+    pub sections: Vec<DraftSection>,
+    #[serde(default)]
+    pub problems: Vec<String>,
+    #[serde(default)]
+    pub attempts: Option<u32>,
+}
+
+#[derive(Deserialize, Clone, Default)]
+pub struct DraftSection {
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub title: String,
+    #[serde(default)]
+    pub lines: Vec<String>,
+}
+
+/// One save file (what the Save / Load menu shows).
+#[derive(Deserialize, Clone, Default)]
+pub struct SaveInfo {
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub slot: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub saved_at: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub clock: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub player: String,
+}
+
+/// Percent-encode a query-string value (UTF-8, so Chinese searches work too).
+pub fn url_encode(text: &str) -> String {
+    let mut out = String::new();
+    for b in text.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
+/// What an NPC remembers and knows (NPC tab: Memories / Knows pages).
+#[derive(Deserialize, Clone, Default)]
+pub struct MindData {
+    #[serde(default)]
+    pub available: bool,
+    #[serde(default)]
+    pub total: usize,
+    #[serde(default)]
+    pub types: std::collections::BTreeMap<String, usize>,
+    #[serde(default)]
+    pub memories: Vec<MemoryView>,
+    #[serde(default)]
+    pub knows: KnowsView,
+    #[serde(default)]
+    pub profile: ProfileView,
+    #[serde(default)]
+    pub routine: RoutineView,
+}
+
+/// The character as written (persona fields) and how they are right now.
+#[derive(Deserialize, Clone, Default)]
+pub struct ProfileView {
+    #[serde(default)]
+    pub fields: Vec<ProfileField>,
+    #[serde(default)]
+    pub status: Vec<String>,
+}
+
+#[derive(Deserialize, Clone, Default)]
+pub struct ProfileField {
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub label: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub value: String,
+}
+
+/// Their day: each slot, which one is now, which once-a-day ones are done.
+#[derive(Deserialize, Clone, Default)]
+pub struct RoutineView {
+    #[serde(default)]
+    pub slots: Vec<RoutineSlotView>,
+    /// A held state such as "Asleep" (empty when none).
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub state: String,
+}
+
+#[derive(Deserialize, Clone, Default)]
+pub struct RoutineSlotView {
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub hours: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub r#where: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub what: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub notes: String,
+    #[serde(default)]
+    pub now: bool,
+    #[serde(default)]
+    pub done: bool,
+}
+
+#[derive(Deserialize, Clone, Default)]
+pub struct MemoryView {
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub text: String,
+    #[serde(default, rename = "type", deserialize_with = "lenient_string")]
+    pub kind: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub location: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub time: String,
+}
+
+#[derive(Deserialize, Clone, Default)]
+pub struct KnowsView {
+    #[serde(default)]
+    pub facts: Vec<FactView>,
+    #[serde(default)]
+    pub places: Vec<String>,
+    #[serde(default)]
+    pub seen: Vec<String>,
+    #[serde(default)]
+    pub omniscient: bool,
+    #[serde(default)]
+    pub grudges: Vec<String>,
+    #[serde(default)]
+    pub trust: Option<i32>,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub player: String,
+}
+
+#[derive(Deserialize, Clone, Default)]
+pub struct FactView {
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub kind: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub text: String,
+}
+
+#[cfg(test)]
+mod url_tests {
+    use super::url_encode;
+
+    #[test]
+    fn query_values_are_percent_encoded() {
+        assert_eq!(url_encode("oak tree"), "oak%20tree");
+        assert_eq!(url_encode("木头"), "%E6%9C%A8%E5%A4%B4");
+        assert_eq!(url_encode("a&b=c"), "a%26b%3Dc");
+    }
 }

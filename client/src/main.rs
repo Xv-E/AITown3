@@ -92,7 +92,14 @@ fn main() {
         )
         .add_systems(
             Update,
-            (ui::update_director_panel, ui::poll_director, ui::director_wheel).after(ui::interaction_input),
+            (
+                ui::update_director_panel,
+                ui::poll_director,
+                ui::director_wheel,
+                ui::poll_mind,
+                ui::mind_search_typing,
+            )
+                .after(ui::interaction_input),
         )
         .run();
 }

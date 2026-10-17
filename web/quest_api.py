@@ -19,6 +19,8 @@ from pydantic import BaseModel
 
 class DraftRequest(BaseModel):
     theme: str = ""
+    # 完整任务包：自带新地点、新人物（带日程）、新物品
+    complete: bool = True
 
 
 class ApplyRequest(BaseModel):
@@ -42,7 +44,9 @@ def make_router(get_world: Callable[[], Any], story_arc: Callable[[], str]) -> A
         from quest import draft_questline
 
         world = get_world()
-        result = await asyncio.to_thread(draft_questline, world, req.theme, story_arc=story_arc())
+        result = await asyncio.to_thread(
+            draft_questline, world, req.theme, story_arc=story_arc(), complete=req.complete
+        )
         body = _result_body(result)
         if result.ok:
             last["patch"] = result.patch.to_dict()

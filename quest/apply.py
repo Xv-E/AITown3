@@ -26,6 +26,7 @@ def apply_questline(world, patch: QuestlinePatch) -> Dict[str, Any]:
             personality=p.personality, background=p.background, goal=p.goal, mood=p.mood,
             secret=p.secret, speech_style=p.speech_style,
             secret_policy="share_gossip", trust_toward_player=0,
+            **({"routine": json.dumps(p.routine, ensure_ascii=False)} if p.routine else {}),
         )
         world.link_entities(p.name, "Person", p.located_at, "Location", "LOCATED_AT")
         world.link_entities(p.name, "Person", p.located_at, "Location", "VISITED")

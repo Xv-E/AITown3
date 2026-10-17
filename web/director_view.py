@@ -117,8 +117,84 @@ def build_director_view(loop: Any, world: Any) -> Dict[str, Any]:
     return out
 
 
+def _effect_text(e: Dict[str, Any]) -> str:
+    op = e.get("op")
+    if op == "spawn_item":
+        return f"gets a new {e.get('name')}"
+    if op == "link" and e.get("rel") == "HAS_ITEM":
+        return f"gets {e.get('b')}"
+    if op == "link" and e.get("rel") == "ADJACENT_TO":
+        return f"opens a way between {e.get('a')} and {e.get('b')}"
+    if op in ("set_prop", "add_prop"):
+        return f"{e.get('entity')}.{e.get('prop')} {'=' if op == 'set_prop' else '+'} {e.get('value', e.get('delta'))}"
+    if op == "relocate":
+        return f"{e.get('entity')} moves to {e.get('to')}"
+    if op == "unlink":
+        return ""
+    return str(op or "")
+
+
+def draft_sections(patch: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """任务包里每样东西的详情：地点、人物（设定 + 日程）、物品、线索、阶段。"""
+    sections: List[Dict[str, Any]] = []
+    places = [
+        f"{r.get('name')} (next to {r.get('next_to')}): {r.get('description') or ''}".strip()
+        for r in patch.get("regions") or []
+    ]
+    if places:
+        sections.append({"title": "New places", "lines": places})
+    people = []
+    for p in patch.get("persons") or []:
+        people.append(f"{p.get('name')} - at {p.get('located_at')}. {p.get('personality') or ''}".strip())
+        for label, key in (("Goal", "goal"), ("Secret", "secret"), ("Background", "background")):
+            if p.get(key):
+                people.append(f"    {label}: {p[key]}")
+        slots = [
+            f"{int(float(s.get('start', 0))):02d}-{int(float(s.get('end', 0))):02d} {s.get('activity') or ''} @ {s.get('location')}"
+            for s in p.get("routine") or [] if isinstance(s, dict)
+        ]
+        if slots:
+            people.append("    Day: " + "; ".join(slots))
+    if people:
+        sections.append({"title": "New people", "lines": people})
+    changed = [
+        f"{u.get('name')}: " + "; ".join(f"{k} -> {u[k]}" for k in ("goal", "secret", "background") if u.get(k))
+        for u in patch.get("person_updates") or []
+    ]
+    if changed:
+        sections.append({"title": "Changes to people already here", "lines": changed})
+    things = []
+    for it in patch.get("items") or []:
+        where = f"held by {it['held_by']}" if it.get("held_by") else f"at {it.get('located_at')}"
+        kind = it.get("item_kind") or it.get("archetype") or "thing"
+        fixed = "" if it.get("portable", True) else ", fixed in place"
+        things.append(f"{it.get('name')} ({kind}{fixed}) - {where}. {it.get('description') or ''}".strip())
+        for a in it.get("actions") or []:
+            things.append(f"    can: {a.get('label') or a.get('id')}")
+    if things:
+        sections.append({"title": "New items", "lines": things})
+    clues = [
+        f"[{c.get('kind') or 'fact'}] {c.get('text')} (known by {', '.join(c.get('known_by') or []) or 'nobody yet'})"
+        for c in patch.get("clues") or []
+    ]
+    if clues:
+        sections.append({"title": "Clues", "lines": clues})
+    stages = []
+    for i, st in enumerate(patch.get("stages") or [], 1):
+        giver = f" (from {st.get('giver')})" if st.get("giver") else ""
+        stages.append(f"{i}. {st.get('title')}{giver}: {st.get('objective')}")
+        rewards = [t for t in (_effect_text(e) for e in st.get("reward") or [] if isinstance(e, dict)) if t]
+        if rewards:
+            stages.append("    Reward: " + "; ".join(rewards))
+        if st.get("news"):
+            stages.append(f"    Then everyone hears: {st['news']}")
+    if stages:
+        sections.append({"title": "Stages", "lines": stages})
+    return sections
+
+
 def draft_summary(body: Dict[str, Any]) -> Dict[str, Any]:
-    """起草结果 → 选项卡里预览用的几行字。"""
+    """起草结果 → 选项卡里预览：标题、梗概，以及每样新东西的详情。"""
     patch: Optional[Dict[str, Any]] = body.get("patch") or None
     lines: List[str] = []
     if patch:
@@ -133,4 +209,13 @@ def draft_summary(body: Dict[str, Any]) -> Dict[str, Any]:
             lines.append(f"{i}. {st.get('title')}{giver}: {st.get('objective')}")
     for p in body.get("problems") or []:
         lines.append(f"Problem: {p}")
-    return {"ok": bool(body.get("ok")), "lines": lines, "attempts": body.get("attempts")}
+    return {
+        "ok": bool(body.get("ok")),
+        "lines": lines,
+        "attempts": body.get("attempts"),
+        "title": (patch or {}).get("title") or "",
+        "premise": (patch or {}).get("premise") or "",
+        "hook": (patch or {}).get("hook") or "",
+        "sections": draft_sections(patch or {}),
+        "problems": [str(p) for p in body.get("problems") or []],
+    }
