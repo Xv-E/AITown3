@@ -120,8 +120,16 @@ def _people_at_location(world, loc: str, exclude: Optional[str] = None) -> List[
         role = str(r.get("role") or "npc")
         is_player = bool(r.get("is_player")) or role == "player"
         personality = (r.get("personality") or "")[:80]
+        try:
+            from spatial import person_cell
+
+            cell = person_cell(world, n)
+        except Exception:
+            cell = None
         out.append({
             "name": n,
+            "x": cell[0] if cell else None,
+            "y": cell[1] if cell else None,
             "hp": hp,
             "power_level": int(r.get("power_level") or 0),
             "alive": hp > 0 and not dead,

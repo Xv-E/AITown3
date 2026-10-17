@@ -91,10 +91,19 @@ def test_tick_deferred_apply(world: Neo4jWorld) -> bool:
     ok = _expect(mid == start, f"after 0.5s still at {start} (got {mid})")
     ok &= _expect(state.pending_action is not None, "pending_action set")
     ok &= _expect(state.status == "acting", f"status=acting (got {state.status})")
+    pending = state.pending_action
+    walk = pending.walk if pending else 0.0
+    ok &= _expect(walk > 0, f"walk to exit counted (walk={walk:.2f}s)")
+    ok &= _expect(
+        pending is not None and abs(pending.duration - walk - get_action_duration(
+            "move", args=pending.args, world=world)) < 1e-6,
+        "duration = travel + walk",
+    )
 
-    loop.tick(2.0, auto_plan=False, instant=False)
+    remaining = (pending.completes_at - loop.sim_time) if pending else 2.0
+    loop.tick(remaining + 0.1, auto_plan=False, instant=False)
     end = _loc(world, name)
-    ok &= _expect(end == dest, f"after +2s at {dest} (got {end})")
+    ok &= _expect(end == dest, f"after walk + travel at {dest} (got {end})")
     ok &= _expect(state.pending_action is None, "pending cleared")
     return ok
 

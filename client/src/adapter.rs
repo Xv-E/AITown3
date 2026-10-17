@@ -11,12 +11,15 @@ use std::collections::{HashMap, VecDeque};
 
 use crate::net::{NpcActivity, WorldSnapshot};
 use crate::scene::{
-    clamp_to_room, exit_position_for, npc_home, Interactive, PlayerAvatar, TargetKind,
+    clamp_to_room, exit_position_for, npc_home, Interactive, PlayerAvatar, TargetKind, ZoneGrid,
 };
 
-const NPC_SPEED: f32 = 170.0;
+/// Walking speed in grid cells per second; must match the server's
+/// `spatial.WALK_CELLS_PER_SEC`, which turns walking distance into action time.
+const NPC_WALK_CELLS_PER_SEC: f32 = 4.0;
 const ARRIVE_EPS: f32 = 3.0;
-const APPROACH_GAP: f32 = 42.0;
+/// Stop this many cells short of the target (server: `spatial.APPROACH_GAP`).
+const APPROACH_GAP_CELLS: f32 = 1.0;
 
 #[derive(Clone, Debug)]
 enum Step {
@@ -91,7 +94,11 @@ pub fn sync_npcs(
     let mut seen: Vec<String> = Vec::new();
 
     for (idx, actor) in here.iter().enumerate() {
-        let home = npc_home(&world, &actor.name, idx);
+        let grid = ZoneGrid::of(&world);
+        let home = actor
+            .cell()
+            .map(|cell| grid.center_of(cell, IVec2::ONE))
+            .unwrap_or_else(|| npc_home(&world, &actor.name, idx));
         seen.push(actor.name.clone());
 
         let existing = if room_changed {
@@ -197,11 +204,12 @@ fn command_to_steps(
     me: Vec2,
 ) -> (Vec<Step>, bool) {
     let args = &activity.pending_args;
+    let gap = APPROACH_GAP_CELLS * ZoneGrid::of(world).tile;
     let arg = |i: usize| args.get(i).cloned().unwrap_or_default();
     let approach = |name: &str| {
         positions.get(name).map(|&target| {
             let away = (me - target).normalize_or(Vec2::NEG_Y);
-            clamp_to_room(target + away * APPROACH_GAP)
+            clamp_to_room(target + away * gap)
         })
     };
     let walk_then = |target: &str, text: String, secs: f32| {
@@ -347,9 +355,11 @@ fn spawn_npc(
 pub fn run_npc_behaviour(
     mut commands: Commands,
     time: Res<Time>,
+    world: Res<WorldSnapshot>,
     mut avatars: Query<(Entity, &mut NpcAvatar, &mut Transform)>,
 ) {
     let dt = time.delta_secs();
+    let speed = NPC_WALK_CELLS_PER_SEC * ZoneGrid::of(&world).tile;
     for (entity, mut avatar, mut transform) in &mut avatars {
         if avatar.current.is_none() {
             avatar.current = avatar.queue.pop_front();
@@ -367,7 +377,7 @@ pub fn run_npc_behaviour(
             Some(Step::WalkTo(dest)) => {
                 let pos = transform.translation.truncate();
                 let delta = *dest - pos;
-                let step = NPC_SPEED * dt;
+                let step = speed * dt;
                 if delta.length() <= step.max(ARRIVE_EPS) {
                     transform.translation.x = dest.x;
                     transform.translation.y = dest.y;

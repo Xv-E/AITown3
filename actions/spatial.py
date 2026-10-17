@@ -233,3 +233,206 @@ def map_distance(world: "Neo4jWorld", a: str, b: str) -> Optional[float]:
     if None in (r.get("ax"), r.get("ay"), r.get("bx"), r.get("by")):
         return None
     return math.hypot(float(r["ax"]) - float(r["bx"]), float(r["ay"]) - float(r["by"]))
+
+
+# ---------------------------------------------------------------------------
+# 区域内步行 — 人物的格子位置存在 Person.x / Person.y（cell_loc = 这格属于哪个区域），
+# 动作要先走到目标旁边，走路耗时 = 距离 / WALK_CELLS_PER_SEC。
+
+# 步行速度（格 / 仿真秒）；必须和客户端 adapter.rs 的 NPC_WALK_CELLS_PER_SEC 一致
+WALK_CELLS_PER_SEC = 4.0
+# 走到目标旁边就停（格）
+APPROACH_GAP = 1.0
+
+# 客户端房间矩形（像素），只用来复现 scene.rs exit_layout 的出口位置
+_ROOM_HALF_W = 360.0
+_ROOM_HALF_H = 210.0
+_ROOM_CENTER_Y = -30.0
+
+Point = Tuple[float, float]
+
+
+def _stable_slot(name: str, fallback_index: int, modulo: int) -> int:
+    """scene.rs stable_slot 的移植（djb2，64 位回绕）。"""
+    if modulo == 0:
+        return 0
+    h = 5381
+    for b in name.encode("utf-8"):
+        h = (h * 33 + b) & 0xFFFFFFFFFFFFFFFF
+    return ((h + fallback_index) & 0xFFFFFFFFFFFFFFFF) % modulo
+
+
+def _lerp(a: float, b: float, t: float) -> float:
+    return a + (b - a) * t
+
+
+def _clamp_cell(world: "Neo4jWorld", location: str, p: Point) -> Cell:
+    gw, gh = zone_grid(world, location)
+    m = EDGE_MARGIN
+    return (
+        min(max(int(round(p[0])), m), gw - m - 1),
+        min(max(int(round(p[1])), m), gh - m - 1),
+    )
+
+
+def adjacent_of(world: "Neo4jWorld", location: str) -> List[str]:
+    rows = world.run_query(
+        "MATCH (:Location {name: $loc})-[:ADJACENT_TO]->(n:Location) RETURN n.name AS name",
+        loc=location,
+    ) or []
+    return sorted({r["name"] for r in rows if r.get("name")})
+
+
+def exit_points(world: "Neo4jWorld", location: str) -> Dict[str, Point]:
+    """每个出口在区域格子坐标里的位置（与客户端 exit_layout 一致；单位是格，格中心为整数）。"""
+    gw, gh = zone_grid(world, location)
+    tile = min(_ROOM_HALF_W * 2 / gw, _ROOM_HALF_H * 2 / gh)
+    origin_x = -gw * tile / 2
+    origin_y = _ROOM_CENTER_Y + gh * tile / 2
+
+    walls: List[List[str]] = [[], [], [], []]
+    for name in adjacent_of(world, location):
+        preferred = _stable_slot(name, 0, 4)
+        wall = min(((preferred + s) % 4 for s in range(4)), key=lambda w: len(walls[w]))
+        walls[wall].append(name)
+
+    top = _ROOM_CENTER_Y + _ROOM_HALF_H
+    bottom = _ROOM_CENTER_Y - _ROOM_HALF_H
+    out: Dict[str, Point] = {}
+    for wall, members in enumerate(walls):
+        n = len(members)
+        for i, name in enumerate(members):
+            t = (i + 1) / (n + 1)
+            if wall == 0:
+                px, py = _lerp(-_ROOM_HALF_W + 120, _ROOM_HALF_W - 120, t), top
+            elif wall == 1:
+                px, py = _ROOM_HALF_W - 58, _lerp(top - 80, bottom + 80, t)
+            elif wall == 2:
+                px, py = _lerp(_ROOM_HALF_W - 120, -_ROOM_HALF_W + 120, t), bottom
+            else:
+                px, py = -_ROOM_HALF_W + 58, _lerp(bottom + 80, top - 80, t)
+            out[name] = ((px - origin_x) / tile - 0.5, (origin_y - py) / tile - 0.5)
+    return out
+
+
+def _location_of(world: "Neo4jWorld", name: str) -> Optional[str]:
+    rows = world.run_query(
+        "MATCH (p:Person {name: $n})-[:LOCATED_AT]->(l:Location) RETURN l.name AS loc LIMIT 1",
+        n=name,
+    ) or []
+    return rows[0].get("loc") if rows else None
+
+
+def _set_person_cell(world: "Neo4jWorld", name: str, location: str, cell: Cell) -> None:
+    world.run_query(
+        "MATCH (p:Person {name: $n}) SET p.x = $x, p.y = $y, p.cell_loc = $loc",
+        n=name,
+        x=cell[0],
+        y=cell[1],
+        loc=location,
+    )
+
+
+def person_cell(world: "Neo4jWorld", name: str) -> Optional[Cell]:
+    """人物在所在区域里的格子；没有（或是别的区域的旧格子）就按名字挑一个空格子。"""
+    rows = world.run_query(
+        """
+        MATCH (p:Person {name: $n})-[:LOCATED_AT]->(l:Location)
+        RETURN p.x AS x, p.y AS y, p.cell_loc AS cell_loc, l.name AS loc LIMIT 1
+        """,
+        n=name,
+    ) or []
+    if not rows or not rows[0].get("loc"):
+        return None
+    r = rows[0]
+    loc = r["loc"]
+    if r.get("x") is not None and r.get("y") is not None and r.get("cell_loc") == loc:
+        return _int(r["x"]), _int(r["y"])
+    gw, gh = zone_grid(world, loc)
+    m = EDGE_MARGIN
+    preferred = (
+        m + _stable_slot(name, 0, max(1, gw - 2 * m - 1)),
+        m + _stable_slot(f"{name}#", 0, max(1, gh - 2 * m - 1)),
+    )
+    cell = find_spot(world, loc, 1, 1, near=preferred, blocking=False) or preferred
+    _set_person_cell(world, name, loc, cell)
+    return cell
+
+
+def _thing_point(world: "Neo4jWorld", actor: str, location: str, name: str) -> Optional[Point]:
+    """同区域里某个人 / 地上物品的位置；不在这里（或在谁手上）返回 None。"""
+    if not name or name == actor:
+        return None
+    if _location_of(world, name) == location:
+        cell = person_cell(world, name)
+        return (float(cell[0]), float(cell[1])) if cell else None
+    rows = world.run_query(
+        """
+        MATCH (i:Item {name: $n})-[:LOCATED_AT]->(:Location {name: $loc})
+        WHERE i.x IS NOT NULL AND i.y IS NOT NULL AND NOT (:Person)-[:HAS_ITEM]->(i)
+        RETURN i.x AS x, i.y AS y,
+               coalesce(i.footprint_w, 1) AS w, coalesce(i.footprint_h, 1) AS h,
+               coalesce(i.portable, true) AS portable
+        LIMIT 1
+        """,
+        n=name,
+        loc=location,
+    ) or []
+    if not rows:
+        return None
+    r = rows[0]
+    w, h = (1, 1) if r.get("portable") is not False else (_int(r["w"], 1), _int(r["h"], 1))
+    return _int(r["x"]) + (w - 1) / 2, _int(r["y"]) + (h - 1) / 2
+
+
+WalkEnd = Tuple[str, Cell]
+
+
+def plan_walk(
+    world: "Neo4jWorld", actor: str, args: List[Any], *, travel: bool
+) -> Tuple[float, Optional[WalkEnd]]:
+    """动作开始前要走多久（仿真秒），以及走完停在哪（区域, 格子）。
+
+    travel：走到 args[2] 方向的出口（之后由 enter_zone 放进新区域，停点为 None）；
+    其它动作：走到参数里第一个同区域的人 / 地上物品旁边。不用走路 → (0, None)。
+    """
+    loc = _location_of(world, actor)
+    start = person_cell(world, actor) if loc else None
+    if not loc or start is None:
+        return 0.0, None
+    sx, sy = float(start[0]), float(start[1])
+    if travel:
+        door = exit_points(world, loc).get(str(args[2])) if len(args) >= 3 else None
+        if door is None:
+            return 0.0, None
+        return math.hypot(door[0] - sx, door[1] - sy) / WALK_CELLS_PER_SEC, None
+    for a in args[1:]:
+        target = _thing_point(world, actor, loc, str(a))
+        if target is None:
+            continue
+        dx, dy = sx - target[0], sy - target[1]
+        dist = math.hypot(dx, dy)
+        if dist <= APPROACH_GAP:
+            return 0.0, None
+        stop = (target[0] + dx / dist * APPROACH_GAP, target[1] + dy / dist * APPROACH_GAP)
+        return (dist - APPROACH_GAP) / WALK_CELLS_PER_SEC, (loc, _clamp_cell(world, loc, stop))
+    return 0.0, None
+
+
+def finish_walk(world: "Neo4jWorld", actor: str, end: Optional[WalkEnd]) -> None:
+    """动作结束：人物停在 plan_walk 算好的位置（人已经不在那个区域就不动）。"""
+    if end and _location_of(world, actor) == end[0]:
+        _set_person_cell(world, actor, end[0], end[1])
+
+
+def enter_zone(world: "Neo4jWorld", actor: str, location: str, came_from: str) -> None:
+    """从 came_from 方向的出口进入 location：站在门内两格附近的空格子。"""
+    door = exit_points(world, location).get(came_from)
+    if door is None:
+        return
+    gw, gh = zone_grid(world, location)
+    dx, dy = (gw - 1) / 2 - door[0], (gh - 1) / 2 - door[1]
+    norm = math.hypot(dx, dy) or 1.0
+    inside = _clamp_cell(world, location, (door[0] + dx / norm * 2, door[1] + dy / norm * 2))
+    cell = find_spot(world, location, 1, 1, near=inside, blocking=False) or inside
+    _set_person_cell(world, actor, location, cell)

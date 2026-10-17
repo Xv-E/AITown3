@@ -7,7 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
-from action_timing import get_action_duration
+from action_timing import action_walk, get_action_duration, is_travel
 from agent_profile import AgentProfile
 from goal_feasibility import assess_goal, pick_best_feasible, sanitize_goal_target
 from goal_planner import plan_for_goal, wait_plan
@@ -44,6 +44,9 @@ class PendingAction:
     started_at: float
     duration: float
     completes_at: float
+    # 其中走路占的秒数，和走完停在哪（区域, 格子）
+    walk: float = 0.0
+    walk_end: Optional[Tuple[str, Tuple[int, int]]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -52,6 +55,7 @@ class PendingAction:
             "started_at": self.started_at,
             "duration": self.duration,
             "completes_at": self.completes_at,
+            "walk": self.walk,
         }
 
 
@@ -699,8 +703,13 @@ class GameLoop:
                 print(f"[WARN] [{state.agent.name}] precheck failed: {reason}")
             return None
 
+        walk, walk_end = (
+            (0.0, None)
+            if instant
+            else action_walk(self.world, state.agent.name, action_name, list(args))
+        )
         duration = get_action_duration(
-            action_name, instant=instant, args=list(args), world=self.world
+            action_name, instant=instant, args=list(args), world=self.world, walk=walk
         )
         pending = PendingAction(
             name=action_name,
@@ -708,6 +717,8 @@ class GameLoop:
             started_at=self.sim_time,
             duration=duration,
             completes_at=self.sim_time + duration,
+            walk=walk,
+            walk_end=walk_end,
         )
         state.pending_action = pending
         state.sim_busy_until = pending.completes_at
@@ -763,6 +774,15 @@ class GameLoop:
             # 无论 apply 是否抛错，都必须清掉 pending，否则会永远卡在「执行 move」
             state.pending_action = None
             state.sim_busy_until = 0.0
+        try:
+            import spatial
+
+            if is_travel(action_name) and action_result.success and len(args) >= 3:
+                spatial.enter_zone(self.world, agent.name, str(args[2]), str(args[1]))
+            else:
+                spatial.finish_walk(self.world, agent.name, pending.walk_end)
+        except Exception:
+            pass
         try:
             self._absorb_own_changes(state, inventory_before)
         except Exception:

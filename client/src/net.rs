@@ -667,6 +667,17 @@ pub struct Actor {
     pub personality: String,
     #[serde(default, deserialize_with = "lenient_vec")]
     pub held_items: Vec<String>,
+    /// Grid cell in the current zone, owned by the server (None = unknown).
+    #[serde(default)]
+    pub x: Option<i32>,
+    #[serde(default)]
+    pub y: Option<i32>,
+}
+
+impl Actor {
+    pub fn cell(&self) -> Option<IVec2> {
+        Some(IVec2::new(self.x?, self.y?))
+    }
 }
 
 #[derive(Deserialize, Clone, Default)]
