@@ -1216,25 +1216,115 @@ def from_ascii(rows: List[str], legend: Dict[str, str], indoor: Iterable[str] = 
     return canvas.terrain(indoor, dict(parents or {}))
 
 
-def links_present(terrain: Terrain) -> Set[Pair]:
-    """地图上实际走得通（门都开着时）的地点对：直接挨着的地，或门洞两边。"""
+def links_present(terrain: Terrain, blocked: Iterable[Cell] = ()) -> Set[Pair]:
+    """地图上实际走得通的地点对：直接挨着的地，或门洞两边。
+
+    blocked：额外走不了的格子（比如锁着的门所在的门洞）；不给就当所有的门都开着。
+    """
+    blocked = set(blocked)
+
+    def open_at(c: Cell) -> bool:
+        return terrain.kind_at(c) in WALKABLE and c not in blocked
+
     out: Set[Pair] = set()
     for y in range(terrain.height):
         for x in range(terrain.width):
             a = terrain.owner[y][x]
-            if a < 0 or terrain.kind[y][x] not in WALKABLE:
+            if a < 0 or not open_at((x, y)):
                 continue
             for dx, dy in ((1, 0), (0, 1), (1, 1), (1, -1)):
                 c = (x + dx, y + dy)
                 if not terrain.inside(c):
                     continue
                 b = terrain.owner[c[1]][c[0]]
-                if b < 0 or b == a or terrain.kind[c[1]][c[0]] not in WALKABLE:
+                if b < 0 or b == a or not open_at(c):
                     continue
-                if dx and dy and (terrain.kind_at((x + dx, y)) not in WALKABLE or terrain.kind_at((x, y + dy)) not in WALKABLE):
+                if dx and dy and (not open_at((x + dx, y)) or not open_at((x, y + dy))):
                     continue
                 out.add(frozenset((terrain.names[a], terrain.names[b])))
     return out
+
+
+# =====================================================================
+# 改地形：改几格（砌墙、开门洞、铺地）、在两个地点之间打通 / 隔断
+# =====================================================================
+
+
+def _canvas_from(terrain: Terrain) -> _Canvas:
+    canvas = _Canvas(terrain.width, terrain.height, list(terrain.names))
+    canvas.owner = [list(row) for row in terrain.owner]
+    canvas.kind = [list(row) for row in terrain.kind]
+    canvas.doorways = list(terrain.doorways)
+    return canvas
+
+
+def _doorway_at(canvas: _Canvas, c: Cell) -> Optional[Doorway]:
+    """门洞那一格两侧（对着的两格）是哪两个地点。"""
+    me = canvas.own(c)
+    if me < 0:
+        return None
+    for dx, dy in _DIRS4:
+        a, b = canvas.own((c[0] - dx, c[1] - dy)), canvas.own((c[0] + dx, c[1] + dy))
+        other = b if a == me else a if b == me else -1
+        if other >= 0 and other != me and canvas.kd((c[0] - dx, c[1] - dy)) in WALKABLE                 and canvas.kd((c[0] + dx, c[1] + dy)) in WALKABLE:
+            return Doorway(c, canvas.names[me], canvas.names[other])
+    return None
+
+
+def edit_cells(terrain: Terrain, changes: Dict[Cell, Tuple[str, Optional[str]]]) -> Terrain:
+    """改几格：{格子: (种类, 属于哪个地点 / None)}。返回新的地形（原来的不动）。
+
+    障碍物（墙、篱笆、水）不属于任何地点；门洞要夹在两个地点之间才算门洞。
+    """
+    canvas = _canvas_from(terrain)
+    for c, (kind, owner) in changes.items():
+        if not canvas.inside(c):
+            continue
+        if kind in OBSTACLES or kind == VOID or owner is None:
+            canvas.set(c, -1, kind if kind in OBSTACLES else VOID)
+        else:
+            if owner not in canvas.index:
+                raise ValueError(f"unknown place {owner}")
+            canvas.set(c, canvas.index[owner], kind)
+    touched = set(changes)
+    # 门洞列表：改到的格子和它们旁边的门洞重新认一遍
+    near = {(c[0] + dx, c[1] + dy) for c in touched for dx in (-1, 0, 1) for dy in (-1, 0, 1)}
+    canvas.doorways = [d for d in canvas.doorways if d.cell not in near]
+    for c in sorted(near):
+        if canvas.inside(c) and canvas.kd(c) == DOOR:
+            d = _doorway_at(canvas, c)
+            if d:
+                canvas.doorways.append(d)
+    return canvas.terrain(terrain.indoor, terrain.parents)
+
+
+def connect(terrain: Terrain, a: str, b: str, *, door: bool = False) -> Terrain:
+    """让 a、b 之间走得通：已经通了就不动，否则穿过荒野 / 篱笆 / 墙打通一条最短的路（穿墙处是门洞）。"""
+    if frozenset((a, b)) in links_present(terrain):
+        return terrain
+    canvas = _canvas_from(terrain)
+    _repair_links(canvas, {frozenset((a, b)): "door" if door else "open"}, {}, set(terrain.indoor))
+    return canvas.terrain(terrain.indoor, terrain.parents)
+
+
+def separate(terrain: Terrain, a: str, b: str) -> Terrain:
+    """隔断 a、b：它们之间的门洞砌上，敞开的交界围上（室内用墙，室外用篱笆）。"""
+    canvas = _canvas_from(terrain)
+    ia, ib = canvas.index[a], canvas.index[b]
+    barrier = WALL if a in terrain.indoor or b in terrain.indoor else FENCE
+    for d in [d for d in canvas.doorways if d.pair() == frozenset((a, b))]:
+        canvas.set(d.cell, -1, barrier)
+    canvas.doorways = [d for d in canvas.doorways if d.pair() != frozenset((a, b))]
+    # 小的一边挨着另一边的格子都变成隔断
+    na, nb = len(canvas.cells(ia, WALKABLE)), len(canvas.cells(ib, WALKABLE))
+    side, other = (ia, ib) if (na, a) <= (nb, b) else (ib, ia)
+    line = [c for c in canvas.cells(side, WALKABLE)
+            if any(canvas.own((c[0] + dx, c[1] + dy)) == other
+                   and canvas.kd((c[0] + dx, c[1] + dy)) in WALKABLE for dx, dy in _DIRS8)]
+    for c in line:
+        canvas.set(c, -1, barrier)
+    canvas.doorways = [d for d in canvas.doorways if canvas.kd(d.cell) == DOOR]
+    return canvas.terrain(terrain.indoor, terrain.parents)
 
 
 def ascii_preview(terrain: Terrain) -> str:

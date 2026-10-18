@@ -193,3 +193,81 @@ def test_who_is_around_is_about_distance_and_walls(camp):
     camp.run_query("""MATCH (p:Person {name: 'Rowan'})-[r:LOCATED_AT]->() DELETE r WITH p
                       MATCH (l:Location {name: 'Shelter'}) MERGE (p)-[:LOCATED_AT]->(l)""")
     assert "Rowan" not in people_around(camp, "Observer", "CampfireClearing"), "walls hide people indoors"
+
+
+# ---------------------------------------------------------------------
+# 连通关系以地图为准
+# ---------------------------------------------------------------------
+
+
+def _edges(world, rel="ADJACENT_TO"):
+    rows = world.run_query(
+        f"MATCH (a:Location)-[:{rel}]-(b:Location) WHERE a.name < b.name RETURN a.name AS a, b.name AS b"
+    )
+    return {frozenset((r["a"], r["b"])) for r in rows}
+
+
+@pytest.mark.parametrize("world_id", ["key_and_door", "sealed_archive", "town_daily_life", "adventurer_town",
+                                      "market_town", "frontier_village"])
+def test_the_graph_says_what_the_map_says(world, world_id):
+    from spatial import locked_door_cells, terrain_of
+    from terrain_gen import links_present
+
+    w = _build(world, world_id)
+    t = terrain_of(w)
+    closed = locked_door_cells(w, t)
+    assert _edges(w) == links_present(t, closed)
+    assert _edges(w, "LOCKED_ADJACENT_TO") == links_present(t) - links_present(t, closed)
+
+
+def test_unlocking_a_door_opens_the_way(world):
+    from graph_ops import apply_all, make_ctx
+
+    w = _build(world, "key_and_door")
+    pair = frozenset(("Hall", "Vault"))
+    assert pair in _edges(w, "LOCKED_ADJACENT_TO") and pair not in _edges(w)
+    apply_all(w, [{"op": "set_prop", "entity": "VaultDoor", "label": "Item", "prop": "locked", "value": False}],
+              make_ctx(actor="", tool="", target=""))
+    assert pair in _edges(w) and pair not in _edges(w, "LOCKED_ADJACENT_TO")
+
+
+def test_a_wall_cuts_places_apart_and_a_doorway_joins_them(camp):
+    from spatial import edit_terrain, find_path, terrain_of, walkable_cells
+
+    t = terrain_of(camp)
+    pair = frozenset(("CampfireClearing", "Forest"))
+    forest = t.cells_of("Forest")
+    border = sorted(c for c in t.cells_of("CampfireClearing")
+                    if any((c[0] + dx, c[1] + dy) in forest for dx in (-1, 0, 1) for dy in (-1, 0, 1)))
+    out = edit_terrain(camp, {c: ("#", None) for c in border})
+    assert pair in {frozenset(p) for p in out["removed"]} and pair not in _edges(camp)
+    walk = walkable_cells(camp)
+    assert not find_path(walk, t.anchor("Forest"), terrain_of(camp).cells_of("CampfireClearing") & walk) or \
+        any(p for p in _edges(camp) if "Forest" in p), "only a detour through other places, if any"
+    gate = next(c for c in border for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1))
+                if (c[0] + dx, c[1] + dy) in forest
+                and terrain_of(camp).owner_at((c[0] - dx, c[1] - dy)) == "CampfireClearing")
+    edit_terrain(camp, {gate: ("+", "CampfireClearing")})
+    assert pair in _edges(camp)
+
+
+def test_scripts_that_link_or_unlink_places_change_the_map(camp):
+    from graph_ops import apply_all, make_ctx
+    from spatial import find_path, terrain_of, walkable_cells
+
+    ctx = make_ctx(actor="", tool="", target="")
+    pair = frozenset(("Forest", "BerryGrove"))
+    assert pair not in _edges(camp)
+    apply_all(camp, [{"op": "link", "a": "Forest", "b": "BerryGrove", "rel": "ADJACENT_TO", "bidirectional": True}], ctx)
+    t, walk = terrain_of(camp), walkable_cells(camp)
+    assert pair in _edges(camp), "a passage was cut on the map"
+    direct = walk & (t.cells_of("Forest") | t.cells_of("BerryGrove"))
+    assert find_path(direct, t.anchor("Forest"), t.cells_of("BerryGrove") & walk), "a way through without the clearing"
+    apply_all(camp, [{"op": "unlink", "a": "Forest", "b": "BerryGrove", "rel": "ADJACENT_TO", "bidirectional": True}], ctx)
+    assert pair not in _edges(camp)
+    # 图上随手加的边，地图上不通就会被同步掉
+    camp.run_query("MATCH (a:Location {name: 'Shelter'}), (b:Location {name: 'RiverBank'}) MERGE (a)-[:ADJACENT_TO]->(b)")
+    from spatial import sync_adjacency
+
+    sync_adjacency(camp)
+    assert frozenset(("Shelter", "RiverBank")) not in _edges(camp)

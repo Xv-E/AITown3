@@ -244,3 +244,58 @@ def test_a_locked_door_is_the_only_way_through_the_wall():
     (way,) = t.doorways_between("Hall", "Vault")
     assert path is not None and way.cell in path, "through the one doorway"
     assert open_between(world, "Hall", "Vault")
+
+
+# ---------------------------------------------------------------------
+# 改地形：连通关系跟着地图走
+# ---------------------------------------------------------------------
+
+
+def test_a_locked_doorway_counts_as_closed():
+    places, links, side = _world_spec("key_and_door")
+    t = generate(places, links, side)
+    (way,) = t.doorways_between("Hall", "Vault")
+    assert frozenset(("Hall", "Vault")) in links_present(t)
+    assert frozenset(("Hall", "Vault")) not in links_present(t, blocked=[way.cell])
+
+
+def test_walling_up_a_border_disconnects_and_a_doorway_reconnects():
+    from terrain_gen import edit_cells
+
+    places, links, side = _world_spec("frontier_village")
+    t = generate(places, links, side)
+    pair = frozenset(("Village", "Forest"))
+    forest = t.cells_of("Forest")
+    border = {c for c in t.cells_of("Village")
+              if any((c[0] + dx, c[1] + dy) in forest for dx in (-1, 0, 1) for dy in (-1, 0, 1))}
+    walled = edit_cells(t, {c: ("#", None) for c in border})
+    assert pair not in links_present(walled)
+    assert t.kind_at(next(iter(border))) == GROUND, "the original map is untouched"
+    # 墙上开一个门洞：门洞两侧一边是村子、一边是森林
+    gate = next(c for c in sorted(border) for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1))
+                if (c[0] + dx, c[1] + dy) in forest and walled.owner_at((c[0] - dx, c[1] - dy)) == "Village")
+    opened = edit_cells(walled, {gate: ("+", "Village")})
+    assert pair in links_present(opened)
+    assert [(d.owner, d.other) for d in opened.doorways if d.cell == gate] == [("Village", "Forest")]
+
+
+def test_connect_cuts_a_passage_and_separate_closes_it():
+    from terrain_gen import connect, separate
+
+    places, links, side = _world_spec("frontier_village")
+    t = generate(places, links, side)
+    pair = frozenset(("Forest", "Field"))
+    assert pair not in links_present(t)
+    joined = connect(t, "Forest", "Field")
+    assert pair in links_present(joined)
+    others = links_present(t) - {pair}
+    assert others <= links_present(joined), "nothing else got cut off"
+    assert connect(joined, "Forest", "Field") is joined, "already connected: no change"
+    apart = separate(joined, "Forest", "Field")
+    assert pair not in links_present(apart)
+    # 室内：把公会大厅和地下墓穴之间的门洞砌上
+    places, links, side = _world_spec("adventurer_town")
+    town = generate(places, links, side)
+    sealed = separate(town, "GuildHall", "Crypt")
+    assert frozenset(("GuildHall", "Crypt")) not in links_present(sealed)
+    assert not sealed.doorways_between("GuildHall", "Crypt")

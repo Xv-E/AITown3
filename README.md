@@ -134,6 +134,12 @@ The world is one continuous terrain map (`actions/terrain_gen.py`, stored as a `
 {"name": "Tavern", "tags": "food,social", "indoor": true, "parent": "TownSquare", "grid": [16, 12]}
 ```
 
+**Connectivity comes from the map.** The `ADJACENT_TO` / `LOCKED_ADJACENT_TO` edges in the graph are a summary of the terrain, rewritten by `spatial.sync_adjacency()`: places joined by open ground or an open doorway are `ADJACENT_TO`; places joined only through a locked door are `LOCKED_ADJACENT_TO` (with the door's key). The planner, routines and prompts read those edges as before. A world's `adjacencies` are only the design intent for generating the first map; a `locked` adjacency becomes a locked door item. After that, changes go through the map:
+
+- `spatial.edit_terrain(world, {(x, y): ("#", None), ...})` builds or knocks down walls, opens doorways, lays ground, then re-syncs.
+- Script ops: `link` / `unlink` of two Locations with `ADJACENT_TO` cut a passage / wall them off on the map; `spawn_location` grows the new place onto the map; setting a door's `locked` re-syncs (`graph_ops.apply_all`).
+- An edge added straight to the graph with no passage on the map is dropped at the next sync.
+
 `area` / `map` place a location's centre (optional); `grid` sets its rough size. The same world always gets the same map. A world can also hand-draw its map: `"terrain": {"rows": [...], "legend": {"V": "Village", "t": "Tavern"}}` with `#`, `%`, `~`, `+` and spaces as above. Places a questline adds later grow into the wilderness next to their neighbour; existing ground isn't touched.
 
 - **AI reasons in regions** (PDDL, routines, knowledge, the Storyteller): "go to the Forest", "chop the OakTree".

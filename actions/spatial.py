@@ -19,7 +19,9 @@ import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Set, Tuple
 
-from terrain_gen import DOOR, Place, Terrain, extend, from_ascii, generate, links_present
+from terrain_gen import (
+    DOOR, Place, Terrain, connect, edit_cells, extend, from_ascii, generate, links_present, separate,
+)
 
 if TYPE_CHECKING:
     from neo4j_world import Neo4jWorld
@@ -480,10 +482,11 @@ def layout_regions(world: "Neo4jWorld") -> Dict[str, Area]:
         world.run_query("MATCH (p:Person) REMOVE p.x, p.y")
     missing = [tuple(sorted(p)) for p in links if p <= set(terrain.names) and p not in links_present(terrain)]
     if missing:
-        log.info("地形上没有直接相通的相邻地点（经由别处仍走得到）：%s", missing)
+        log.info("地形上没有直接相通的相邻地点（经由别处仍走得到；图里会以地图为准）：%s", missing)
     areas = region_areas(world)
     place_doors(world, areas)
     _settle_items(world, terrain, areas, authored_sizes if rebuilt else {})
+    sync_adjacency(world)
     return areas
 
 
@@ -528,7 +531,11 @@ def _settle_items(world: "Neo4jWorld", terrain: Terrain, areas: Dict[str, Area],
 
 
 def door_pairs(world: "Neo4jWorld") -> Dict[str, Dict[str, Any]]:
-    """每扇门连着哪两块地：门的 connects_to；或者开门的钥匙效果里连的那两处；或者门所在地的「锁着的相邻」。"""
+    """每扇门连着哪两块地。
+
+    门已经摆在地图的门洞上：就是那个门洞两边（地图说了算）。还没摆：看门的 connects_to；
+    或者开门的钥匙效果里连的那两处；或者门所在地的「锁着的相邻」。
+    """
     import json
 
     rows = world.run_query(
@@ -536,11 +543,14 @@ def door_pairs(world: "Neo4jWorld") -> Dict[str, Dict[str, Any]]:
         MATCH (d:Item)-[:LOCATED_AT]->(l:Location) WHERE toLower(coalesce(d.item_kind, '')) = 'door'
         OPTIONAL MATCH (l)-[:LOCKED_ADJACENT_TO]-(m:Location)
         RETURN d.name AS door, l.name AS here, coalesce(d.connects_to, '') AS to,
-               coalesce(d.locked, false) AS locked, collect(DISTINCT m.name) AS locked_to
+               coalesce(d.locked, false) AS locked, collect(DISTINCT m.name) AS locked_to,
+               d.x AS x, d.y AS y
         """
     ) or []
     if not rows:
         return {}
+    t = terrain_of(world, build=False)
+    areas = region_areas(world) if t is not None else {}
     links: Dict[str, Tuple[str, str]] = {}
     for r in world.run_query("MATCH (i:Item) WHERE i.effects_on IS NOT NULL RETURN i.effects_on AS e") or []:
         try:
@@ -554,6 +564,15 @@ def door_pairs(world: "Neo4jWorld") -> Dict[str, Dict[str, Any]]:
     out: Dict[str, Dict[str, Any]] = {}
     for r in rows:
         here, other = r["here"], ""
+        area = areas.get(here)
+        on_map = None
+        if t is not None and area and r.get("x") is not None and r.get("y") is not None:
+            cell = (area[0] + _int(r["x"]), area[1] + _int(r["y"]))
+            on_map = next((w for w in t.doorways if w.cell == cell and here in (w.owner, w.other)), None)
+        if on_map is not None:
+            other = on_map.other if on_map.owner == here else on_map.owner
+            out[r["door"]] = {"here": here, "other": other, "locked": bool(r["locked"]), "cell": on_map.cell}
+            continue
         if r["to"]:
             other = r["to"]
         elif r["door"] in links:
@@ -643,19 +662,171 @@ def walkable_cells(world: "Neo4jWorld", areas: Optional[Dict[str, Area]] = None)
         return set()
     areas = areas if areas is not None else region_areas(world)
     _, blocked = _item_cells(world, areas)
-    # 锁着的门：门洞那一格不能走（门还没摆到门洞上也一样）；只「锁着相邻」、还没打开的也一样
+    return t.walkable() - blocked - locked_door_cells(world, t)
+
+
+def locked_door_cells(world: "Neo4jWorld", t: Terrain) -> Set[Cell]:
+    """锁着的门挡住的门洞：门摆在哪个门洞就挡哪个；还没摆上去的，挡住它那两块地之间所有的门洞。"""
+    out: Set[Cell] = set()
     for d in door_pairs(world).values():
-        if d["locked"]:
-            blocked.update(w.cell for w in t.doorways_between(d["here"], d["other"]))
+        if not d["locked"]:
+            continue
+        if d.get("cell"):
+            out.add(d["cell"])
+        else:
+            out.update(w.cell for w in t.doorways_between(d["here"], d["other"]))
+    return out
+
+
+# ---------------------------------------------------------------------
+# 连通关系从地图来：图里的 ADJACENT_TO / LOCKED_ADJACENT_TO 是地图的「摘要」
+# ---------------------------------------------------------------------
+
+
+def sync_adjacency(world: "Neo4jWorld") -> Dict[str, List[Tuple[str, str]]]:
+    """按地图重写地点之间的边：
+
+      走得通（敞开的交界，或开着的门洞）        → ADJACENT_TO（双向）
+      只隔着锁着的门才连着                      → LOCKED_ADJACENT_TO（双向，key = 开门的钥匙）
+      地图上不通                                → 没有边
+
+    只动两头都在地图上的地点之间的边。返回加了 / 删了哪些对。
+    """
+    import json
+
+    t = terrain_of(world, build=False)
+    if t is None:
+        return {}
+    on_map = {n for n in t.names if t.cells_of(n)}
+    every = {p for p in links_present(t) if p <= on_map}
+    open_ = {p for p in links_present(t, locked_door_cells(world, t)) if p <= on_map}
+    locked = every - open_
+    pairs = door_pairs(world)
+    keys: Dict[Any, str] = {}
     for r in world.run_query(
         """
-        MATCH (a:Location)-[:LOCKED_ADJACENT_TO]-(b:Location)
-        WHERE a.name < b.name AND NOT (a)-[:ADJACENT_TO]-(b)
-        RETURN a.name AS a, b.name AS b
+        MATCH (d:Item)-[:LOCATED_AT]->(:Location) WHERE toLower(coalesce(d.item_kind, '')) = 'door'
+        RETURN d.name AS door, d.accepts_from AS acc, coalesce(d.key_item, '') AS key
         """
     ) or []:
-        blocked.update(w.cell for w in t.doorways_between(r["a"], r["b"]))
-    return t.walkable() - blocked
+        try:
+            acc = json.loads(r["acc"]) if isinstance(r.get("acc"), str) else (r.get("acc") or [])
+        except ValueError:
+            acc = []
+        key = r["key"] or (str(acc[0]) if acc else "")
+        d = pairs.get(r["door"])
+        if d and key:
+            keys[frozenset((d["here"], d["other"]))] = key
+
+    changes: Dict[str, List[Tuple[str, str]]] = {"added": [], "removed": [], "locked": [], "unlocked": []}
+    for rel, want, add_key, drop_key in (("ADJACENT_TO", open_, "added", "removed"),
+                                         ("LOCKED_ADJACENT_TO", locked, "locked", "unlocked")):
+        have = {
+            frozenset((r["a"], r["b"]))
+            for r in world.run_query(
+                f"MATCH (a:Location)-[:{rel}]-(b:Location) WHERE a.name < b.name RETURN a.name AS a, b.name AS b"
+            ) or []
+        }
+        have = {p for p in have if p <= on_map and len(p) == 2}
+        for p in sorted(want, key=sorted):
+            a, b = sorted(p)
+            extra = " SET r1.key = $key, r2.key = $key" if rel == "LOCKED_ADJACENT_TO" else ""
+            world.run_query(
+                f"MATCH (a:Location {{name: $a}}), (b:Location {{name: $b}}) "
+                f"MERGE (a)-[r1:{rel}]->(b) MERGE (b)-[r2:{rel}]->(a)" + extra,
+                a=a, b=b, key=keys.get(p, ""),
+            )
+            if p not in have:
+                changes[add_key].append((a, b))
+        for p in sorted(have - want, key=sorted):
+            a, b = sorted(p)
+            world.run_query(
+                f"MATCH (a:Location {{name: $a}})-[r:{rel}]-(b:Location {{name: $b}}) DELETE r", a=a, b=b
+            )
+            changes[drop_key].append((a, b))
+    return changes
+
+
+def _save_keeping_items(world: "Neo4jWorld", terrain: Terrain) -> None:
+    """存改过的地形；外接矩形变了的地点，把地上东西的局部坐标跟着挪，世界位置不变。"""
+    before = region_areas(world)
+    save_terrain(world, terrain)
+    after = region_areas(world)
+    for name, (x, y, _, _) in after.items():
+        old = before.get(name)
+        if old and (old[0], old[1]) != (x, y):
+            world.run_query(
+                """
+                MATCH (i:Item)-[:LOCATED_AT]->(:Location {name: $n})
+                WHERE i.x IS NOT NULL AND i.y IS NOT NULL
+                SET i.x = i.x + $dx, i.y = i.y + $dy
+                """,
+                n=name, dx=old[0] - x, dy=old[1] - y,
+            )
+
+
+def _after_map_change(world: "Neo4jWorld", terrain: Terrain) -> Dict[str, Any]:
+    _save_keeping_items(world, terrain)
+    areas = region_areas(world)
+    place_doors(world, areas)
+    _settle_items(world, terrain, areas, {})
+    place_people(world)  # 站在新砌的墙里的人挪到旁边
+    return sync_adjacency(world)
+
+
+def edit_terrain(world: "Neo4jWorld", changes: Dict[Cell, Tuple[str, Optional[str]]]) -> Dict[str, Any]:
+    """改地形（砌墙、拆墙、开门洞、铺地……）：{世界格子: (种类, 地点 / None)}，改完按地图同步连通关系。
+
+    种类见 terrain_gen：'.' 室外地 ',' 室内地板 '+' 门洞 '#' 墙 '%' 篱笆 '~' 水 ' ' 荒野。
+    """
+    t = terrain_of(world)
+    if t is None:
+        return {}
+    return _after_map_change(world, edit_cells(t, changes))
+
+
+def connect_places(world: "Neo4jWorld", a: str, b: str) -> Dict[str, Any]:
+    """在地图上打通 a、b（已经通了就不动）。"""
+    t = terrain_of(world)
+    if t is None or a not in t.names or b not in t.names:
+        return {}
+    new = connect(t, a, b)
+    return sync_adjacency(world) if new is t else _after_map_change(world, new)
+
+
+def separate_places(world: "Neo4jWorld", a: str, b: str) -> Dict[str, Any]:
+    """在地图上隔断 a、b（门洞砌上，敞开的交界围起来）。"""
+    t = terrain_of(world)
+    if t is None or a not in t.names or b not in t.names:
+        return {}
+    return _after_map_change(world, separate(t, a, b))
+
+
+def apply_map_changes(
+    world: "Neo4jWorld",
+    *,
+    new_places: bool = False,
+    linked: Iterable[Tuple[str, str]] = (),
+    unlinked: Iterable[Tuple[str, str]] = (),
+    doors_changed: bool = False,
+) -> Dict[str, Any]:
+    """动作 / 脚本改了世界之后，把地图和连通关系对上（graph_ops.apply_all 调用）。
+
+    新地点 → 落到地图上；脚本连 / 断了两个地点 → 在地图上打通 / 隔断；门的锁变了 → 重新同步。
+    这个世界还没有地图（老测试的假世界）就什么都不做。
+    """
+    if terrain_of(world, build=False) is None:
+        return {}
+    if new_places:
+        layout_regions(world)
+    doors = {frozenset((d["here"], d["other"])) for d in door_pairs(world).values()}
+    for a, b in unlinked:
+        if frozenset((a, b)) in doors:
+            continue  # 隔着一扇门：关上 / 锁上就够了，不把门洞砌死
+        separate_places(world, a, b)
+    for a, b in linked:
+        connect_places(world, a, b)
+    return sync_adjacency(world)
 
 
 def region_shapes(world: "Neo4jWorld", areas: Optional[Dict[str, Area]] = None,

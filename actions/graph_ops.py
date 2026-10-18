@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, List, Optional, Tuple
 
 from action import (
@@ -11,6 +12,8 @@ from action import (
     get_property,
     set_property,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def resolve_token(token: Any, ctx: Dict[str, str]) -> Any:
@@ -518,11 +521,42 @@ def check_all(world, conditions: List[Dict[str, Any]], ctx: Dict[str, str]) -> T
 def apply_all(world, ops: List[Dict[str, Any]], ctx: Dict[str, str]) -> None:
     """依次执行；带 "when": [条件...] 的操作只在条件全部成立时执行。"""
     ctx = _with_world(world, ctx)
+    applied = []
     for op_spec in ops or []:
         when = op_spec.get("when")
         if when and not check_all(world, when, ctx)[0]:
             continue
         apply_op(world, op_spec, ctx)
+        applied.append(op_spec)
+    _sync_map(world, applied, ctx)
+
+
+def _sync_map(world, applied: List[Dict[str, Any]], ctx: Dict[str, str]) -> None:
+    """连通关系以地图为准：新地点落图；连 / 断两个地点就在地图上打通 / 隔断；门的锁变了就重新同步。"""
+    new_places = False
+    linked, unlinked = [], []
+    doors_changed = False
+    for op_spec in applied:
+        op = op_spec.get("op")
+        if op == "spawn_location":
+            new_places = True
+        elif op in ("link", "unlink") and (op_spec.get("rel") or "ADJACENT_TO") == "ADJACENT_TO" \
+                and (op_spec.get("a_label") or "Location") == "Location" \
+                and (op_spec.get("b_label") or "Location") == "Location":
+            pair = (str(resolve_token(op_spec["a"], ctx)), str(resolve_token(op_spec["b"], ctx)))
+            (linked if op == "link" else unlinked).append(pair)
+        elif op == "set_prop" and op_spec.get("prop") == "locked":
+            doors_changed = True
+    if not (new_places or linked or unlinked or doors_changed):
+        return
+    try:
+        import spatial
+
+        spatial.apply_map_changes(
+            world, new_places=new_places, linked=linked, unlinked=unlinked, doors_changed=doors_changed
+        )
+    except Exception:  # noqa: BLE001  地图同步失败不该让动作本身失败
+        logger.warning("map sync after ops failed", exc_info=True)
 
 
 def make_ctx(*, actor: str, tool: str, target: str, target_loc: str = "") -> Dict[str, str]:
