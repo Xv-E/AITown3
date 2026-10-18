@@ -44,6 +44,8 @@ OPENAI_CREATIVE_MODEL=qwen-plus    # Director / Storyteller / object actions: ra
 # Optional local LlamaCpp (GBNF repair only)
 # DEFAULT_MODEL_PATH=Models/your-model.gguf
 
+# NPC memory backend: chroma (default) | neo4j (:Memory nodes in the world DB)
+# MEMORY_BACKEND=chroma
 CHROMA_PATH=data/chroma
 DEFAULT_EMBEDDING_MODEL_PATH=sentence-transformers/all-MiniLM-L6-v2
 ```
