@@ -1303,6 +1303,28 @@ pub struct Simulation {
     /// Recent conversations, oldest first (played back as speech bubbles).
     #[serde(default)]
     pub conversations: Vec<Conversation>,
+    /// Recent mutters (NPCs talking to themselves on the road), oldest first.
+    #[serde(default)]
+    pub mutters: Vec<Mutter>,
+}
+
+#[derive(Deserialize, Clone, Default)]
+pub struct Mutter {
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub id: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub who: String,
+    /// Empty: just the mood icon.
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub text: String,
+    /// Mood icon key (happy, angry, sad, scared, tired, love, surprised, thinking, hurt, secret).
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub icon: String,
+    /// Something that matters (a secret slipping out); `overheard` when the player was close enough.
+    #[serde(default)]
+    pub important: bool,
+    #[serde(default)]
+    pub overheard: bool,
 }
 
 #[derive(Deserialize, Clone, Default)]

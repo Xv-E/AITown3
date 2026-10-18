@@ -923,6 +923,7 @@ def _play_simulation_snapshot(world) -> Dict[str, Any]:
             "story": sim.story(),
             "conflicts": sim.conflicts(limit=8),
             "conversations": sim.conversations(limit=8),
+            "mutters": sim.mutters(limit=8),
         }
     except Exception:
         return {"sim_time": 0, "tick": 0, "clock": _clock_safe(0.0), "npc_activity": []}

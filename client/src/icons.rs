@@ -435,8 +435,13 @@ fn palette(c: char) -> Option<[u8; 4]> {
 }
 
 fn image_for(icon: Icon) -> Image {
+    image_from_rows(&pixels(icon))
+}
+
+/// A 12x12 picture from rows of palette letters ('.' = transparent).
+pub fn image_from_rows(rows: &[&str; SIZE]) -> Image {
     let mut data = Vec::with_capacity(SIZE * SIZE * 4);
-    for row in pixels(icon) {
+    for row in rows {
         for c in row.chars() {
             data.extend_from_slice(&palette(c).unwrap_or([0, 0, 0, 0]));
         }

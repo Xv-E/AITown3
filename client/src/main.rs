@@ -1,5 +1,6 @@
 mod adapter;
 mod icons;
+mod mutter;
 mod net;
 mod scene;
 mod speech;
@@ -31,6 +32,7 @@ fn main() {
         .insert_resource(WalkGrid::default())
         .insert_resource(PlayerSync::default())
         .insert_resource(speech::SpeechPlayer::default())
+        .insert_resource(mutter::MutterBoard::default())
         .insert_resource(SimClock::default())
         .insert_resource(NpcDirector::default())
         .insert_resource(NearbyInteract::default())
@@ -44,13 +46,14 @@ fn main() {
             }),
             ..default()
         }))
-        .add_systems(Startup, (icons::setup_icons, icons::use_cjk_font, scene::setup_scene, ui::setup_ui))
+        .add_systems(Startup, (icons::setup_icons, mutter::setup_mood_icons, icons::use_cjk_font, scene::setup_scene, ui::setup_ui))
         .add_systems(
             Update,
             (
                 net::schedule_state_sync,
                 net::receive_network_messages,
                 speech::update_speech,
+                mutter::update_mutters,
                 terrain::sync_region_images,
                 terrain::sync_structure_image,
                 ui::ui_buttons,
@@ -74,6 +77,7 @@ fn main() {
             (
                 speech::render_speech_bubbles,
                 adapter::update_npc_bubbles,
+                mutter::render_mood_icons,
                 scene::draw_world_gizmos,
                 world_map::render_world_map,
                 world_map::draw_world_map_gizmos,

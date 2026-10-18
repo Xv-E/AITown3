@@ -9,12 +9,17 @@
 use bevy::prelude::*;
 use std::time::Instant;
 
+use crate::mutter::{MutterBoard, NpcMood};
 use crate::net::{trim_line, NpcActivity, SimClock, WorldSnapshot};
 use crate::speech::SpeechPlayer;
 use crate::scene::{cell_center, Interactive, TargetKind, TILE};
 
 /// Server walking speed (world cells per sim second); must match spatial.WALK_CELLS_PER_SEC.
 const SERVER_WALK_SPEED: f32 = 10.0;
+/// Head text: what the NPC is doing, a mutter, or something important slipping out.
+const BUBBLE_COLOR: Color = Color::srgb(1.0, 0.92, 0.55);
+const MUTTER_COLOR: Color = Color::srgb(0.84, 0.86, 0.92);
+const SECRET_COLOR: Color = Color::srgb(1.0, 0.66, 0.30);
 /// Fallback glide speed when correcting to the server position (pixels per second).
 const GLIDE_SPEED: f32 = 6.0 * TILE;
 const MIN_WALK_SECS: f32 = 0.2;
@@ -268,9 +273,15 @@ fn spawn_npc(commands: &mut Commands, name: &str, alive: bool, hp: i32, at: Vec2
                 font_size: 13.0,
                 ..default()
             },
-            TextColor(Color::srgb(1.0, 0.92, 0.55)),
+            TextColor(BUBBLE_COLOR),
             Transform::from_xyz(0.0, TILE * 0.85, 0.3),
             NpcBubble { owner: npc },
+        ));
+        parent.spawn((
+            Sprite { custom_size: Some(Vec2::splat(TILE * 0.7)), ..default() },
+            Transform::from_xyz(0.0, TILE * 1.45, 0.4),
+            Visibility::Hidden,
+            NpcMood { owner: npc },
         ));
     });
 }
@@ -301,11 +312,12 @@ pub fn run_npc_behaviour(
 pub fn update_npc_bubbles(
     world: Res<WorldSnapshot>,
     speech: Res<SpeechPlayer>,
+    mutters: Res<MutterBoard>,
     avatars: Query<&NpcAvatar>,
-    mut bubbles: Query<(&NpcBubble, &mut Text2d), Without<NpcThought>>,
+    mut bubbles: Query<(&NpcBubble, &mut Text2d, &mut TextColor), Without<NpcThought>>,
     mut thoughts: Query<(&NpcThought, &mut Text2d), Without<NpcBubble>>,
 ) {
-    for (bubble, mut text) in &mut bubbles {
+    for (bubble, mut text, mut color) in &mut bubbles {
         let Ok(avatar) = avatars.get(bubble.owner) else {
             continue;
         };
@@ -313,15 +325,26 @@ pub fn update_npc_bubbles(
             .activity(&avatar.name)
             .map(|a| a.state_label.clone())
             .unwrap_or_default();
-        let next = if speech.is_speaking(&avatar.name) {
-            String::new() // the speech bubble is up; don't stack the action text on it
+        let mutter = mutters.current(&avatar.name).filter(|m| !m.text.trim().is_empty());
+        let (next, tint) = if speech.is_speaking(&avatar.name) {
+            (String::new(), BUBBLE_COLOR) // the speech bubble is up; don't stack the action text on it
+        } else if let Some(m) = mutter {
+            // Something important the player was close enough to catch stands out.
+            if m.important && m.overheard {
+                (format!("! {} !", trim_line(&m.text, 44)), SECRET_COLOR)
+            } else {
+                (format!("~ {} ~", trim_line(&m.text, 44)), MUTTER_COLOR)
+            }
         } else if !state_label.is_empty() && avatar.bubble.is_empty() {
-            state_label
+            (state_label, BUBBLE_COLOR)
         } else {
-            avatar.bubble.clone()
+            (avatar.bubble.clone(), BUBBLE_COLOR)
         };
         if text.0 != next {
             text.0 = next;
+        }
+        if color.0 != tint {
+            color.0 = tint;
         }
     }
     for (thought, mut text) in &mut thoughts {

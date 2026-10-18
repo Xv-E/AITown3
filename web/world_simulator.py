@@ -195,6 +195,10 @@ class WorldSimulator:
             from quest import QuestTracker
 
             self._game_loop.hooks.append(QuestTracker())
+            if os.environ.get("AITOWN3_MUTTER", "1") != "0":
+                from mutter import Mutterer
+
+                self._game_loop.hooks.append(Mutterer())
         else:
             self._game_loop.world = world
         return self._game_loop
@@ -443,6 +447,11 @@ class WorldSimulator:
         """最近的对话（旧的在前，客户端按 id 去重后依次播放）。"""
         loop = self._game_loop
         return list(loop.conversations[-max(1, int(limit)):]) if loop else []
+
+    def mutters(self, limit: int = 8) -> List[Dict[str, Any]]:
+        """最近的嘀咕（旧的在前，客户端按 id 去重后在头顶显示一会儿）。"""
+        loop = self._game_loop
+        return list((getattr(loop, "mutters", None) or [])[-max(1, int(limit)):]) if loop else []
 
     def record_conversation(self, world, a: str, b: str, location: str, lines: List[Any]) -> None:
         """玩家通过界面说的话也进同一个列表（NPC 的回话同样冒气泡）。"""
