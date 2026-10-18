@@ -228,7 +228,44 @@ def draft_sections(patch: Dict[str, Any]) -> List[Dict[str, Any]]:
             stages.append(f"    Then everyone hears: {st['news']}")
     if stages:
         sections.append({"title": "Stages", "lines": stages})
+    listens = []
+    for ls in patch.get("listeners") or []:
+        if not isinstance(ls, dict):
+            continue
+        heard = _listen_text(ls)
+        then = ls.get("then") or {}
+        does = [t for t in (
+            f'says "{then["say"]}"' if then.get("say") else "",
+            "; ".join(t for t in (_effect_text(e) for e in then.get("effects") or [] if isinstance(e, dict)) if t),
+            "starts the questline" if then.get("start") else "",
+            f"{then['nudge'].get('who')} reacts" if isinstance(then.get("nudge"), dict) else "",
+        ) if t]
+        active = ls.get("active") or ("dormant" if then.get("start") else "active")
+        listens.append(f"{ls.get('id')} [{active}]: when {heard} -> {', '.join(does) or 'nothing'}")
+    if listens:
+        sections.append({"title": "Listeners", "lines": listens})
     return sections
+
+
+def _listen_text(ls: Dict[str, Any]) -> str:
+    def one(e: Dict[str, Any]) -> str:
+        who = str(e.get("who") or "anyone").replace("@player", "player")
+        what = e.get("what") or e.get("contains") or ""
+        times = f" x{e['times']}" if int(e.get("times") or 1) > 1 else ""
+        return f"{who} {e.get('event')} {what}".strip() + times
+
+    if ls.get("sequence"):
+        text = " -> ".join(one(e) for e in ls["sequence"])
+    elif ls.get("on"):
+        count = int(ls.get("count") or 1)
+        text = one(ls["on"]) + (f" {count} times" if count > 1 else "")
+    else:
+        text = f"{len(ls.get('when') or [])} condition(s) become true"
+    if ls.get("within_hours"):
+        text += f" within {ls['within_hours']}h"
+    if ls.get("at"):
+        text += f" at {ls['at']}"
+    return text
 
 
 def draft_summary(body: Dict[str, Any]) -> Dict[str, Any]:

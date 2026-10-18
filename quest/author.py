@@ -37,6 +37,7 @@ SCHEMA = """Respond with ONE JSON object:
   "title": "...", "premise": "1-2 sentences", "hook": "how the player first hears of it",
   "start": {"hear": ["<clue>"], "find": ["<item>"], "visit": ["<region>"], "when": [ <conditions> ],
             "pattern": [ <steps> ], "within_hours": 2, "at": "night", "omen": {"text": "...", "effects": [ ]}},
+  "listeners": [ <listeners: the world reacting to what happens, see below> ],
   "regions": [{"name": "OldMine", "next_to": "<existing region>", "description": "...", "tags": "a,b", "w": 18, "h": 14}],
   "persons": [{"name": "Hollis", "located_at": "<region>", "personality": "...", "background": "...",
                "goal": "...", "secret": "...", "mood": "wary", "speech_style": "...",
@@ -105,6 +106,37 @@ Optional for all of them:
           (an item an omen moves must be listed in "items" somewhere out of the way)
 Give at least two different ways in when you can, so the player doesn't miss it. None of them may
 be true already (the player must not start out knowing / holding / standing there).
+
+Listeners ("listeners"): the world reacting to what happens - this is what makes a questline feel
+alive. Each listens for something, and when it happens (and its conditions hold) does something:
+  {"id": "Footsteps", "active": "dormant",
+   "sequence": [{"event": "enter", "who": "@player", "what": "Forest"},
+                {"event": "enter", "who": "@player", "what": "Camp"},
+                {"event": "enter", "who": "@player", "what": "Forest"}], "within_hours": 2, "at": "night",
+   "then": {"say": "Footsteps echo yours... and stop a beat after you do.",
+            "effects": [{"op": "relocate", "entity": "MuddyBootprints", "to": "@here"}], "start": true}}
+  {"id": "Knocking", "active": "stage:s2", "on": {"event": "enter", "who": "@player", "what": "OldMine"},
+   "at": "night", "cooldown_hours": 6, "then": {"say": "Three knocks from deep in the rock."}}
+  {"id": "ReedSneaks", "active": "active", "on": {"event": "enter", "who": "Reed", "what": "Storehouse"},
+   "then": {"effects": [{"op": "relocate", "entity": "TornGlove", "to": "Storehouse"}],
+            "nudge": {"who": "Mara", "text": "You saw Reed slip into the storehouse. Tell @player?"}}}
+Fields:
+  "active":   when it listens - "dormant" (before the player takes the questline up), "active" (while it
+              runs), "stage:<stage id>" (only during that stage), "always"
+  "on":       one kind of event, "count": N times (optionally "within_hours"); or "sequence": several in order
+              (steps may have "times"); or neither, to fire the moment "when" becomes true
+  events:     enter (region) / pick_up, drop (item) / talk (person) / do (action, "target") / learn (clue,
+              who @player) / time (night, dawn, morning, day, afternoon, dusk, evening) / hour ("0".."23") /
+              new_day / news ("contains": "some words") / stage_done (stage id) / quest_started / listener (id)
+  "who":      @player, npc, anyone, or a person's name (who did it)
+  "when":     extra conditions (@player, @here = where the player is, @actor = who did it); "at": time of day
+  "then":     "say" (a line everyone hears), "effects" (change the world), "start": true (take the
+              questline up - only while dormant), "nudge": {"who": <NPC>, "text": what they now feel like doing}
+  "once": true to fire only once (default for "start"); "cooldown_hours" between repeats
+A listener's effects can also set a flag a stage checks, e.g. effects
+[{"op": "set_prop", "entity": "OldMine", "prop": "knocked", "value": true}] and a stage condition
+{"op": "prop_eq", "entity": "OldMine", "prop": "knocked", "value": true}.
+Use 1-4 listeners; at least one "start" way the player can reach on their own (enter / pick_up / time).
 
 Rules: CamelCase names, new names must not exist yet; values are plain JSON (no expressions);
 places are relations, never a "location" property; new regions sit next to an existing region;

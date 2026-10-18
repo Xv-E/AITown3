@@ -134,6 +134,41 @@ class StartSpec:
         ]
 
 
+LISTENER_PHASES = ("dormant", "active", "always")
+LISTENER_ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,31}$")
+
+
+@dataclass
+class ListenerSpec:
+    """监听器：某种事发生了（on / sequence）、条件也成立（when / at），就做 then 里的事。
+
+    active：什么时候在听 —— dormant（任务线还没被接下）/ active（进行中）/ stage:<阶段 id> / always。
+    on：一种事件 {"event", "who", "what", "target", "contains"}，count 次（within_hours 内）才算；
+        不写 on 也不写 sequence = 每拍只看 when。
+    sequence：几种事件按顺序发生（同 start.pattern，可以带 times）。
+    then：{"say": 一句话, "effects": [...], "start": true（接下任务线）, "nudge": {"who", "text"}}。
+    once：只触发一次（接下任务线的默认 true）；cooldown_hours：两次之间至少隔多久。
+    """
+
+    id: str
+    active: str = ""
+    on: Dict[str, Any] = field(default_factory=dict)
+    sequence: List[Dict[str, Any]] = field(default_factory=list)
+    count: int = 1
+    within_hours: float = 0.0
+    when: List[Dict[str, Any]] = field(default_factory=list)
+    at: str = ""
+    cooldown_hours: float = 0.0
+    once: Optional[bool] = None
+    then: Dict[str, Any] = field(default_factory=dict)
+
+    def phase(self) -> str:
+        return self.active or ("dormant" if self.then.get("start") else "active")
+
+    def fires_once(self) -> bool:
+        return bool(self.then.get("start")) if self.once is None else bool(self.once)
+
+
 @dataclass
 class QuestlinePatch:
     title: str
@@ -146,6 +181,7 @@ class QuestlinePatch:
     clues: List[ClueSpec] = field(default_factory=list)
     stages: List[StageSpec] = field(default_factory=list)
     start: StartSpec = field(default_factory=StartSpec)
+    listeners: List[ListenerSpec] = field(default_factory=list)
 
     # ----- (反)序列化 -----
 
@@ -169,6 +205,7 @@ class QuestlinePatch:
             clues=many("clues", ClueSpec, _fields(ClueSpec)),
             stages=many("stages", StageSpec, _fields(StageSpec)),
             start=_start(data.get("start")),
+            listeners=[_listener(x) for x in data.get("listeners") or [] if isinstance(x, dict)],
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -184,6 +221,30 @@ class QuestlinePatch:
 
 def _fields(cls) -> Set[str]:
     return set(cls.__dataclass_fields__)
+
+
+def _listener(raw: Dict[str, Any]) -> ListenerSpec:
+    def num(key: str, default: float) -> float:
+        try:
+            return float(raw.get(key) if raw.get(key) is not None else default)
+        except (TypeError, ValueError):
+            return -1.0  # 校验时报出来
+
+    then = raw.get("then")
+    once = raw.get("once")
+    return ListenerSpec(
+        id=str(raw.get("id") or "").strip(),
+        active=str(raw.get("active") or "").strip(),
+        on=dict(raw["on"]) if isinstance(raw.get("on"), dict) else {},
+        sequence=[x for x in raw.get("sequence") or [] if isinstance(x, dict)],
+        count=int(num("count", 1)),
+        within_hours=num("within_hours", 0),
+        when=[x for x in raw.get("when") or [] if isinstance(x, dict)],
+        at=str(raw.get("at") or "").strip(),
+        cooldown_hours=num("cooldown_hours", 0),
+        once=None if once is None else bool(once),
+        then=dict(then) if isinstance(then, dict) else {},
+    )
 
 
 def _start(raw: Any) -> StartSpec:
@@ -345,6 +406,7 @@ def validate(patch: QuestlinePatch, known: KnownWorld) -> List[str]:
             errors.append(f"clue {c.name}: known_by must list people who know it (bad: {bad or 'none given'})")
 
     errors += _start_problems(patch, known, regions, items, persons, all_names)
+    errors += _listener_problems(patch, known, _event_names(patch, known, regions, items, persons, all_names))
 
     check = OpsChecker(placeholders=("player",), entity_names=all_names, archetypes=known.archetypes)
     ids: Set[str] = set()
@@ -397,7 +459,13 @@ def _start_problems(patch: QuestlinePatch, known: KnownWorld, regions: Set[str],
         err = check.conditions(st.when, "start.when")
         if err:
             out.append(err)
-    out += _pattern_problems(st.pattern, regions, items, persons - {known.player}, all_names)
+    names = _event_names(patch, known, regions, items, persons, all_names)
+    for i, step in enumerate(st.pattern):
+        where = f"start.pattern step {i + 1}"
+        if step.get("event") not in PATTERN_EVENTS:
+            out.append(f"{where}: event is one of {', '.join(PATTERN_EVENTS)}")
+            continue
+        out += _event_problems({"who": "@player", **step}, where, names, steps=True)
     if st.within_hours < 0:
         out.append("start.within_hours is a number of game hours (0 = no limit)")
     if st.at and parse_hours(st.at) is None:
@@ -411,36 +479,120 @@ def _start_problems(patch: QuestlinePatch, known: KnownWorld, regions: Set[str],
     return out
 
 
-def _pattern_problems(pattern: List[Dict[str, Any]], regions: Set[str], items: Set[str], npcs: Set[str],
-                      all_names: Set[str]) -> List[str]:
-    out: List[str] = []
+@dataclass
+class _EventNames:
+    regions: Set[str]
+    items: Set[str]
+    persons: Set[str]
+    player: str
+    clues: Set[str]
+    stages: Set[str]
+    listeners: Set[str]
+    all_names: Set[str]
+    actions: Optional[Set[str]]
+
+
+def _event_names(patch, known, regions, items, persons, all_names) -> _EventNames:
     try:
         from registry import get_registry
 
-        actions = set(get_registry().names())
+        actions: Optional[Set[str]] = set(get_registry().names())
     except Exception:  # noqa: BLE001
         actions = None
-    expect = {"enter": ("a region", regions), "pick_up": ("an item", items), "drop": ("an item", items),
-              "talk": ("an NPC", npcs)}
-    for i, step in enumerate(pattern):
-        where = f"start.pattern step {i + 1}"
-        event, what = step.get("event"), str(step.get("what") or "")
-        if event not in PATTERN_EVENTS:
-            out.append(f"{where}: event is one of {', '.join(PATTERN_EVENTS)}")
-            continue
-        if event == "do":
-            if actions is not None and what not in actions:
-                out.append(f"{where}: {what!r} is not an action")
-        elif what not in expect[event][1]:
-            out.append(f"{where}: {what!r} is not {expect[event][0]}")
-        if step.get("target") and step["target"] not in all_names:
-            out.append(f"{where}: target {step['target']!r} does not exist")
+    return _EventNames(
+        regions=regions, items=items, persons=persons, player=known.player,
+        clues={c.name for c in patch.clues} | set(known.other_names),
+        stages={st.id for st in patch.stages}, listeners={x.id for x in patch.listeners},
+        all_names=all_names, actions=actions,
+    )
+
+
+def _event_problems(spec: Dict[str, Any], where: str, n: _EventNames, *, steps: bool = False) -> List[str]:
+    """一条事件描述（监听器的 on / sequence 一步 / start.pattern 一步）写得对不对。"""
+    from .trail import EVENTS, PERSON_EVENTS
+
+    out: List[str] = []
+    event, what = spec.get("event"), str(spec.get("what") or "")
+    if event not in EVENTS:
+        return [f"{where}: event is one of {', '.join(EVENTS)}"]
+    who = str(spec.get("who") or "anyone")
+    if who not in ("@player", "npc", "anyone") and who not in n.persons:
+        out.append(f"{where}: who is @player, npc, anyone or a person's name (got {who!r})")
+    if event == "learn" and who not in ("@player", "anyone"):
+        out.append(f"{where}: only the player's learning is tracked (who @player)")
+    npcs = n.persons - {n.player}
+    expect = {
+        "enter": ("a region", n.regions), "pick_up": ("an item", n.items), "drop": ("an item", n.items),
+        "talk": ("an NPC", npcs) if who == "@player" else ("a person", n.persons), "learn": ("a clue", n.clues),
+        "time": ("a time of day", set(TIMES_OF_DAY)), "hour": ("an hour 0-23", {str(h) for h in range(24)}),
+        "stage_done": ("a stage id", n.stages), "listener": ("a listener id", n.listeners),
+    }
+    if event == "do":
+        if n.actions is not None and what not in n.actions:
+            out.append(f"{where}: {what!r} is not an action")
+    elif event in expect and (what or event in PERSON_EVENTS) and what not in expect[event][1]:
+        out.append(f"{where}: {what!r} is not {expect[event][0]}")
+    if spec.get("target") and spec["target"] not in n.all_names | n.stages:
+        out.append(f"{where}: target {spec['target']!r} does not exist")
+    if steps:
         try:
-            ok = 1 <= int(step.get("times") or 1) <= 5
+            ok = 1 <= int(spec.get("times") or 1) <= 5
         except (TypeError, ValueError):
             ok = False
         if not ok:
             out.append(f"{where}: times is 1-5")
+    return out
+
+
+def _listener_problems(patch: QuestlinePatch, known: KnownWorld, names: _EventNames) -> List[str]:
+    from ephemeral_action_dsl import OpsChecker
+
+    out: List[str] = []
+    check = OpsChecker(placeholders=("player", "here", "actor"), entity_names=names.all_names,
+                       archetypes=known.archetypes)
+    seen: Set[str] = set()
+    for i, ls in enumerate(patch.listeners):
+        where = f"listener {ls.id or i + 1}"
+        if not LISTENER_ID_RE.match(ls.id):
+            out.append(f"{where}: needs an id (letters, digits, _)")
+        elif ls.id in seen:
+            out.append(f"{where}: id is used twice")
+        seen.add(ls.id)
+        phase = ls.phase()
+        if phase not in LISTENER_PHASES and not (phase.startswith("stage:") and phase[6:] in names.stages):
+            out.append(f"{where}: active is dormant, active, always or stage:<stage id>")
+        if ls.then.get("start") and phase not in ("dormant", "always"):
+            out.append(f"{where}: a listener that starts the questline must listen while it is dormant")
+        if ls.on and ls.sequence:
+            out.append(f"{where}: give on or sequence, not both")
+        if ls.on:
+            out += _event_problems(ls.on, f"{where}.on", names)
+        for k, step in enumerate(ls.sequence):
+            out += _event_problems(step, f"{where}.sequence step {k + 1}", names, steps=True)
+        if not ls.on and not ls.sequence and not ls.when:
+            out.append(f"{where}: listen for something (on / sequence) or watch conditions (when)")
+        if not 1 <= ls.count <= 10:
+            out.append(f"{where}: count is 1-10")
+        if ls.within_hours < 0 or ls.cooldown_hours < 0:
+            out.append(f"{where}: within_hours and cooldown_hours are game hours (0 = no limit)")
+        if ls.at and parse_hours(ls.at) is None:
+            out.append(f"{where}: at {ls.at!r}: use one of {', '.join(TIMES_OF_DAY)} or hours like \"22-4\"")
+        if ls.when:
+            err = check.conditions(ls.when, f"{where}.when")
+            if err:
+                out.append(err)
+        then = ls.then
+        if not any(then.get(k) for k in ("say", "effects", "start", "nudge")):
+            out.append(f"{where}: then needs say, effects, start or nudge")
+        err = check.effects(then.get("effects") or [], f"{where}.then.effects")
+        if err:
+            out.append(err)
+        nudge = then.get("nudge")
+        if nudge:
+            bad = (not isinstance(nudge, dict) or nudge.get("who") not in names.persons - {known.player}
+                   or not str(nudge.get("text") or "").strip())
+            if bad:
+                out.append(f'{where}: nudge is {{"who": <NPC>, "text": what they feel like doing}}')
     return out
 
 
@@ -516,7 +668,7 @@ def completeness_problems(patch: QuestlinePatch) -> List[str]:
             out.append(f"person {p.name}: give a daily routine of 2-4 slots (start, end, location, activity)")
     if patch.stages and not patch.stages[0].giver:
         out.append("the first stage needs a giver (who asks the player for help)")
-    if patch.start.empty():
+    if patch.start.empty() and not any(ls.then.get("start") for ls in patch.listeners):
         out.append('say how the player comes across this story in "start": a clue they hear, '
                    "a thing they find (a note, a token) or a place they reach")
     return out
@@ -527,6 +679,7 @@ def conservation_problems(patch: QuestlinePatch) -> List[str]:
     out: List[str] = []
     groups = [(f"stage {st.id} reward", st.reward) for st in patch.stages] + [
         ("start.omen", (patch.start.omen or {}).get("effects") or [])] + [
+        (f"listener {ls.id}", ls.then.get("effects") or []) for ls in patch.listeners] + [
         (f"item {it.name} action {a.get('id')}", a.get("effects") or [])
         for it in patch.items for a in it.actions if isinstance(a, dict)
     ]

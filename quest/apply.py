@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import asdict
 from typing import Any, Dict
 
 from .spec import QuestlinePatch, item_props
@@ -62,10 +63,11 @@ def apply_questline(world, patch: QuestlinePatch) -> Dict[str, Any]:
         title=patch.title, description=patch.premise, hook=patch.hook,
         stage=first.title, objective=first.objective,
         # 有接下的途径就先休眠：玩家听说 / 捡到 / 走到之前不推进（见 runtime.check_progress）
-        state="active" if patch.start.empty() else "dormant",
+        state=_first_state(patch),
         questline=True, current=0,
         stages=json.dumps([s.__dict__ for s in patch.stages], ensure_ascii=False),
         start=json.dumps(patch.start.__dict__, ensure_ascii=False),
+        listeners=json.dumps([asdict(x) for x in patch.listeners], ensure_ascii=False),
     )
     if first.giver:
         world.link_entities(first.giver, "Person", name, "Quest", "GIVES_QUEST")
@@ -79,5 +81,12 @@ def apply_questline(world, patch: QuestlinePatch) -> Dict[str, Any]:
             "clues": [c.name for c in patch.clues],
         },
         "first_objective": first.objective,
-        "state": "active" if patch.start.empty() else "dormant",
+        "state": _first_state(patch),
+        "listeners": [x.id for x in patch.listeners],
     }
+
+
+def _first_state(patch: QuestlinePatch) -> str:
+    """有接下的途径（start 或会接下任务线的监听器）就先休眠，否则一写进世界就开始。"""
+    waits = not patch.start.empty() or any(x.then.get("start") for x in patch.listeners)
+    return "dormant" if waits else "active"

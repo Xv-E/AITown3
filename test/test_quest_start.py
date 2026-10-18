@@ -165,10 +165,12 @@ def test_a_pattern_matches_in_order_with_other_things_in_between():
 
 class TrailWorld:
     def __init__(self):
-        self.loc, self.items = "Camp", []
+        self.loc, self.items, self.knows = "Camp", [], []
 
     def run_query(self, cypher, **p):
-        return [{"loc": self.loc, "items": list(self.items)}]
+        if "KNOWS_FACT|BELIEVES" in cypher:
+            return [{"names": list(self.knows)}]
+        return [{"who": "Traveler", "loc": self.loc, "items": list(self.items)}]
 
 
 def test_the_observer_turns_changes_into_events():
@@ -177,10 +179,11 @@ def test_the_observer_turns_changes_into_events():
     old = [{"id": "1:Mara:Traveler", "a": "Mara", "b": "Traveler"}]
     obs.observe(w, "Traveler", now=0.0, conversations=old)
     assert trail.events("Traveler") == [], "what was already there is not news"
-    w.loc, w.items = "Forest", ["TornNote"]
+    w.loc, w.items, w.knows = "Forest", ["TornNote"], ["SmokeRumor"]
     obs.observe(w, "Traveler", now=1.0, conversations=old + [{"id": "2:Traveler:Reed", "a": "Traveler", "b": "Reed"}])
     got = [(e["event"], e["what"]) for e in trail.events("Traveler")]
-    assert got == [("enter", "Forest"), ("pick_up", "TornNote"), ("talk", "Reed")]
+    assert got == [("enter", "Forest"), ("pick_up", "TornNote"), ("learn", "SmokeRumor"), ("talk", "Reed")]
+    assert [(e["who"], e["what"]) for e in trail.events("Reed")] == [("Reed", "Traveler")], "both sides talked"
     trail.clear()
 
 

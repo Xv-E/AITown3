@@ -6,6 +6,9 @@
 先发生异象（omen：一句话 + 改世界），再提醒第一阶段的委托人。
 休眠期间，知道那条线索的 NPC 会被提醒去告诉玩家。
 
+任务线还可以带监听器（listeners，见 quest.listeners）：监听事件总线上的任何事，
+休眠时可以把任务线接下，进行中可以让世界对玩家（或 NPC）做的事起反应。
+
 只通过 GameLoop.hooks 接入（on_tick），不改模拟本身。
 """
 
@@ -28,7 +31,8 @@ def active_questlines(world) -> List[Dict[str, Any]]:
         MATCH (q:Quest) WHERE q.questline = true
         RETURN q.name AS name, q.title AS title, q.description AS premise, q.state AS state,
                coalesce(q.current, 0) AS current, q.stages AS stages, q.start AS start,
-               coalesce(q.hook, '') AS hook, coalesce(q.hook_told, false) AS hook_told
+               coalesce(q.hook, '') AS hook, coalesce(q.hook_told, false) AS hook_told,
+               q.listeners AS listeners, q.listener_state AS listener_state
         ORDER BY name
         """
     ) or []
@@ -95,62 +99,63 @@ def _player_here(world, player: str) -> str:
     return rows[0]["loc"] if rows else ""
 
 
-def _omen(world, player: str, here: str, omen: Dict[str, Any]) -> None:
-    """接下的那一刻发生的事：执行效果；被挪到这里的东西重新摆到地上。"""
-    from graph_ops import apply_all
+def start_quest(world, q: Dict[str, Any], player: str, how: str, here: str, *,
+                announce: Callable[[str], None], now: float = 0.0) -> Optional[Dict[str, Any]]:
+    """把休眠的任务线接下：先发生异象（start.omen），再公告；返回给委托人的提醒用的记录。"""
+    from .listeners import apply_effects
+    from .trail import note
 
-    effects = omen.get("effects") or []
-    if not effects:
-        return
-    apply_all(world, effects, {"player": player, "here": here})
-    moved = [e.get("entity") for e in effects if isinstance(e, dict) and e.get("op") == "relocate"]
-    if moved and here:
-        world.run_query("MATCH (i:Item) WHERE i.name IN $n REMOVE i.x, i.y", n=moved)
+    stages = q.get("stages") or []
+    if not stages:
+        return None
+    world.run_query("MATCH (q:Quest {name: $n}) SET q.state = 'active', q.started_by = $how",
+                    n=q["name"], how=how)
+    omen = (q.get("start") or {}).get("omen") or {}
+    if omen.get("effects"):
         try:
-            from spatial import place_unplaced
-
-            place_unplaced(world, here)
-        except Exception:  # noqa: BLE001
-            pass
+            apply_effects(world, omen["effects"], {"player": player, "here": here})
+        except Exception as e:  # noqa: BLE001
+            print(f"[WARN] questline omen {q['name']}: {e}")
+    if omen.get("text"):
+        announce(str(omen["text"]))
+    announce(f"{player} {how}: {q.get('hook') or q.get('title')}")
+    note("", "quest_started", q["name"], at=now)
+    return {"quest": q["name"], "started": True, "how": how, "next": stages[0]}
 
 
 def check_progress(world, *, announce: Callable[[str], None],
                    seen_since: Optional[Callable[[str], List[Dict[str, Any]]]] = None,
-                   hour: Optional[float] = None) -> List[Dict[str, Any]]:
+                   hour: Optional[float] = None, now: float = 0.0,
+                   quests: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
     """推进所有任务线；返回这次的变化：接下了（started）或完成了某个阶段。announce(text) 负责公告。
 
     seen_since(quest) -> 这条任务线写进世界以来玩家的足迹；hour：现在几点。
     """
     from graph_ops import apply_all, check_all
 
+    from .trail import note
+
     player = _player(world)
     if not player:
         return []
     ctx = {"player": player}
     done: List[Dict[str, Any]] = []
-    for q in active_questlines(world):
+    for q in active_questlines(world) if quests is None else quests:
         stages = q["stages"]
         if q.get("state") == "dormant":
             start = q.get("start") or {}
+            if not any(start.get(k) for k in ("hear", "find", "visit", "when", "pattern")):
+                continue  # 只靠监听器接下
             here = _player_here(world, player)
             seen = seen_since(q["name"]) if seen_since else []
             how = came_across(world, player, start, seen=seen, hour=hour, here=here)
-            if not how or not stages:
+            if not how:
                 continue
-            world.run_query("MATCH (q:Quest {name: $n}) SET q.state = 'active', q.started_by = $how",
-                            n=q["name"], how=how)
-            omen = start.get("omen") or {}
-            if omen:
-                try:
-                    _omen(world, player, here, omen)
-                except Exception as e:  # noqa: BLE001
-                    print(f"[WARN] questline omen {q['name']}: {e}")
-                if omen.get("text"):
-                    announce(str(omen["text"]))
-            announce(f"{player} {how}: {q.get('hook') or q.get('title')}")
-            done.append({"quest": q["name"], "started": True, "how": how, "next": stages[0]})
+            started = start_quest(world, q, player, how, here, announce=announce, now=now)
+            if started:
+                done.append(started)
             continue  # 接下的这一拍不判第一阶段：先让委托人开口
-        if q.get("state") != "active":
+        if q.get("state") != "active" or q.get("just_started"):
             continue
         k = int(q["current"])
         if k >= len(stages):
@@ -173,6 +178,7 @@ def check_progress(world, *, announce: Callable[[str], None],
             objective=nxt["objective"] if nxt else "",
         )
         announce(stage.get("news") or f"{player} finished: {stage.get('title')}.")
+        note("", "stage_done", str(stage.get("id") or ""), at=now, target=q["name"])
         done.append({"quest": q["name"], "stage": stage, "next": nxt})
     return done
 
@@ -200,9 +206,11 @@ class QuestTracker:
     """GameLoop 每拍回调：记玩家足迹，推进任务线，公告进大事记，委托人 / 知情人收到提醒。"""
 
     def __init__(self) -> None:
+        from .listeners import ListenerMemory
         from .trail import Observer
 
         self.observer = Observer()
+        self.listeners = ListenerMemory()
         # 每条休眠任务线头一次被看到的时刻：pattern 只看那之后玩家做的事
         self.since: Dict[str, float] = {}
 
@@ -229,7 +237,8 @@ class QuestTracker:
         now = float(loop.sim_time)
         if player:
             try:
-                self.observer.observe(world, player, now=now, conversations=getattr(loop, "conversations", []))
+                self.observer.observe(world, player, now=now, conversations=getattr(loop, "conversations", []),
+                                      loop=loop)
             except Exception as e:  # noqa: BLE001
                 print(f"[WARN] player trail: {e}")
             told = set()
@@ -243,8 +252,24 @@ class QuestTracker:
 
         from routine import hour_of_day
 
+        from .listeners import run as run_listeners
+
+        hour = hour_of_day(now)
+        quests = active_questlines(world)
+        changes: List[Dict[str, Any]] = []
+        if player:
+            try:
+                changes += run_listeners(
+                    world, quests, player=player, now=now, hour=hour, memory=self.listeners,
+                    announce=announce, nudge=nudge,
+                    start_quest=lambda q, how, here: start_quest(world, q, player, how, here,
+                                                                 announce=announce, now=now),
+                )
+            except Exception as e:  # noqa: BLE001
+                print(f"[WARN] questline listeners: {e}")
         seen = (lambda quest: self.seen_since(player, quest, now)) if player else None
-        for done in check_progress(world, announce=announce, seen_since=seen, hour=hour_of_day(now)):
+        changes += check_progress(world, announce=announce, seen_since=seen, hour=hour, now=now, quests=quests)
+        for done in changes:
             nxt = done.get("next") or {}
             if done.get("started"):
                 text = (f"{player} has {done['how']} and may want to help. You could ask them to: "

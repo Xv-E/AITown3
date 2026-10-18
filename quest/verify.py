@@ -86,10 +86,12 @@ def verify(snap, patch: QuestlinePatch, player: str, *, solve=None) -> Verificat
     base = load_config()
     cfg = load_config({"exclude_actions": [a for a in base.exclude_actions if a not in ALLOWED_FOR_QUESTS]})
     extra = stage_actions(patch)
+    # 进行中的监听器也是玩家能「做」的事：触发它的事件 + 条件 -> 它的效果（例如给某个阶段要的标记）
+    heard = [a for a, ls in listener_actions(patch) if not ls.then.get("start")]
 
     def attempt(k: int):
         goal = [{"op": "prop_eq", "entity": player, "label": "Person", "prop": _flag(k), "value": True}]
-        compiled = compile_pddl(world, player, goal, config=cfg, extra_actions=extra[:k])
+        compiled = compile_pddl(world, player, goal, config=cfg, extra_actions=extra[:k] + heard)
         unsupported = [
             f"stage {name.rsplit('-', 1)[-1]} {part}: {note}".replace(" :", ":")
             for name, part, note in compiled.report.rows
@@ -155,7 +157,7 @@ def _start_problem(world, patch: QuestlinePatch, player: str, cfg, solve) -> str
     说话 / 做动作 / 放下这类步骤只查名字（validate 里查过）。
     """
     st = patch.start
-    if st.empty():
+    if st.empty() and not any(ls.then.get("start") for ls in patch.listeners):
         return ""
 
     def plan_for(goal):
@@ -190,9 +192,87 @@ def _start_problem(world, patch: QuestlinePatch, player: str, cfg, solve) -> str
                 ok = False
                 break
         routes.append(ok)
+    # 会接下任务线的监听器：能编译的看规划器做不做得到；编译不了的（等 NPC / 时辰 / 消息）证明不了，不拦
+    starters = [ls for ls in patch.listeners if ls.then.get("start")]
+    compiled = {ls.id: action for action, ls in listener_actions(patch)}
+    for ls in starters:
+        action = compiled.get(ls.id)
+        if action is None:
+            routes.append(None)
+            continue
+        goal = [substitute(c, "c", player) for c in action["requires"]]
+        plan = solve_goal(world, player, goal, cfg, solve) if goal else []
+        if plan is not None and not plan and not ls.on and not ls.sequence:
+            return (f"listener {ls.id} watches conditions that are already true, so the questline would "
+                    "start at once")
+        routes.append(plan is not None)
+    if None in routes:
+        routes = [r for r in routes if r is not None] + [True]
     if not any(routes) and not st.hear:
         return "the player can't reach any way into the questline (check start.find / visit / when / pattern)"
     return ""
+
+
+# 事件 -> 规划器里「这件事能发生」的前提（玩家做的事；时辰总会到，没有前提；其余编译不了）
+_EVENT_PRECONDITION = {
+    "enter": lambda w: {"op": "person_at", "person": "@c", "location": w},
+    "pick_up": lambda w: {"op": "has_item", "person": "@c", "item": w},
+}
+_ALWAYS_HAPPENS = ("time", "hour", "new_day")
+
+
+def _trigger(spec: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
+    """一条事件描述 -> 前提列表；None = 规划器没法表达（NPC 做的事、消息、说话……）。"""
+    event = spec.get("event")
+    if event in _ALWAYS_HAPPENS:
+        return []
+    who = spec.get("who") or "anyone"
+    if who not in ("@player", "anyone") or event not in _EVENT_PRECONDITION or not spec.get("what"):
+        return None
+    return [_EVENT_PRECONDITION[event](spec["what"])]
+
+
+def listener_actions(patch: QuestlinePatch) -> List[Tuple[Dict[str, Any], Any]]:
+    """能编译成规划器动作的监听器：[(内容包格式的动作, 监听器)]。
+
+    前提 = 触发它的事件能发生（顺序事件取最后一步）+ when；效果 = then.effects。
+    @player / @actor 换成执行者 @c，@here 换成触发它的地点；换不了的就不编译。
+    stage:<id> 的监听器要求前一阶段已完成。
+    """
+    stage_k = {st.id: k for k, st in enumerate(patch.stages, 1)}
+    out = []
+    for ls in patch.listeners:
+        if ls.sequence:
+            steps = [_trigger(x) for x in ls.sequence]
+            requires = None if any(x is None for x in steps) else steps[-1]
+            where = ls.sequence[-1].get("what") if ls.sequence[-1].get("event") == "enter" else ""
+        elif ls.on:
+            requires = _trigger(ls.on)
+            where = ls.on.get("what") if ls.on.get("event") == "enter" else ""
+        else:
+            requires, where = [], ""
+        if requires is None:
+            continue
+        conds = substitute(substitute(ls.when, "player", "@c"), "actor", "@c")
+        effects = substitute(substitute(ls.then.get("effects") or [], "player", "@c"), "actor", "@c")
+        if where:
+            conds, effects = substitute(conds, "here", where), substitute(effects, "here", where)
+        if "@here" in str(conds) + str(effects):
+            continue
+        requires = list(requires) + list(conds)
+        phase = ls.phase()
+        if phase.startswith("stage:") and stage_k.get(phase[6:], 1) > 1:
+            requires.insert(0, {"op": "prop_eq", "entity": "@c", "label": "Person",
+                                "prop": _flag(stage_k[phase[6:]] - 1), "value": True})
+        if not effects and not ls.then.get("start"):
+            continue  # 只说话 / 提醒人的监听器不改世界，规划器用不上
+        out.append(({
+            "name": f"questline-listener-{ls.id.lower().replace('_', '-')}",
+            "params": [{"name": "c", "type": "Person", "source": "self"}],
+            "requires": requires,
+            "effects": list(effects),
+        }, ls))
+    return out
 
 
 def solve_goal(world, player: str, goal, cfg, solve) -> Optional[List[Tuple[str, List[str]]]]:
