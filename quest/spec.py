@@ -85,6 +85,27 @@ class StageSpec:
 
 
 @dataclass
+class StartSpec:
+    """玩家怎么接下这条任务线：任一条成立就算接下（之前任务线休眠，不推进阶段）。
+
+    都不写 = 一写进世界就开始（旧行为）。
+    """
+
+    hear: List[str] = field(default_factory=list)   # 线索：玩家听说了（KNOWS_FACT / BELIEVES）
+    find: List[str] = field(default_factory=list)   # 物品：玩家拿到了（小纸条、信物……）
+    visit: List[str] = field(default_factory=list)  # 地点：玩家走到了
+
+    def empty(self) -> bool:
+        return not (self.hear or self.find or self.visit)
+
+    def planner_conditions(self) -> List[Dict[str, Any]]:
+        """规划器能证明的那几条（听说靠对话里真的说出口，证明不了）。"""
+        return [{"op": "has_item", "person": "@player", "item": i} for i in self.find] + [
+            {"op": "person_at", "person": "@player", "location": r} for r in self.visit
+        ]
+
+
+@dataclass
 class QuestlinePatch:
     title: str
     premise: str = ""
@@ -95,6 +116,7 @@ class QuestlinePatch:
     items: List[ItemSpec] = field(default_factory=list)
     clues: List[ClueSpec] = field(default_factory=list)
     stages: List[StageSpec] = field(default_factory=list)
+    start: StartSpec = field(default_factory=StartSpec)
 
     # ----- (反)序列化 -----
 
@@ -117,6 +139,7 @@ class QuestlinePatch:
             items=many("items", ItemSpec, _fields(ItemSpec)),
             clues=many("clues", ClueSpec, _fields(ClueSpec)),
             stages=many("stages", StageSpec, _fields(StageSpec)),
+            start=_start(data.get("start")),
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -132,6 +155,17 @@ class QuestlinePatch:
 
 def _fields(cls) -> Set[str]:
     return set(cls.__dataclass_fields__)
+
+
+def _start(raw: Any) -> StartSpec:
+    if not isinstance(raw, dict):
+        return StartSpec()
+
+    def names(key: str) -> List[str]:
+        v = raw.get(key) or []
+        return [str(x).strip() for x in ([v] if isinstance(v, str) else v) if str(x).strip()]
+
+    return StartSpec(hear=names("hear"), find=names("find"), visit=names("visit"))
 
 
 # ----- 物品属性：写进快照（验证）和写进数据库（应用）共用 -----
@@ -267,6 +301,8 @@ def validate(patch: QuestlinePatch, known: KnownWorld) -> List[str]:
         if not c.known_by or bad:
             errors.append(f"clue {c.name}: known_by must list people who know it (bad: {bad or 'none given'})")
 
+    errors += _start_problems(patch, known, regions, items)
+
     check = OpsChecker(placeholders=("player",), entity_names=all_names, archetypes=known.archetypes)
     ids: Set[str] = set()
     for i, st in enumerate(patch.stages):
@@ -286,6 +322,30 @@ def validate(patch: QuestlinePatch, known: KnownWorld) -> List[str]:
         if err:
             errors.append(err)
     return errors
+
+
+def _start_problems(patch: QuestlinePatch, known: KnownWorld, regions: Set[str], items: Set[str]) -> List[str]:
+    st = patch.start
+    out: List[str] = []
+    clues = {c.name: c for c in patch.clues}
+    for name in st.hear:
+        clue = clues.get(name)
+        if clue is None:
+            out.append(f"start.hear {name!r} must be one of this questline's clues")
+        elif known.player in clue.known_by:
+            out.append(f"start.hear {name}: the player already knows it, so the questline would start at once")
+        elif not [n for n in clue.known_by if n != known.player]:
+            out.append(f"start.hear {name}: someone other than the player must know it to tell them")
+    held = {i.name for i in patch.items if i.held_by == known.player}
+    for name in st.find:
+        if name not in items:
+            out.append(f"start.find {name!r} is not an item")
+        elif name in held:
+            out.append(f"start.find {name}: the player already holds it, so the questline would start at once")
+    for name in st.visit:
+        if name not in regions:
+            out.append(f"start.visit {name!r} is not a region")
+    return out
 
 
 def normalize(patch: QuestlinePatch, known: KnownWorld) -> List[str]:
@@ -360,6 +420,9 @@ def completeness_problems(patch: QuestlinePatch) -> List[str]:
             out.append(f"person {p.name}: give a daily routine of 2-4 slots (start, end, location, activity)")
     if patch.stages and not patch.stages[0].giver:
         out.append("the first stage needs a giver (who asks the player for help)")
+    if patch.start.empty():
+        out.append('say how the player comes across this story in "start": a clue they hear, '
+                   "a thing they find (a note, a token) or a place they reach")
     return out
 
 

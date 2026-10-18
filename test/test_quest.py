@@ -203,6 +203,7 @@ def test_a_complete_package_brings_its_own_place_people_and_things():
             {"start": 18, "end": 6, "location": "OldMine", "activity": "rest"}]}],
         "items": [{"name": "MineKey", "held_by": "Hollis"}],
         "stages": [{"id": "s1", "title": "Ask", "objective": "x", "giver": "Hollis", "complete_when": []}],
+        "start": {"visit": ["OldMine"]},
     })
     assert completeness_problems(full) == []
     assert full.persons[0].routine[0]["activity"] == "dig", "routines survive parsing"

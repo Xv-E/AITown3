@@ -32,6 +32,17 @@ def conflict_line(c: Dict[str, Any]) -> str:
     return f"{pretty(c.get('culprit'))} got to {pretty(c.get('item'))} before {pretty(c.get('loser'))}{how}"
 
 
+def _hook_text(patch: Dict[str, Any]) -> str:
+    """开场那句 + 玩家接下任务的途径（听说 / 捡到 / 走到）。"""
+    start = patch.get("start") or {}
+    ways = [f"{verb} {', '.join(start.get(k) or [])}"
+            for k, verb in (("hear", "hears"), ("find", "finds"), ("visit", "reaches")) if start.get(k)]
+    hook = str(patch.get("hook") or "")
+    if not ways:
+        return hook
+    return f"{hook} (starts when the player {'; or '.join(ways)})".strip()
+
+
 def _stage_rows(stages: List[Dict[str, Any]], current: int, state: str) -> List[Dict[str, str]]:
     rows = []
     for i, st in enumerate(stages):
@@ -231,7 +242,7 @@ def draft_summary(body: Dict[str, Any]) -> Dict[str, Any]:
         "attempts": body.get("attempts"),
         "title": (patch or {}).get("title") or "",
         "premise": (patch or {}).get("premise") or "",
-        "hook": (patch or {}).get("hook") or "",
+        "hook": _hook_text(patch or {}),
         "sections": draft_sections(patch or {}),
         "problems": [str(p) for p in body.get("problems") or []],
     }

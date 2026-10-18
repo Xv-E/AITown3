@@ -35,6 +35,7 @@ object actions you write). If you need something to exist, put it in the world o
 SCHEMA = """Respond with ONE JSON object:
 {
   "title": "...", "premise": "1-2 sentences", "hook": "how the player first hears of it",
+  "start": {"hear": ["<clue>"], "find": ["<item>"], "visit": ["<region>"]},
   "regions": [{"name": "OldMine", "next_to": "<existing region>", "description": "...", "tags": "a,b", "w": 18, "h": 14}],
   "persons": [{"name": "Hollis", "located_at": "<region>", "personality": "...", "background": "...",
                "goal": "...", "secret": "...", "mood": "wary", "speech_style": "...",
@@ -78,6 +79,15 @@ How things reach the player:
   {"op": "unlink", "a": "Hollis", "a_label": "Person", "b": "MineKey", "b_label": "Item", "rel": "HAS_ITEM"},
   {"op": "link", "a": "@player", "a_label": "Person", "b": "MineKey", "b_label": "Item", "rel": "HAS_ITEM"}
 - Use spawn_item only for new things no condition refers to by name.
+
+How the player comes across it ("start"): the questline sleeps until ANY of these happens, then
+its stages begin. Make it feel natural, not a quest board:
+  "hear":  clues the player hears from whoever knows them (one of your clues, known_by an NPC;
+           that NPC will look for the player to tell them)
+  "find":  things the player picks up - a torn note, a dropped token (an item located_at a region)
+  "visit": places where the player stumbles onto it
+Give at least two different ways in when you can, so the player doesn't miss it. None of them may
+be true already (the player must not start out knowing / holding / standing there).
 
 Rules: CamelCase names, new names must not exist yet; values are plain JSON (no expressions);
 places are relations, never a "location" property; new regions sit next to an existing region;

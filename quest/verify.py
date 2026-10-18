@@ -98,6 +98,17 @@ def verify(snap, patch: QuestlinePatch, player: str, *, solve=None) -> Verificat
         result = solve(compiled.domain, compiled.problem)
         return compiled, result, unsupported
 
+    # 接下任务的途径：不能一开局就成立；能拿到 / 走到的至少要有一条（只有「听说」时靠对话，证明不了）
+    reachable = False
+    for cond in patch.start.planner_conditions():
+        plan = solve_goal(world, player, [substitute(cond, "player", player)], cfg, solve)
+        if plan is not None and not plan:
+            return Verification(False, f"start {_cond_text(cond)} is already true, so the questline would "
+                                       "start at once; pick something the player still has to find or reach")
+        reachable = reachable or plan is not None
+    if patch.start.planner_conditions() and not reachable and not patch.start.hear:
+        return Verification(False, "the player can't reach any way into the questline (start.find / start.visit)")
+
     # 一开局就成立的阶段：玩家什么都不用做，不算任务
     for k, st in enumerate(patch.stages, 1):
         goal = list(substitute(st.complete_when, "player", player))

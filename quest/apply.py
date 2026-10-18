@@ -60,9 +60,12 @@ def apply_questline(world, patch: QuestlinePatch) -> Dict[str, Any]:
     world.add_entity(
         name, entity_type="Quest",
         title=patch.title, description=patch.premise, hook=patch.hook,
-        stage=first.title, objective=first.objective, state="active",
+        stage=first.title, objective=first.objective,
+        # 有接下的途径就先休眠：玩家听说 / 捡到 / 走到之前不推进（见 runtime.check_progress）
+        state="active" if patch.start.empty() else "dormant",
         questline=True, current=0,
         stages=json.dumps([s.__dict__ for s in patch.stages], ensure_ascii=False),
+        start=json.dumps(patch.start.__dict__, ensure_ascii=False),
     )
     if first.giver:
         world.link_entities(first.giver, "Person", name, "Quest", "GIVES_QUEST")
@@ -76,4 +79,5 @@ def apply_questline(world, patch: QuestlinePatch) -> Dict[str, Any]:
             "clues": [c.name for c in patch.clues],
         },
         "first_objective": first.objective,
+        "state": "active" if patch.start.empty() else "dormant",
     }
