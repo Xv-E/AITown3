@@ -1,5 +1,5 @@
 """
-Web LLM decision service — wraps MultiStepDecider + Chroma memory.
+Web LLM decision service — wraps MultiStepDecider + NPC memory (Chroma or Neo4j, see MEMORY_BACKEND).
 """
 
 from __future__ import annotations
@@ -25,10 +25,10 @@ def get_web_memory():
             mem_path = str(_AITOWN3 / "memory")
             if mem_path not in sys.path:
                 sys.path.insert(0, mem_path)
-            from chroma_memory import ChromaMemory
+            from memory_backend import get_memory
 
             persist = os.getenv("CHROMA_PATH", str(_AITOWN3 / "data" / "chroma"))
-            _memory = ChromaMemory.get_instance(persist_path=persist)
+            _memory = get_memory(persist_path=persist)
         except Exception:
             _memory = False  # type: ignore[assignment]
     return _memory if _memory is not False else None
@@ -276,7 +276,7 @@ def get_character_memories(
     limit: int = 50,
     query: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """List or semantically search a character's Chroma memories."""
+    """List or semantically search a character's memories."""
     memory = get_web_memory()
     if memory is None:
         return {
@@ -287,7 +287,7 @@ def get_character_memories(
             "count": 0,
             "total": 0,
             "memories": [],
-            "message": "Chroma memory not enabled or failed to load",
+            "message": "NPC memory not enabled or failed to load",
         }
 
     total = memory.count(character)
@@ -316,14 +316,14 @@ def get_character_memories(
 
 
 def clear_character_memories(character: str) -> Dict[str, Any]:
-    """Clear all Chroma memories for a character."""
+    """Clear all memories for a character."""
     memory = get_web_memory()
     if memory is None:
         return {
             "ok": False,
             "available": False,
             "character": character,
-            "message": "Chroma memory not enabled or failed to load",
+            "message": "NPC memory not enabled or failed to load",
         }
     before = memory.count(character)
     memory.clear(character)
@@ -337,17 +337,17 @@ def clear_character_memories(character: str) -> Dict[str, Any]:
 
 
 def clear_all_memories() -> Dict[str, Any]:
-    """Clear Chroma memories for all characters."""
+    """Clear memories for all characters."""
     memory = get_web_memory()
     if memory is None:
         return {
             "ok": False,
             "available": False,
-            "message": "Chroma memory not enabled or failed to load",
+            "message": "NPC memory not enabled or failed to load",
         }
     memory.clear_all()
     return {
         "ok": True,
         "available": True,
-        "message": "Cleared all Chroma memories",
+        "message": "Cleared all NPC memories",
     }

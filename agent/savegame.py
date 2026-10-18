@@ -1,10 +1,10 @@
 """
 存档 / 读档：一个存档 = 一个 JSON 文件（saves/<slot>.json），包括
 
-  world   Neo4j 里的整张图（所有节点 + 关系，原样）
+  world   Neo4j 里的整张图（所有节点 + 关系，原样；:Memory 节点除外，记忆走下面的 memory）
   sim     GameLoop 内存里的进度：时间、每个 NPC 的计划 / 正在做的事 / 触发器 / 历史、
           冲突、大事记、对话、剧情导演
-  memory  每个 NPC 的长期记忆（Chroma）
+  memory  每个 NPC 的长期记忆（Chroma 或 Neo4j，见 MEMORY_BACKEND；不存向量，读档时重算）
 
 读档 = 清空图 → 原样建回 → 重建 GameLoop 并把进度填回去 → 记忆换成存档里的。
 """
@@ -51,11 +51,13 @@ def dump_graph(world) -> Dict[str, Any]:
 
 def _dump_graph(world, id_fn: str) -> Dict[str, Any]:
     nodes = world.run_query(
-        f"MATCH (n) RETURN toString({id_fn}(n)) AS id, labels(n) AS labels, properties(n) AS props"
+        f"MATCH (n) WHERE NOT n:Memory "
+        f"RETURN toString({id_fn}(n)) AS id, labels(n) AS labels, properties(n) AS props"
     ) or []
     rels = world.run_query(
         f"""
         MATCH (a)-[r]->(b)
+        WHERE NOT a:Memory AND NOT b:Memory
         RETURN toString({id_fn}(a)) AS a, toString({id_fn}(b)) AS b, type(r) AS type, properties(r) AS props
         """
     ) or []

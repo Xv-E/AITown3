@@ -127,7 +127,7 @@ def fetch_graph(world, limit: int = 800) -> Dict[str, Any]:
     isolated = world.run_query(
         """
         MATCH (n)
-        WHERE n.name IS NOT NULL AND NOT (n)--()
+        WHERE n.name IS NOT NULL AND NOT n:Memory AND NOT (n)--()
         RETURN labels(n) AS labels, n.name AS name, properties(n) AS props
         LIMIT 50
         """
