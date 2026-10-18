@@ -638,6 +638,7 @@ def normalize(patch: QuestlinePatch, known: KnownWorld) -> List[str]:
                 notes.append(f"stage {st.id}: giver {giver!r} -> {head}")
                 st.giver = head
     notes += _fix_places(patch, known)
+    notes += _fix_conditions(patch, known)
     notes += _fix_ops(patch)
     notes += _fix_start_and_listeners(patch, known)
     from content import get_content
@@ -670,6 +671,44 @@ def _fix_places(patch: QuestlinePatch, known: KnownWorld) -> List[str]:
         for slot in person.routine or []:
             if isinstance(slot, dict) and slot.get("location"):
                 slot["location"] = fix(str(slot["location"]), f"person {person.name} routine")
+    return notes
+
+
+# 模型常编的「说过话」关系：系统里说过话就是 KNOWS
+TALK_RELS = {"TALKED_TO", "TALKED_WITH", "SPOKE_TO", "SPOKE_WITH", "MET", "HAS_MET", "KNOWS_PERSON", "CONVERSED_WITH"}
+TIME_WORDS = ("clock", "time", "hour", "night", "day", "dawn", "dusk", "noon", "midnight", "evening", "morning")
+
+
+def _fix_conditions(patch: QuestlinePatch, known: KnownWorld) -> List[str]:
+    """阶段条件里的两种常见笔误：
+    - 编出来的「说过话」关系 -> KNOWS；
+    - 想查「几点」：阶段条件查不了时辰（世界里没有钟这个东西），去掉，留给第二步的监听器（at）。"""
+    notes: List[str] = []
+    names = known.regions | known.persons | known.items | known.other_names | set(patch.new_names())
+
+    def fix(conds: List[Dict[str, Any]], where: str) -> List[Dict[str, Any]]:
+        out = []
+        for c in conds:
+            if not isinstance(c, dict):
+                out.append(c)
+                continue
+            if c.get("op") == "any":
+                c = {**c, "of": fix(c.get("of") or [], where)}
+            if c.get("op") in ("has_rel", "not_has_rel") and str(c.get("rel") or "").upper() in TALK_RELS:
+                notes.append(f"{where}: relation {c['rel']} -> KNOWS (talking to someone)")
+                c = {**c, "rel": "KNOWS"}
+            entity = str(c.get("entity") or "")
+            if entity and not entity.startswith("@") and entity not in names                     and any(w in entity.lower() for w in TIME_WORDS):
+                notes.append(f"{where}: stages can't check the time of day ({entity}); dropped - "
+                             "use a listener with \"at\" instead")
+                continue
+            out.append(c)
+        return out
+
+    for st in patch.stages:
+        st.complete_when = fix(st.complete_when, f"stage {st.id}")
+    for ls in patch.listeners:
+        ls.when = fix(ls.when, f"listener {ls.id}")
     return notes
 
 

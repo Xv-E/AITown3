@@ -147,6 +147,8 @@ Rules: CamelCase names, new names must not exist yet; values are plain JSON (no 
 places are relations, never a "location" property; new regions sit next to an existing region;
 "archetype" is optional and must be one of the listed archetype names (otherwise leave it out and
 use "item_kind"); "giver" is just a person's name; every stage needs the player to DO something;
+stages can't check the time of day (there is no clock in the world) - timing ("at night") belongs to
+listeners; "talked to someone" is {"op": "has_rel", "a": "@player", "b": "<NPC>", "rel": "KNOWS"};
 3-5 stages."""
 
 

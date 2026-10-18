@@ -327,3 +327,17 @@ def test_common_slips_are_fixed_without_asking_again():
     assert {"op": "add_prop", "entity": "Mara", "label": "Person", "prop": "coins", "delta": -5} in reward
     assert any(op.get("delta") == 5 for op in reward if op.get("op") == "add_prop"), "value -> delta"
     assert len(notes) >= 7
+
+
+def test_invented_talk_relations_and_clock_conditions_are_fixed():
+    from quest.spec import normalize
+
+    stages = copy.deepcopy(GOOD["stages"])
+    stages[0]["complete_when"] = [{"op": "has_rel", "a": "@player", "b": "Hollis", "rel": "TALKED_TO"}]
+    stages[2]["complete_when"] = stages[2]["complete_when"] + [
+        {"op": "prop_eq", "entity": "TownClock", "prop": "hour", "value": 22}]
+    p = _patch(stages=stages)
+    notes = normalize(p, KNOWN)
+    assert p.stages[0].complete_when[0]["rel"] == "KNOWS"
+    assert all(c.get("entity") != "TownClock" for c in p.stages[2].complete_when)
+    assert any("time of day" in n for n in notes) and validate(p, KNOWN) == []
