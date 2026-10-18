@@ -52,14 +52,49 @@ def _flag(k: int) -> str:
     return f"questline_stage_{k}_done"
 
 
+STARTED_FLAG = "questline_started"
+
+
+def start_action(patch: QuestlinePatch) -> Optional[Dict[str, Any]]:
+    """接下任务线那一刻发生的事（start.omen + 接下任务线的监听器的效果）当成「第 0 阶段」：
+    第一阶段要的东西可以是它们给的（橡树裂开、小路露出来……）。没有接下的途径就返回 None。
+
+    @here 换成接下的地方（visit 的第一个，或监听器等的那个 enter）；还换不了的效果规划器用不上，略过。
+    """
+    starters = [ls for ls in patch.listeners if ls.then.get("start")]
+    if patch.start.empty() and not starters:
+        return None
+    where = (patch.start.visit or [""])[0]
+    effects: List[Dict[str, Any]] = []
+    for ops, at in [((patch.start.omen or {}).get("effects") or [], where)] + [
+        (ls.then.get("effects") or [], _enter_of(ls) or where) for ls in starters
+    ]:
+        for op in substitute(substitute(ops, "player", "@c"), "actor", "@c"):
+            op = substitute(op, "here", at) if at else op
+            if "@here" not in str(op):
+                effects.append(op)
+    effects.append({"op": "set_prop", "entity": "@c", "label": "Person", "prop": STARTED_FLAG, "value": True})
+    return {"name": "questline-start", "params": [{"name": "c", "type": "Person", "source": "self"}],
+            "requires": [], "effects": effects}
+
+
+def _enter_of(ls) -> str:
+    last = ls.sequence[-1] if ls.sequence else ls.on
+    return str(last.get("what") or "") if last and last.get("event") == "enter" else ""
+
+
 def stage_actions(patch: QuestlinePatch) -> List[Dict[str, Any]]:
-    """每个阶段一个内容包格式的动作；@player 换成动作的执行者 @c。"""
+    """每个阶段一个内容包格式的动作；@player 换成动作的执行者 @c。有接下的途径时，第一阶段要先接下。"""
     out = []
+    gated = start_action(patch) is not None
     for k, st in enumerate(patch.stages, 1):
         requires = list(substitute(st.complete_when, "player", "@c"))
         if k > 1:
             requires.insert(0, {"op": "prop_eq", "entity": "@c", "label": "Person",
                                 "prop": _flag(k - 1), "value": True})
+        elif gated:
+            requires.insert(0, {"op": "prop_eq", "entity": "@c", "label": "Person",
+                                "prop": STARTED_FLAG, "value": True})
         effects = list(substitute(st.reward, "player", "@c")) + [
             {"op": "set_prop", "entity": "@c", "label": "Person", "prop": _flag(k), "value": True}
         ]
@@ -88,10 +123,15 @@ def verify(snap, patch: QuestlinePatch, player: str, *, solve=None) -> Verificat
     extra = stage_actions(patch)
     # 进行中的监听器也是玩家能「做」的事：触发它的事件 + 条件 -> 它的效果（例如给某个阶段要的标记）
     heard = [a for a, ls in listener_actions(patch) if not ls.then.get("start")]
+    begin = [a for a in [start_action(patch)] if a]
+
+    def before(k: int) -> List[Dict[str, Any]]:
+        """完成第 k 阶段时规划器可以用的额外动作：接下任务线、前 k 个阶段、监听器。"""
+        return begin + extra[:k] + heard
 
     def attempt(k: int):
         goal = [{"op": "prop_eq", "entity": player, "label": "Person", "prop": _flag(k), "value": True}]
-        compiled = compile_pddl(world, player, goal, config=cfg, extra_actions=extra[:k] + heard)
+        compiled = compile_pddl(world, player, goal, config=cfg, extra_actions=before(k))
         unsupported = [
             f"stage {name.rsplit('-', 1)[-1]} {part}: {note}".replace(" :", ":")
             for name, part, note in compiled.report.rows
@@ -132,6 +172,18 @@ def verify(snap, patch: QuestlinePatch, player: str, *, solve=None) -> Verificat
     n = len(patch.stages)
     compiled, result, unsupported = attempt(n)
     if unsupported:
+        # 「永远不成立」：找到第一个卡住的阶段，指出是哪几个条件没有任何东西能让它成立
+        for k, st in enumerate(patch.stages, 1):
+            stuck = [c for c in st.complete_when
+                     if _never(world, player, substitute(c, "player", player), cfg, solve, before(k - 1))]
+            if stuck:
+                return Verification(
+                    False,
+                    f"stage {k} '{st.title}' needs {'; '.join(_cond_text(c) for c in stuck)}, but nothing in the "
+                    "questline ever makes that true (no starting state, reward, item action, omen or listener "
+                    "effect sets it) - set it somewhere, or change the condition",
+                    failed_stage=k,
+                )
         return Verification(False, "the planner can't check these conditions: " + "; ".join(unsupported[:3]))
     if not result.get("success"):
         for k in range(1, n + 1):
@@ -145,7 +197,7 @@ def verify(snap, patch: QuestlinePatch, player: str, *, solve=None) -> Verificat
     for name, args in compiled.decode(result.get("plan") or []):
         if name.startswith("questline-stage-"):
             walkthrough.append([])
-        else:
+        elif not name.startswith("questline-"):
             walkthrough[-1].append((name, args))
     return Verification(True, walkthrough=walkthrough[:n])
 
@@ -273,6 +325,17 @@ def listener_actions(patch: QuestlinePatch) -> List[Tuple[Dict[str, Any], Any]]:
             "effects": list(effects),
         }, ls))
     return out
+
+
+def _never(world, player: str, cond: Dict[str, Any], cfg, solve, extra: List[Dict[str, Any]]) -> bool:
+    """这个条件用上这些额外动作也做不到（规划器表达不了也算）。"""
+    from compiler import compile_pddl
+
+    try:
+        compiled = compile_pddl(world, player, [cond], config=cfg, extra_actions=extra)
+    except ValueError:
+        return True
+    return not solve(compiled.domain, compiled.problem).get("success")
 
 
 def solve_goal(world, player: str, goal, cfg, solve) -> Optional[List[Tuple[str, List[str]]]]:
