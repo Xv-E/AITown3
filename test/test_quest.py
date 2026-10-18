@@ -40,6 +40,7 @@ GOOD = {
     "persons": [{"name": "Hollis", "located_at": "OldMine", "personality": "wary", "goal": "hide the ledger"}],
     "items": [
         {"name": "Crowbar", "located_at": "Forest", "item_kind": "tool"},
+        {"name": "Lantern", "held_by": "Hollis", "item_kind": "tool"},
         {"name": "Strongbox", "located_at": "OldMine", "item_kind": "box", "portable": False,
          "actions": [{"id": "pry_open", "label": "Pry it open",
                       "requires": [{"op": "has_item", "person": "@actor", "item": "Crowbar"}],
@@ -51,7 +52,10 @@ GOOD = {
          "giver": "Mara", "complete_when": [{"op": "has_rel", "a": "@player", "b": "Hollis", "rel": "KNOWS"}]},
         {"id": "s2", "title": "The strongbox", "objective": "Open Hollis's strongbox.",
          "giver": "Hollis", "complete_when": [{"op": "prop_eq", "entity": "Strongbox", "prop": "opened", "value": True}],
-         "reward": [{"op": "spawn_item", "name": "Lantern", "item_kind": "tool", "held_by": "@player"}]},
+         "reward": [{"op": "unlink", "a": "Hollis", "a_label": "Person", "b": "Lantern", "b_label": "Item",
+                     "rel": "HAS_ITEM"},
+                    {"op": "link", "a": "@player", "a_label": "Person", "b": "Lantern", "b_label": "Item",
+                     "rel": "HAS_ITEM"}]},
         {"id": "s3", "title": "Bring it back", "objective": "Give the crowbar back to Mara.",
          "giver": "Mara", "complete_when": [{"op": "has_item", "person": "Mara", "item": "Crowbar"}],
          "news": "The mystery of the old mine is solved."},
@@ -226,3 +230,15 @@ def test_the_draft_preview_details_every_new_thing():
     assert sections["New items"] == ["MineKey (key) - held by Hollis."]
     assert sections["Stages"] == ["1. Ask around (from Reed): Talk to Hollis", "    Reward: gets MineKey",
                                   "    Then everyone hears: Hollis confesses."]
+
+
+def test_nothing_appears_from_nowhere_in_a_questline():
+    from quest.spec import conservation_problems
+
+    stages = copy.deepcopy(GOOD['stages'])
+    stages[1]['reward'] = [{'op': 'spawn_item', 'name': 'Gold', 'held_by': '@player'}]
+    assert any('nothing may appear' in p for p in conservation_problems(_patch(stages=stages)))
+    stages[1]['reward'] = [{'op': 'add_prop', 'entity': '@player', 'label': 'Person', 'prop': 'coins', 'delta': 5}]
+    assert any('coins can only move' in p for p in conservation_problems(_patch(stages=stages)))
+    stages[1]['reward'] += [{'op': 'add_prop', 'entity': 'Hollis', 'label': 'Person', 'prop': 'coins', 'delta': -5}]
+    assert conservation_problems(_patch(stages=stages)) == [], "paid out of the giver's purse is fine"

@@ -1,0 +1,16 @@
+{
+  "id": "smoke_fish",
+  "label": "Smoke fish",
+  "inputs": [
+    {
+      "kind": "fish",
+      "count": 2
+    }
+  ],
+  "station": "smokehouse",
+  "output": {
+    "archetype": "smoked_fish"
+  },
+  "duration": 4,
+  "description": "Smoke two fish into goods that sell well. Needs a Smokehouse (build one)."
+}

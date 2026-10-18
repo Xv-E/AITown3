@@ -1,0 +1,18 @@
+{
+  "id": "spear",
+  "label": "Spear",
+  "inputs": [
+    {
+      "kind": "log"
+    },
+    {
+      "kind": "stone"
+    }
+  ],
+  "station": "workbench",
+  "output": {
+    "archetype": "spear"
+  },
+  "duration": 4,
+  "description": "Shape a log into a shaft and fit a stone head. Needs a workbench (build a Workshop)."
+}

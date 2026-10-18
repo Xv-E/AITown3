@@ -708,7 +708,7 @@ class Compiler:
                 return TRUE
             t = self._term(cond.get("entity"), env)
             kind = self.prop_kind.get(prop) if prop != "name" else None
-            return self._static(cond, t) if kind is None else self._dyn_prop(cond, t, kind)
+            return self._static(cond, t) if kind is None else self._dyn_prop(cond, t, kind, env)
         if op == "any":
             subs = cond.get("of") or []
             if subs and all(
@@ -746,13 +746,24 @@ class Compiler:
             return [[Lit(f"(= {a.text} {b.text})", "=").negate()]]
         raise Unsupported(f"condition '{op}' has no PDDL form")
 
-    def _dyn_prop(self, cond: Dict[str, Any], t: Term, kind: str) -> Alts:
+    def _dyn_prop(self, cond: Dict[str, Any], t: Term, kind: str, env: Optional[Dict[str, Term]] = None) -> Alts:
         op, prop, want = cond["op"], cond["prop"], cond.get("value")
         if kind == "num":
             expr = f"({self._fluent(prop, t.type)} {t.text})"
             f = _ident(prop).lower()
             if op in ("prop_gte", "prop_lte"):
                 sign = ">=" if op == "prop_gte" else "<="
+                if isinstance(want, str) and want.startswith("@"):
+                    # 和另一个实体的属性比：(>= (coins ?c) (value ?i))
+                    ent, _, p2 = want[1:].partition(".")
+                    if not p2:
+                        raise Unsupported(f"value {want} is not a property")
+                    src = self._term("@" + ent, env or {})
+                    g = self._fluent(p2, src.type)
+                    rhs = f"({g} {src.text})"
+                    # 第二个字面量恒真，只为让 (value ?i) 这个函数被声明、被赋初值
+                    return [[Lit(f"({sign} {expr} {rhs})", f, numeric=True),
+                             Lit(f"(>= {rhs} {rhs})", g, numeric=True)]]
                 return [[Lit(f"({sign} {expr} {_num(want or 0)})", f, numeric=True)]]
             if op in ("prop_eq", "prop_neq") and _is_number(want):
                 if op == "prop_eq":

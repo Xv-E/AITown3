@@ -1,0 +1,12 @@
+{
+  "id": "gather_sticks",
+  "label": "Gather dry sticks",
+  "node": "deadwood",
+  "stock": "stock",
+  "yield": {
+    "archetype": "firewood"
+  },
+  "duration": 2,
+  "narrative": "@c gathers an armful of dry sticks from @node.",
+  "empty_message": "Nothing dry left at @node for now"
+}

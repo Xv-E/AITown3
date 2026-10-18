@@ -163,7 +163,8 @@ pub fn rebuild_walk_grid(world: Res<WorldSnapshot>, mut grid: ResMut<WalkGrid>) 
     }
     for item in &world.world.items {
         let Some(cell) = item.cell() else { continue };
-        if item.portable {
+        // Things on the ground don't block; an open door is a doorway you walk through.
+        if item.portable || (item.is_door() && !item.locked) {
             continue;
         }
         let size = item.footprint();
@@ -273,7 +274,7 @@ pub fn setup_scene(mut commands: Commands) {
     commands.spawn((
         Sprite {
             color: Color::srgb(0.25, 0.72, 1.0),
-            custom_size: Some(Vec2::splat(TILE * 0.8)),
+            custom_size: Some(Vec2::splat(TILE * 1.0)),
             ..default()
         },
         Transform::from_xyz(0.0, 0.0, 10.0),
@@ -406,6 +407,12 @@ fn spawn_thing(commands: &mut Commands, icons: &IconAtlas, thing: &Thing, positi
 }
 
 fn item_label(thing: &Thing) -> String {
+    if !thing.needs.is_empty() {
+        return format!("{} (needs {})", thing.name, thing.needs);
+    }
+    if let Some(stock) = thing.stock {
+        return format!("{} ({stock} left)", thing.name);
+    }
     if thing.is_fixture() || thing.item_kind.is_empty() {
         thing.name.clone()
     } else if thing.locked {
@@ -677,4 +684,22 @@ mod tests {
         assert_eq!(path.last(), Some(&IVec2::new(2, 1)));
         assert!(!path.contains(&IVec2::new(1, 1)));
     }
+}
+
+/// The player's figure (blue outfit), once we know their name.
+pub fn player_look(
+    world: Res<WorldSnapshot>,
+    mut looks: ResMut<crate::icons::PersonIcons>,
+    mut images: ResMut<Assets<Image>>,
+    mut player: Query<&mut Sprite, With<PlayerAvatar>>,
+    mut drawn_as: Local<String>,
+) {
+    let name = &world.player.name;
+    if name.is_empty() || *drawn_as == *name {
+        return;
+    }
+    let Ok(mut sprite) = player.single_mut() else { return };
+    sprite.image = looks.get(name, false, true, &mut images);
+    sprite.color = Color::WHITE;
+    *drawn_as = name.clone();
 }

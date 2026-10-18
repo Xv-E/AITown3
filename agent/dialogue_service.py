@@ -343,6 +343,7 @@ def _build_speaker_utterance_prompt(
     mem_hints: List[str],
     max_chars: int,
     retry_note: str = "",
+    situation: str = "",
 ) -> str:
     retry = f"{retry_note}\n" if retry_note else ""
     hints = "; ".join(mem_hints[:3]) if mem_hints else "none"
@@ -350,6 +351,7 @@ def _build_speaker_utterance_prompt(
     return f"""{retry}You are {speaker_a} at {location}. You will speak ONE line to {speaker_b}.
 Profile: {agent_a.personality}; {agent_a.background}; mood={agent_a.mood}
 Current goal: {goal}
+Your situation: {situation or '(nothing pressing)'}
 About {speaker_b}: {partner_brief}
 What you know (do not invent beyond this):
 {facts_block}
@@ -415,6 +417,7 @@ def _llm_speaker_utterance(
     facts_block = _speaker_facts_block(knowledge_a)
     mem_hints = [m[:160] for m in (knowledge_a.memory_snippets or [])[:3] if m]
 
+    situation_a = situation_brief(world, speaker_a)
     prompt = _build_speaker_utterance_prompt(
         speaker_a=speaker_a,
         speaker_b=speaker_b,
@@ -424,6 +427,7 @@ def _llm_speaker_utterance(
         facts_block=facts_block,
         mem_hints=mem_hints,
         max_chars=max_chars,
+        situation=situation_a,
     )
 
     t0 = _time.perf_counter()
@@ -457,6 +461,7 @@ def _llm_speaker_utterance(
             partner_brief=partner_brief,
             facts_block=facts_block,
             mem_hints=mem_hints,
+            situation=situation_a,
             max_chars=max_chars,
             retry_note=(
                 "IMPORTANT: Previous answer was invalid. "
@@ -528,6 +533,49 @@ def history_block(history: Optional[List[Dict[str, str]]]) -> str:
     return "Conversation so far:\n" + "\n".join(f'{who}: "{text}"' for who, text in turns) + "\n"
 
 
+def situation_brief(world, name: str) -> str:
+    """说话的人此刻的处境：在忙什么、缺什么、挂着什么委托、店里卖什么缺什么。"""
+    if world is None or not name:
+        return ""
+    lines: List[str] = []
+    try:
+        rows = world.run_query(
+            """
+            MATCH (p:Person {name: $n})
+            RETURN coalesce(p.doing, '') AS doing, coalesce(p.coins, 0) AS coins, coalesce(p.trader, false) AS trader
+            """,
+            n=name,
+        ) or []
+    except Exception:
+        rows = []
+    if rows:
+        if rows[0].get("doing"):
+            lines.append(f"Right now you are trying to {rows[0]['doing']}.")
+        lines.append(f"You have {int(float(rows[0].get('coins') or 0))} coins.")
+    try:
+        from job_board import open_requests
+
+        for r in open_requests(world):
+            if r["poster"] == name:
+                pay = f"you'll pay {r['reward']} coins to whoever brings it" if r.get("reward") else "you can't pay much"
+                lines.append(f"You NEED {r['kind']} and posted a request for it ({pay}). Reason: {r.get('reason') or '-'}")
+    except Exception:
+        pass
+    if rows and rows[0].get("trader"):
+        try:
+            from economy import shop_of, shop_shortages
+
+            shop = shop_of(world, name)
+            if shop.get("sells"):
+                lines.append(f"You run a shop selling: {', '.join(shop['sells'])}.")
+            missing = shop_shortages(world, name)
+            if missing:
+                lines.append(f"Your shop is out of: {', '.join(missing)} - you'd welcome anyone bringing some.")
+        except Exception:
+            pass
+    return "\n".join(lines)
+
+
 def _build_dialogue_prompt(
     *,
     speaker_a: str,
@@ -543,6 +591,7 @@ def _build_dialogue_prompt(
     retry_note: str = "",
     history: Optional[List[Dict[str, str]]] = None,
     speaker_is_player: bool = True,
+    situation: str = "",
 ) -> str:
     """尽量短的对话 prompt，降低 DashScope 超时概率。"""
     retry = f"{retry_note}\n" if retry_note else ""
@@ -555,6 +604,10 @@ def _build_dialogue_prompt(
     return f"""{retry}You are {speaker_b} at {location}. Stay in character. Reply in the language the player writes in (English if unsure).
 {so_far}{'Player (' + speaker_a + ')' if speaker_is_player else speaker_a}: "{safe_msg or '(greets you)'}"
 Profile: {agent_b.personality}; {agent_b.background}; mood={agent_b.mood}; style={style}
+Your situation:
+{situation or '(nothing pressing)'}
+If they offer help or ask what you need, answer concretely from your situation: what you need, where it can be
+found or how it is made, and what you'll give for it. Don't make up needs you don't have.
 Knowledge (do not invent beyond this):
 {clue}
 Memory hints: {hints}
@@ -681,6 +734,7 @@ def _llm_dialogue(
         limits=limits,
         history=history,
         speaker_is_player=_is_player_name(world, speaker_a),
+        situation=situation_brief(world, speaker_b),
     )
 
     t0 = _time.perf_counter()
@@ -846,6 +900,7 @@ def _llm_dialogue(
         limits=limits,
         history=history,
         speaker_is_player=_is_player_name(world, speaker_a),
+        situation=situation_brief(world, speaker_b),
         retry_note=(
             f"IMPORTANT: Previous answer was invalid (placeholder or bad JSON). "
             f"Write a real in-character reply for {speaker_b} about the player's question. "
@@ -1075,7 +1130,15 @@ def generate_talk_dialogue(
 
     delta = int(result.get("trust_delta") or 0)
     if not _is_player_name(world, speaker_a):
-        delta = 0  # trust_toward_player 只记对玩家的信任；NPC 之间的好恶走 TENSION
+        # NPC 之间：回话的人对发起的人的好感随这段话变（trust_toward_player 只记对玩家的）
+        if world is not None and delta and result.get("source") == "llm":
+            try:
+                from relations import adjust as _adjust_feeling
+
+                _adjust_feeling(world, speaker_b, speaker_a, delta, reason="how our talk went")
+            except Exception:  # noqa: BLE001
+                pass
+        delta = 0
     if world is not None and delta and result.get("source") == "llm":
         new_trust = adjust_trust(world, speaker_b, delta)
     else:

@@ -99,7 +99,7 @@ def test_spawned_items_decode_to_kind_placeholders():
 
 def test_manual_pruning_turns_problem_into_strips():
     cfg = PlanningConfig.from_dict({
-        "exclude_actions": ["give", "use_item", "drop", "use_on--*--site"],
+        "exclude_actions": ["give", "use_item", "drop", "use_on--*--site", "craft_*", "gather_*", "buy", "sell"],
         "drop_props": ["hp"],
     })
     c = compile_pddl(_village(), "Kai", [{"op": "has_item", "person": "@self", "item": "kind:plank"}], config=cfg)
@@ -228,3 +228,63 @@ def test_unchanging_ground_conditions_are_folded_away():
     assert "mood-is" not in c.domain.split("(:action interact")[1]
     _, plan = _solve(c)
     assert plan == [("interact", ["Kai", "Tree", "hug"])]
+
+
+# ----- RPG systems: gathering, crafting, trading are planned like any other action
+
+def _camp() -> Snapshot:
+    snap = Snapshot()
+    snap.objects.update(
+        Forest=("Location", {}),
+        River=("Location", {}),
+        Kai=("Person", {"hp": 100, "coins": 0}),
+        Reed=("Person", {"hp": 100, "coins": 30, "trader": True}),
+        Rock=_item("rock_outcrop"),
+        Oak=("Item", {"item_kind": "tree", "portable": False, "logs": 3, "value": 0}),
+        Stick=_item("firewood"),
+    )
+    snap.edges["ADJACENT_TO"] = {("Forest", "River"), ("River", "Forest")}
+    snap.location.update(Kai="Forest", Reed="River", Rock="Forest", Oak="Forest", Stick="Forest")
+    return snap
+
+
+def test_an_npc_gathers_and_crafts_a_tool_it_needs():
+    c = compile_pddl(_camp(), "Kai", [{"op": "has_item", "person": "@self", "item": "kind:axe"}],
+                     config=PlanningConfig())
+    _, plan = _solve(c)
+    names = [a for a, _ in plan]
+    assert "gather_collect_stone" in names and "craft_stone_axe" in names, plan
+    assert names.index("gather_collect_stone") < names.index("craft_stone_axe")
+
+
+def test_a_log_needs_an_axe_first():
+    c = compile_pddl(_camp(), "Kai", [{"op": "has_item", "person": "@self", "item": "kind:log"}],
+                     config=PlanningConfig())
+    _, plan = _solve(c)
+    names = [a for a, _ in plan]
+    assert names.index("craft_stone_axe") < names.index("gather_fell_log"), plan
+
+
+def test_with_coins_buying_is_a_way_to_get_things():
+    snap = _camp()
+    del snap.objects["Rock"], snap.objects["Stick"]
+    snap.location.pop("Rock"), snap.location.pop("Stick")
+    snap.objects["Kai"] = ("Person", {"hp": 100, "coins": 20})
+    snap.objects["Axe1"] = _item("axe", for_sale=True, price=8)
+    snap.holder["Axe1"] = "Reed"
+    c = compile_pddl(snap, "Kai", [{"op": "has_item", "person": "@self", "item": "kind:axe"}],
+                     config=PlanningConfig())
+    _, plan = _solve(c)
+    assert plan[-1][0] == "buy" and plan[-1][1][1] == "Axe1", plan
+    assert "(>= (coins" in c.domain and "(price ?" in c.domain
+
+
+def test_an_npc_walks_over_to_propose_an_alliance():
+    snap = _camp()
+    want = [{"op": "has_rel", "a": "@self", "b": "Reed", "rel": "ALLY", "a_label": "Person", "b_label": "Person",
+             "directed": True}]
+    c = compile_pddl(snap, "Kai", want, config=PlanningConfig())
+    _, plan = _solve(c)
+    assert plan[0] == ("move", ["Kai", "Forest", "River"]), plan
+    assert plan[-1] == ("propose_alliance", ["Kai", "Reed", "River"]), plan
+    assert "feels_gte" in c.report.text(), "whether they agree is only known face to face"

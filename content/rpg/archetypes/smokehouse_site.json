@@ -1,0 +1,53 @@
+{
+  "archetype": "smokehouse_site",
+  "extends": "construction_site",
+  "name": "SmokehouseSite",
+  "footprint": [2, 2],
+  "description": "Stakes mark where a Smokehouse will stand. Needs logs and stone.",
+  "blueprint": {
+    "label": "Smokehouse",
+    "description": "Smokes fish into goods traders pay well for. Needs 3 logs, 2 stone.",
+    "zone_tags": ["build"],
+    "order": 15
+  },
+  "script": {
+    "initial_state": {
+      "need_log": 3,
+      "need_stone": 2
+    },
+    "on_tick": [
+      {
+        "op": "rule",
+        "id": "built",
+        "when": [
+          {
+            "op": "prop_lte",
+            "entity": "@self",
+            "prop": "need_log",
+            "value": 0
+          },
+          {
+            "op": "prop_lte",
+            "entity": "@self",
+            "prop": "need_stone",
+            "value": 0
+          }
+        ],
+        "do": [
+          {
+            "op": "spawn_item",
+            "archetype": "smokehouse",
+            "located_at": "@here",
+            "x": "@self.x",
+            "y": "@self.y"
+          },
+          {
+            "op": "delete_entity",
+            "entity": "@self"
+          }
+        ],
+        "announce": "A Smokehouse is finished in @here! Two fish smoke into goods that keep and sell well."
+      }
+    ]
+  }
+}

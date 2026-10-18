@@ -73,6 +73,8 @@ def filter_view(view: Any, me: str, k: Knowledge) -> Any:
     for name, info in view.items.items():
         if info.holder == me:
             items[name] = info
+        elif not info.portable and info.location in places:
+            items[name] = info  # 固定设施（树、岩壁、锻炉……）：知道这个地方就知道它在那儿
         elif name in k.items:
             loc, holder = k.items[name]
             items[name] = replace(info, location=None if holder else loc, holder=holder)
@@ -106,6 +108,10 @@ def filter_snapshot(snap: Any, me: str, k: Knowledge) -> Any:
         if snap.holder.get(name) == me:
             out.objects[name] = (label, props)
             out.holder[name] = me
+        elif props.get("portable") is False and snap.location.get(name) in places:
+            # 固定设施（树、岩壁、鱼塘、锻炉……）：知道这个地方就知道它在那儿，不用亲眼见过
+            out.objects[name] = (label, props)
+            out.location[name] = snap.location[name]
         elif name in k.items:
             loc, holder = k.items[name]
             if holder and holder in out.objects:

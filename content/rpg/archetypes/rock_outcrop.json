@@ -1,0 +1,23 @@
+{
+  "archetype": "rock_outcrop",
+  "name": "RockOutcrop",
+  "item_kind": "rock",
+  "portable": false,
+  "value": 0,
+  "description": "A broken rock face. Loose stones can be gathered; more crack off with time.",
+  "script": {
+    "lore": "Gather stones here. The supply refills slowly.",
+    "state_props": ["stock"],
+    "initial_state": {
+      "stock": 6
+    },
+    "on_tick": [
+      {
+        "op": "add_prop",
+        "prop": "stock",
+        "delta_per_sec": 0.015,
+        "max": 6
+      }
+    ]
+  }
+}

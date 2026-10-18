@@ -1,0 +1,15 @@
+{
+  "id": "pack_crate",
+  "label": "Pack a crate of goods",
+  "inputs": [
+    {
+      "kind": "ingredient",
+      "count": 2
+    }
+  ],
+  "output": {
+    "archetype": "crate"
+  },
+  "duration": 2,
+  "description": "Pack two lots of produce into a crate the market stall can sell."
+}

@@ -286,6 +286,11 @@ def layout_regions(world: "Neo4jWorld") -> Dict[str, Area]:
     ) or []
     size = {r["name"]: (max(4, _int(r["w"])), max(4, _int(r["h"]))) for r in rows}
     adj = {r["name"]: sorted(a for a in r["adj"] or [] if a) for r in rows}
+    # 隔着一扇门的两块地也要挨着放（门得开在它们交界处）
+    for d in door_pairs(world).values():
+        if d["here"] in adj and d["other"] in adj:
+            adj[d["here"]] = sorted(set(adj[d["here"]]) | {d["other"]})
+            adj[d["other"]] = sorted(set(adj[d["other"]]) | {d["here"]})
     placed: Dict[str, Area] = {
         r["name"]: (_int(r["x"]), _int(r["y"]), *size[r["name"]])
         for r in rows
@@ -333,7 +338,103 @@ def layout_regions(world: "Neo4jWorld") -> Dict[str, Area]:
             "MATCH (l:Location {name: $n}) SET l.area_x = $x, l.area_y = $y, l.grid_w = $w, l.grid_h = $h",
             n=name, x=x - min_x, y=y - min_y, w=w, h=h,
         )
+    place_doors(world, out)
     return out
+
+
+def door_pairs(world: "Neo4jWorld") -> Dict[str, Dict[str, Any]]:
+    """每扇门连着哪两块地：门的 connects_to；或者开门的钥匙效果里连的那两处；或者门所在地的「锁着的相邻」。"""
+    import json
+
+    rows = world.run_query(
+        """
+        MATCH (d:Item)-[:LOCATED_AT]->(l:Location) WHERE toLower(coalesce(d.item_kind, '')) = 'door'
+        OPTIONAL MATCH (l)-[:LOCKED_ADJACENT_TO]-(m:Location)
+        RETURN d.name AS door, l.name AS here, coalesce(d.connects_to, '') AS to,
+               coalesce(d.locked, false) AS locked, collect(DISTINCT m.name) AS locked_to
+        """
+    ) or []
+    if not rows:
+        return {}
+    links: Dict[str, Tuple[str, str]] = {}
+    for r in world.run_query("MATCH (i:Item) WHERE i.effects_on IS NOT NULL RETURN i.effects_on AS e") or []:
+        try:
+            effects = json.loads(r["e"]) if isinstance(r["e"], str) else (r["e"] or [])
+        except ValueError:
+            continue
+        for e in effects if isinstance(effects, list) else []:
+            for op in (e or {}).get("ops") or []:
+                if op.get("op") == "link" and op.get("rel") == "ADJACENT_TO" and e.get("target"):
+                    links[str(e["target"])] = (str(op.get("a")), str(op.get("b")))
+    out: Dict[str, Dict[str, Any]] = {}
+    for r in rows:
+        here, other = r["here"], ""
+        if r["to"]:
+            other = r["to"]
+        elif r["door"] in links:
+            a, b = links[r["door"]]
+            other = b if a == here else a if b == here else ""
+        elif r.get("locked_to"):
+            other = sorted(x for x in r["locked_to"] if x)[0] if any(r["locked_to"]) else ""
+        if other and other != here:
+            out[r["door"]] = {"here": here, "other": other, "locked": bool(r["locked"])}
+    return out
+
+
+def boundary_status(world: "Neo4jWorld", areas: Dict[str, Area]) -> Dict[Any, str]:
+    """每对相接的区域之间是什么：open（相邻、没门）/ door（隔着一扇门）/ wall（不相邻）。"""
+    adjacent = {
+        frozenset((r["a"], r["b"]))
+        for r in world.run_query(
+            "MATCH (a:Location)-[:ADJACENT_TO]-(b:Location) WHERE a.name < b.name RETURN a.name AS a, b.name AS b"
+        ) or []
+    }
+    doors = {frozenset((d["here"], d["other"])) for d in door_pairs(world).values()}
+    names = sorted(areas)
+    out: Dict[Any, str] = {}
+    for i, a in enumerate(names):
+        for b in names[i + 1:]:
+            if not shared_edge(areas[a], areas[b]):
+                continue
+            pair = frozenset((a, b))
+            out[pair] = "door" if pair in doors else "open" if pair in adjacent else "wall"
+    return out
+
+
+def open_between(world: "Neo4jWorld", a: str, b: str) -> bool:
+    """a、b 之间现在走得通（相邻；隔着门的话门得开着）。"""
+    rows = world.run_query(
+        "MATCH (:Location {name: $a})-[:ADJACENT_TO]-(:Location {name: $b}) RETURN 1 AS ok LIMIT 1", a=a, b=b
+    ) or []
+    if not rows:
+        return False
+    for d in door_pairs(world).values():
+        if {d["here"], d["other"]} == {a, b} and d["locked"]:
+            return False
+    return True
+
+
+def place_doors(world: "Neo4jWorld", areas: Optional[Dict[str, Area]] = None) -> List[str]:
+    """把每扇门摆到它那两块地交界处的门洞上（门所在那一侧）。返回挪过的门。"""
+    areas = areas if areas is not None else region_areas(world)
+    moved = []
+    for door, d in door_pairs(world).items():
+        a, b = d["here"], d["other"]
+        if a not in areas or b not in areas:
+            continue
+        edge = shared_edge(areas[a], areas[b])
+        if not edge:
+            continue
+        cell = edge[len(edge) // 2][0]
+        x, y = cell[0] - areas[a][0], cell[1] - areas[a][1]
+        rows = world.run_query("MATCH (i:Item {name: $n}) RETURN i.x AS x, i.y AS y", n=door) or []
+        if rows and (rows[0].get("x"), rows[0].get("y")) == (x, y):
+            continue
+        world.run_query(
+            "MATCH (i:Item {name: $n}) SET i.x = $x, i.y = $y, i.footprint_w = 1, i.footprint_h = 1", n=door, x=x, y=y
+        )
+        moved.append(door)
+    return moved
 
 
 def region_at(areas: Dict[str, Area], cell: Cell) -> Optional[str]:
@@ -351,6 +452,12 @@ def walkable_cells(world: "Neo4jWorld", areas: Optional[Dict[str, Area]] = None)
     out: Set[Cell] = set()
     for shape in region_shapes(world, areas, item_cells).values():
         out |= shape
+    # 锁着的门：门洞那一格不能走（门还没摆到门洞上也一样）
+    for d in door_pairs(world).values():
+        if d["locked"] and d["here"] in areas and d["other"] in areas:
+            edge = shared_edge(areas[d["here"]], areas[d["other"]])
+            if edge:
+                blocked.add(edge[len(edge) // 2][0])
     return out - blocked
 
 
@@ -418,13 +525,41 @@ def region_shape(name: str, area: Area, anchors: Iterable[Cell] = ()) -> Set[Cel
     return out
 
 
-def region_links(areas: Dict[str, Area]) -> Dict[str, List[Cell]]:
-    """相接的两块矩形：各自在交界线中点留一个通道口（格子在自己那一侧）。"""
+def shared_edge(a_area: Area, b_area: Area) -> List[Tuple[Cell, Cell]]:
+    """两块矩形相接的那条边：[(a 这一侧的格子, b 那一侧对面的格子), ...]（不相接就是空的）。"""
+    ax, ay, aw, ah = a_area
+    bx, by, bw, bh = b_area
+    out: List[Tuple[Cell, Cell]] = []
+    if ax + aw == bx or bx + bw == ax:
+        a_x, b_x = (ax + aw - 1, bx) if ax + aw == bx else (ax, bx + bw - 1)
+        out += [((a_x, y), (b_x, y)) for y in range(max(ay, by), min(ay + ah, by + bh))]
+    if ay + ah == by or by + bh == ay:
+        a_y, b_y = (ay + ah - 1, by) if ay + ah == by else (ay, by + bh - 1)
+        out += [((x, a_y), (x, b_y)) for x in range(max(ax, bx), min(ax + aw, bx + bw))]
+    return out
+
+
+def region_links(areas: Dict[str, Area], status: Optional[Dict[Any, str]] = None) -> Dict[str, List[Cell]]:
+    """相接的两块矩形：各自在交界线中点留一个通道口（格子在自己那一侧）。
+
+    status（可选）按一对区域说明交界是什么：open = 宽通道（默认）；door = 只留一格门洞；
+    wall = 不留口（不相邻的区域之间是墙）。
+    """
     out: Dict[str, List[Cell]] = {n: [] for n in areas}
     names = sorted(areas)
     for i, a in enumerate(names):
         ax, ay, aw, ah = areas[a]
         for b in names[i + 1:]:
+            kind = (status or {}).get(frozenset((a, b)), "open" if status is None else "wall")
+            if kind == "wall":
+                continue
+            if kind == "door":
+                edge = shared_edge(areas[a], areas[b])
+                if edge:
+                    ca, cb = edge[len(edge) // 2]
+                    out[a].append(ca)
+                    out[b].append(cb)
+                continue
             bx, by, bw, bh = areas[b]
             if ax + aw == bx or bx + bw == ax:  # 左右相接
                 lo, hi = max(ay, by), min(ay + ah, by + bh)
@@ -454,7 +589,8 @@ def _item_cells(world: "Neo4jWorld", areas: Dict[str, Area]) -> Tuple[Dict[str, 
         MATCH (i:Item)-[:LOCATED_AT]->(l:Location)
         WHERE i.x IS NOT NULL AND i.y IS NOT NULL
         RETURN l.name AS loc, i.x AS x, i.y AS y, coalesce(i.portable, true) AS portable,
-               coalesce(i.footprint_w, 1) AS w, coalesce(i.footprint_h, 1) AS h
+               coalesce(i.footprint_w, 1) AS w, coalesce(i.footprint_h, 1) AS h,
+               coalesce(i.item_kind, '') AS kind, coalesce(i.locked, false) AS locked
         """
     ) or []
     per: Dict[str, List[Cell]] = {n: [] for n in areas}
@@ -465,7 +601,10 @@ def _item_cells(world: "Neo4jWorld", areas: Dict[str, Area]) -> Tuple[Dict[str, 
             continue
         footprint = list(cells(area[0] + _int(r["x"]), area[1] + _int(r["y"]), _int(r["w"], 1), _int(r["h"], 1)))
         per[r["loc"]].extend(footprint)
-        if not r.get("portable", True):
+        if str(r.get("kind") or "").lower() == "door":
+            if r.get("locked"):
+                blocked.update(footprint)  # 锁着的门挡住门洞；开了就能走过去
+        elif not r.get("portable", True):
             blocked.update(footprint)
     return per, blocked
 
@@ -479,18 +618,31 @@ def region_shapes(world: "Neo4jWorld", areas: Optional[Dict[str, Area]] = None,
     areas = areas if areas is not None else region_areas(world)
     if item_cells is None:
         item_cells, _ = _item_cells(world, areas)
+    status = boundary_status(world, areas)
     key = (
         tuple(sorted(areas.items())),
         tuple(sorted((n, tuple(sorted(c))) for n, c in item_cells.items())),
+        tuple(sorted((tuple(sorted(p)), k) for p, k in status.items())),
     )
     hit = _SHAPE_CACHE.get(key)
     if hit is not None:
         return hit
-    links = region_links(areas)
+    links = region_links(areas, status)
     shapes = {
         name: region_shape(name, area, list(links.get(name, [])) + list(item_cells.get(name, [])))
         for name, area in areas.items()
     }
+    # 墙：不相通（或只隔着一扇门）的两块地相接处，两边各削掉一排，只留门洞
+    keep = {c for cells_ in links.values() for c in cells_}
+    for pair, kind in status.items():
+        if kind == "open" or len(pair) != 2:
+            continue
+        a, b = sorted(pair)
+        for ca, cb in shared_edge(areas[a], areas[b]):
+            if ca not in keep:
+                shapes[a].discard(ca)
+            if cb not in keep:
+                shapes[b].discard(cb)
     if len(_SHAPE_CACHE) > 64:
         _SHAPE_CACHE.clear()
     _SHAPE_CACHE[key] = shapes
@@ -701,6 +853,8 @@ def move_person_freely(world: "Neo4jWorld", name: str, cell: Cell) -> Dict[str, 
         return {"ok": False, "error": "Can't stand there"}
     region = region_at(areas, cell)
     before = person_region_name(world, name)
+    if region and before and region != before and not open_between(world, before, region):
+        return {"ok": False, "error": f"There is no open way from {before} into {region}"}
     set_person_cell(world, name, cell)
     if region and region != before:
         world.run_query(

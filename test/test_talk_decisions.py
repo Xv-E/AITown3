@@ -76,3 +76,33 @@ def test_npc_talk_does_not_change_trust_toward_the_player(monkeypatch):
     assert ds._is_player_name(world, "Reed") is False
     world.run_query = lambda q, **k: [{"pl": True, "role": "player"}]
     assert ds._is_player_name(world, "Ash") is True
+
+
+def test_background_npcs_follow_the_routine_only():
+    from game_loop import AgentState, GameLoop, normalize_brain
+
+    assert normalize_brain("npc") == normalize_brain("routine") == "routine"
+    assert normalize_brain(None) == normalize_brain("LLM") == "llm"
+
+    loop = GameLoop(MagicMock(), verbose=False)
+    brains = {"Reed": "routine", "Sage": "llm"}
+    loop._person_flags = lambda state: {"is_player": False, "role": "npc", "dead": False, "hp": 100,
+                                        "brain": brains[state.agent.name]}
+    reed, sage = AgentState(agent=Who("Reed")), AgentState(agent=Who("Sage"))
+    loop.agents = [reed, sage]
+    assert loop._routine_only(reed) and loop._rule_based(reed), "decides by rules even in LLM mode"
+    assert not loop._rule_based(sage)
+    assert not loop.heard("Reed", "Sage", [{"speaker": "Sage", "text": "Help me?"}]), "talk doesn't change a routine"
+    assert loop.heard("Sage", "Reed", [{"speaker": "Reed", "text": "Morning."}])
+
+
+def test_the_storyteller_never_whispers_to_background_npcs():
+    import json
+
+    from storyteller import parse_plan
+
+    digest = {"people": [{"name": "Reed", "routine": True}, {"name": "Sage"}], "items": [], "recent_beats": []}
+    raw = json.dumps({"arc": "x", "beats": [{"op": "whisper", "to": "Reed", "text": "psst"},
+                                             {"op": "whisper", "to": "Sage", "text": "psst"}]})
+    plan = parse_plan(raw, digest)
+    assert [b["to"] for b in plan["beats"]] == ["Sage"]

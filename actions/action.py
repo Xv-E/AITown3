@@ -144,11 +144,13 @@ def get_property(world: "Neo4jWorld", name: str, label: str, prop: str):
 
     整个节点的属性一次取回：tick 读缓存下，同一实体的其他属性直接命中缓存。
     """
-    rows = world.run_query(
-        f"MATCH (n:{label} {{name: $name}}) RETURN properties(n) AS p LIMIT 1",
-        name=name,
-    )
+    rows = world.run_query(properties_query(label), name=name)
     return (rows[0]["p"] or {}).get(prop) if rows else None
+
+
+def properties_query(label: str) -> str:
+    """get_property 用的查询（tick 预加载按同一字符串填缓存）。"""
+    return f"MATCH (n:{label} {{name: $name}}) RETURN properties(n) AS p LIMIT 1"
 
 
 def set_property(world: "Neo4jWorld", name: str, label: str, prop: str, value) -> None:

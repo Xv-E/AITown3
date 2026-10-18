@@ -1,0 +1,11 @@
+{
+  "id": "collect_stone",
+  "label": "Gather stones",
+  "node": "rock",
+  "stock": "stock",
+  "yield": {
+    "archetype": "stone"
+  },
+  "duration": 2,
+  "narrative": "@c pries a loose stone from @node."
+}

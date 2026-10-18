@@ -1,0 +1,8 @@
+{
+  "archetype": "fish",
+  "name": "Fish",
+  "item_kind": "fish",
+  "portable": true,
+  "value": 4,
+  "description": "A fresh river fish. Cook it at the campfire."
+}

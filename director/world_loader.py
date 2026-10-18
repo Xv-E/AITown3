@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -16,8 +17,8 @@ from .blueprint import EventBlueprint
 logger = logging.getLogger(__name__)
 
 _WORLDS_DIR = Path(__file__).resolve().parent.parent / "worlds"
-# 主世界：无缝营地。其余模板是小型演示 / 回归测试
-_DEFAULT_WORLD_ID = "town_daily_life"
+# 主世界：冒险者小镇（空数据库自动加载；AITOWN3_DEFAULT_WORLD 可以换）。其余模板是小型演示 / 回归测试
+_DEFAULT_WORLD_ID = os.environ.get("AITOWN3_DEFAULT_WORLD", "adventurer_town")
 
 
 def worlds_dir() -> Path:

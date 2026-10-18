@@ -1,0 +1,8 @@
+{
+  "archetype": "spear",
+  "name": "Spear",
+  "item_kind": "spear",
+  "portable": true,
+  "value": 16,
+  "description": "A log-shafted spear with a knapped stone head. Made at a workbench; traders pay well."
+}

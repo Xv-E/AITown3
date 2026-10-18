@@ -33,17 +33,26 @@ pub enum Icon {
     Field,
     Dial,
     Crate,
+    Fish,
+    Water,
+    Site,
 }
 
-const ALL: [Icon; 20] = [
+const ALL: [Icon; 23] = [
     Icon::Tree, Icon::Berry, Icon::Fire, Icon::Wood, Icon::Coin, Icon::Stone, Icon::Door,
     Icon::Key, Icon::Herb, Icon::Potion, Icon::Document, Icon::Tool, Icon::Lantern, Icon::Tent,
-    Icon::Stall, Icon::Board, Icon::Stove, Icon::Field, Icon::Dial, Icon::Crate,
+    Icon::Stall, Icon::Board, Icon::Stove, Icon::Field, Icon::Dial, Icon::Crate, Icon::Fish, Icon::Water,
+    Icon::Site,
 ];
 
 /// Keyword → icon, checked in order (so "DoorKey" is a key and "StoneDial" a dial).
 const RULES: &[(&[&str], Icon)] = &[
     (&["key"], Icon::Key),
+    (&["site"], Icon::Site),
+    (&["fishing_spot", "pool", "pond", "well"], Icon::Water),
+    (&["fish"], Icon::Fish),
+    (&["smoke"], Icon::Stove),
+    (&["rod", "spear"], Icon::Tool),
     (&["door", "gate"], Icon::Door),
     (&["dial", "puzzle", "mechanism", "lever"], Icon::Dial),
     (&["tree", "woodlot", "forest", "oak", "pine"], Icon::Tree),
@@ -341,6 +350,48 @@ fn pixels(icon: Icon) -> [&'static str; SIZE] {
             "..SSssssSS..",
             "....SSSS....",
         ],
+        Icon::Fish => [
+            "............",
+            "............",
+            "............",
+            "..uuuu....u.",
+            ".uwwuuu..uu.",
+            "uuwkuuuuuuu.",
+            "uuuuuuuuuuu.",
+            ".uucuuu..uu.",
+            "..uuuu....u.",
+            "............",
+            "............",
+            "............",
+        ],
+        Icon::Water => [
+            "............",
+            "............",
+            "...uuuuuu...",
+            ".uuuccuuuuu.",
+            "uuuuuuuccuuu",
+            "uuccuuuuuuuu",
+            "uuuuuucuuuuu",
+            ".uuuuuuuucu.",
+            "...uuuuuu...",
+            "............",
+            "............",
+            "............",
+        ],
+        Icon::Site => [
+            "............",
+            ".B........B.",
+            ".BtttttttttB",
+            ".B.t....t..B",
+            ".B..t..t...B",
+            ".B...tt....B",
+            ".B..t..t...B",
+            ".B.t....t..B",
+            ".BtttttttttB",
+            ".B........B.",
+            "sSsSsSsSsSsS",
+            "............",
+        ],
         Icon::Crate => [
             "............",
             ".BBBBBBBBBB.",
@@ -378,6 +429,7 @@ fn palette(c: char) -> Option<[u8; 4]> {
         'u' => [72, 140, 220, 255],
         'p' => [170, 84, 214, 255],
         'P' => [110, 46, 150, 255],
+        'c' => [150, 210, 240, 255],
         _ => [255, 0, 255, 255],
     })
 }
@@ -429,12 +481,111 @@ pub fn use_cjk_font(mut fonts: ResMut<Assets<Font>>) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// People: a little pixel figure; skin, hair and clothes picked from the name
+// ---------------------------------------------------------------------------
+
+/// h hair · s skin · k eyes / shoes · c shirt · p trousers · b satchel (traders)
+const PERSON: [&str; SIZE] = [
+    "....hhhh....",
+    "...hhhhhh...",
+    "...hssssh...",
+    "...skssks...",
+    "....ssss....",
+    "..cccccccc..",
+    ".sccccccccs.",
+    ".sccccccccs.",
+    "...pppppp...",
+    "...pp..pp...",
+    "...pp..pp...",
+    "..kkk..kkk..",
+];
+/// Traders carry a satchel on the hip.
+const SATCHEL: [(usize, usize); 4] = [(6, 8), (6, 9), (7, 8), (7, 9)];
+
+const SKINS: [[u8; 3]; 4] = [[241, 194, 155], [224, 172, 125], [198, 134, 92], [141, 85, 54]];
+const HAIRS: [[u8; 3]; 6] = [[40, 30, 25], [110, 70, 35], [205, 165, 85], [150, 55, 30], [125, 125, 130], [30, 30, 45]];
+const SHIRTS: [[u8; 3]; 8] = [
+    [196, 62, 62], [70, 150, 80], [210, 150, 50], [140, 80, 170],
+    [60, 140, 150], [190, 100, 140], [120, 110, 70], [200, 200, 190],
+];
+const TROUSERS: [[u8; 3]; 3] = [[60, 60, 90], [85, 62, 40], [55, 72, 52]];
+const PLAYER_SHIRT: [u8; 3] = [64, 184, 255];
+
+fn name_hash(name: &str) -> u32 {
+    name.bytes().fold(2166136261u32, |h, b| (h ^ b as u32).wrapping_mul(16777619))
+}
+
+/// The figure for one person (same name -> same look).
+pub fn person_image(name: &str, trader: bool, player: bool) -> Image {
+    let h = name_hash(name);
+    let skin = SKINS[(h % 4) as usize];
+    let hair = HAIRS[((h >> 3) % 6) as usize];
+    let shirt = if player { PLAYER_SHIRT } else { SHIRTS[((h >> 7) % 8) as usize] };
+    let trousers = TROUSERS[((h >> 11) % 3) as usize];
+    let mut data = Vec::with_capacity(SIZE * SIZE * 4);
+    for (y, row) in PERSON.iter().enumerate() {
+        for (x, c) in row.chars().enumerate() {
+            let c = if trader && SATCHEL.contains(&(y, x)) { 'b' } else { c };
+            let rgb = match c {
+                'h' => Some(hair),
+                's' => Some(skin),
+                'k' => Some([25, 22, 28]),
+                'c' => Some(shirt),
+                'p' => Some(trousers),
+                'b' => Some([120, 78, 40]),
+                _ => None,
+            };
+            data.extend_from_slice(&rgb.map_or([0, 0, 0, 0], |[r, g, b]| [r, g, b, 255]));
+        }
+    }
+    let mut image = Image::new(
+        Extent3d { width: SIZE as u32, height: SIZE as u32, depth_or_array_layers: 1 },
+        TextureDimension::D2,
+        data,
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::RENDER_WORLD,
+    );
+    image.sampler = ImageSampler::nearest();
+    image
+}
+
+/// One figure per person, made the first time they are drawn.
+#[derive(Resource, Default)]
+pub struct PersonIcons {
+    images: HashMap<(String, bool, bool), Handle<Image>>,
+}
+
+impl PersonIcons {
+    pub fn get(&mut self, name: &str, trader: bool, player: bool, images: &mut Assets<Image>) -> Handle<Image> {
+        self.images
+            .entry((name.to_string(), trader, player))
+            .or_insert_with(|| images.add(person_image(name, trader, player)))
+            .clone()
+    }
+}
+
+/// Fallen people are drawn grey.
+pub fn person_tint(alive: bool) -> Color {
+    if alive { Color::WHITE } else { Color::srgb(0.35, 0.35, 0.38) }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn thing(name: &str, kind: &str) -> Thing {
         Thing { name: name.into(), item_kind: kind.into(), ..Default::default() }
+    }
+
+    #[test]
+    fn people_look_different_but_always_the_same() {
+        let a = person_image("Ash", false, false);
+        let b = person_image("Sage", false, false);
+        assert_eq!(a.data, person_image("Ash", false, false).data, "same name, same look");
+        assert_ne!(a.data, b.data, "different people look different");
+        assert_ne!(a.data, person_image("Ash", true, false).data, "traders carry a satchel");
+        assert!(PERSON.iter().all(|r| r.chars().count() == SIZE));
     }
 
     #[test]

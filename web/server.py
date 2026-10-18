@@ -15,6 +15,7 @@ import asyncio
 import os
 import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
@@ -223,6 +224,21 @@ from quest_api import make_router as _questline_router  # noqa: E402
 app.include_router(
     _questline_router(get_world, story_arc=lambda: get_world_simulator().story().get("arc", ""))
 )
+
+from rpg_api import make_router as _rpg_router  # noqa: E402
+
+
+def _after_player_action(world, me: str, action: str, params: Dict[str, str]) -> None:
+    """玩家做完采集 / 制造 / 交易：关系系统在这里记一笔（见 relations.py）。"""
+    try:
+        from relations import after_action
+
+        after_action(world, me, action, params, at=get_world_simulator().sim_time)
+    except ImportError:
+        pass
+
+
+app.include_router(_rpg_router(get_world, after_action=_after_player_action))
 
 
 @app.get("/api/stream")
@@ -536,6 +552,12 @@ async def api_execute(req: ExecuteActionRequest):
                 if is_player and receiver:
                     adjust_trust(world, receiver, 2)
                     reason = f"{reason} ({receiver} trust → {get_trust(world, receiver)})"
+                # 交的是他委托要的东西：完成委托、他付酬劳
+                from job_board import on_give
+
+                done = on_give(world, giver, receiver, _item, at=get_world_simulator().sim_time)
+                if done:
+                    reason = f"{reason}. {done}"
             except Exception:
                 pass
         interaction = None
@@ -637,6 +659,24 @@ def api_character_memories(name: str, limit: int = 50, query: Optional[str] = No
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+class BrainRequest(BaseModel):
+    brain: str  # llm | routine
+
+
+@app.post("/api/characters/{name}/brain")
+def api_character_brain(name: str, req: BrainRequest):
+    """切换一个人是用大模型做决策（llm），还是只照日程行动的背景 NPC（routine）。"""
+    from game_loop import normalize_brain
+
+    world = get_world()
+    if name not in {c["name"] for c in list_characters(world)}:
+        raise HTTPException(status_code=404, detail=f"Character not found: {name}")
+    brain = normalize_brain(req.brain)
+    world.run_query("MATCH (p:Person {name: $n}) SET p.brain = $b", n=name, b=brain)
+    what = "thinks with the LLM" if brain == "llm" else "follows the daily routine only"
+    return {"ok": True, "name": name, "brain": brain, "message": f"{name} now {what}."}
 
 
 @app.get("/api/characters/{name}/mind")
@@ -792,22 +832,22 @@ def api_turn(req: TurnRequest):
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-# 每拍除了 interval 的等待，计算本身大约要这么久（秒）
-_TICK_OVERHEAD = 0.2
+# 卡顿（存档、慢 tick）之后单拍最多推进这么多模拟秒，避免一次跳太远
+_SIM_MAX_DT = 2.0
 
 
-def _run_simulation_tick() -> Dict[str, Any]:
+def _run_simulation_tick(dt: float) -> Dict[str, Any]:
     with _tick_lock:
-        return _run_simulation_tick_locked()
+        return _run_simulation_tick_locked(dt)
 
 
-def _run_simulation_tick_locked() -> Dict[str, Any]:
+def _run_simulation_tick_locked(dt: float) -> Dict[str, Any]:
     mgr = get_plan_manager()
     # 模拟节奏 → 说话的人要站多少模拟秒才对得上客户端的气泡
-    get_world_simulator()._ensure_loop(get_world()).sim_per_wall = _sim_dt / max(_sim_interval + _TICK_OVERHEAD, 0.05)
+    get_world_simulator()._ensure_loop(get_world()).sim_per_wall = _sim_dt / max(_sim_interval, 0.05)
     return mgr.tick(
         get_world(),
-        dt=_sim_dt,
+        dt=dt,
         auto_plan=True,
         use_llm=_sim_use_llm,
         force_mock=_sim_force_mock,
@@ -820,10 +860,18 @@ def _run_simulation_tick_locked() -> Dict[str, Any]:
 async def _simulation_loop() -> None:
     global _sim_running, _sim_last_result
     last_autosave = datetime.now(timezone.utc)
+    last_tick_at: Optional[float] = None
     while _sim_running:
+        tick_started = time.monotonic()
+        # 按真实经过时间推进：上一拍开始到这一拍开始的墙钟秒数（含存档耗时）× 模拟/真实比例
+        dt = _sim_dt
+        if last_tick_at is not None:
+            ratio = _sim_dt / max(_sim_interval, 0.05)
+            dt = min(max((tick_started - last_tick_at) * ratio, _sim_dt), max(_SIM_MAX_DT, _sim_dt))
+        last_tick_at = tick_started
         try:
             loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(_executor, _run_simulation_tick)
+            result = await loop.run_in_executor(_executor, _run_simulation_tick, dt)
             _sim_last_result = result
             _state_hub.mark_dirty()
             if AUTOSAVE_SECONDS > 0 and (datetime.now(timezone.utc) - last_autosave).total_seconds() >= AUTOSAVE_SECONDS:
@@ -843,7 +891,7 @@ async def _simulation_loop() -> None:
                 break
         except Exception as e:
             _sim_last_result = {"error": str(e)}
-        await asyncio.sleep(_sim_interval)
+        await asyncio.sleep(max(0.0, _sim_interval - (time.monotonic() - tick_started)))
 
 
 async def _stop_simulation() -> None:
@@ -960,7 +1008,10 @@ def _save_now(slot: str) -> Dict[str, Any]:
     from llm_service import get_web_memory
 
     with _tick_lock:
-        return save_game(slot, get_world(), get_world_simulator()._game_loop, get_web_memory())
+        loop = get_world_simulator()._game_loop
+        if loop is not None:
+            loop.wait_decisions(timeout=30)
+        return save_game(slot, get_world(), loop, get_web_memory())
 
 
 def _autosave_quietly() -> None:
@@ -990,6 +1041,9 @@ def _load_now(slot: str) -> Dict[str, Any]:
     body = read_save(slot)
     world = get_world()
     with _tick_lock:
+        loop = get_world_simulator()._game_loop
+        if loop is not None:
+            loop.wait_decisions(timeout=30)
         counts = restore_graph(world, body.get("world") or {})
         get_plan_manager().reset_all()
         get_world_simulator().reset()

@@ -1,0 +1,23 @@
+{
+  "archetype": "fishing_spot",
+  "name": "FishingSpot",
+  "item_kind": "fishing_spot",
+  "portable": false,
+  "value": 0,
+  "description": "A deep pool where fish gather. Needs a fishing rod.",
+  "script": {
+    "lore": "Fish here with a rod. Fish come back over a few hours.",
+    "state_props": ["stock"],
+    "initial_state": {
+      "stock": 4
+    },
+    "on_tick": [
+      {
+        "op": "add_prop",
+        "prop": "stock",
+        "delta_per_sec": 0.01,
+        "max": 4
+      }
+    ]
+  }
+}

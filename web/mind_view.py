@@ -91,7 +91,26 @@ def knows_view(world, name: str) -> Dict[str, Any]:
     ) or []
     if rows and not rows[0].get("me_player"):
         trust, player = int(rows[0].get("trust") or 0), str(rows[0].get("player") or "")
+    relations: List[str] = []
+    try:
+        from relations import alliance_of, alliances_view, members, relations_of, word_for
+
+        group = alliance_of(world, name)
+        if group:
+            mates = [pretty(m) for m in members(world, group) if m != name]
+            relations.append(f"Member of {group} (with {', '.join(mates) or 'nobody else'})")
+            for g in alliances_view(world):
+                if g["name"] == group:
+                    relations += [f"  {group} and {s['other']}: {s['word']} ({s['value']})" for s in g["stances"]]
+
+        for r in relations_of(world, name):
+            tags = f"  [{', '.join(r['tags'])}]" if r["tags"] else ""
+            why = f" - {r['reason']}" if r.get("reason") else ""
+            relations.append(f"{word_for(int(r['value'])).capitalize()} {pretty(r['other'])} ({int(r['value'])}){tags}{why}")
+    except Exception:  # noqa: BLE001
+        pass
     return {
+        "relations": relations,
         "facts": facts,
         "places": places,
         "seen": seen,
@@ -146,7 +165,11 @@ def profile_view(world, name: str) -> Dict[str, Any]:
         status.append("down")
     held = [pretty(h) for h in rows[0].get("held") or [] if h]
     status.append("Carrying " + ", ".join(held) if held else "Carrying nothing")
-    return {"fields": fields, "status": status}
+    from game_loop import normalize_brain
+
+    player = bool(props.get("is_player")) or props.get("role") == "player"
+    brain = "" if player else normalize_brain(props.get("brain"))
+    return {"fields": fields, "status": status, "brain": brain}
 
 
 def _hours(h: float) -> str:

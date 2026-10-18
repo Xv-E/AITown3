@@ -1,0 +1,15 @@
+{
+  "id": "cook_fish",
+  "label": "Cook fish",
+  "inputs": [
+    {
+      "kind": "fish"
+    }
+  ],
+  "station": "campfire",
+  "output": {
+    "archetype": "cooked_fish"
+  },
+  "duration": 2,
+  "description": "Roast a fish at the campfire."
+}

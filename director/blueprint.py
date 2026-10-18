@@ -103,6 +103,16 @@ class PersonSpec:
     routine: List[Dict[str, Any]] = field(default_factory=list)
     # 开局知识：{"all": true} 全知；{"places": [...], "items": [...]} 额外知道的地点 / 物品
     knows: Dict[str, Any] = field(default_factory=dict)
+    # llm（用大模型做决策）| routine（背景 NPC，只照日程）
+    brain: str = "llm"
+    # 钱（数值）；trader = 会买卖东西的商人
+    coins: int = 0
+    trader: bool = False
+    # 商店：卖哪几类东西、每类备几件（缺了他会自己去采集 / 制造 / 收购）
+    sells: List[str] = field(default_factory=list)
+    shop_stock: int = 1
+    # 只有他自己知道的事（进他的决策 / 对话 prompt；玩家在 Profile 页看得到）
+    secret: str = ""
 
     def normalized(self) -> "PersonSpec":
         routine_out: List[Dict[str, Any]] = []
@@ -153,6 +163,12 @@ class PersonSpec:
             accepts_from=[_clean_name(str(x)) for x in (self.accepts_from or []) if x],
             routine=routine_out,
             knows=dict(self.knows or {}),
+            brain="routine" if str(self.brain or "").strip().lower() in ("routine", "npc") else "llm",
+            coins=max(0, int(self.coins or 0)),
+            trader=bool(self.trader),
+            sells=[str(k).strip().lower() for k in (self.sells or []) if str(k).strip()],
+            shop_stock=max(1, int(self.shop_stock or 1)),
+            secret=(self.secret or "").strip(),
         )
 
 
@@ -626,6 +642,12 @@ class EventBlueprint:
                     accepts_from=list(p.accepts_from or []),
                     routine=routine_fixed,
                     knows=dict(p.knows or {}),
+                    brain=getattr(p, "brain", "llm"),
+                    coins=getattr(p, "coins", 0),
+                    trader=getattr(p, "trader", False),
+                    sells=list(getattr(p, "sells", []) or []),
+                    shop_stock=getattr(p, "shop_stock", 1),
+                    secret=getattr(p, "secret", ""),
                 )
             )
         person_names = {p.name for p in fixed_persons}
@@ -792,6 +814,12 @@ class EventBlueprint:
                 accepts_from=list(x.get("accepts_from") or []),
                 routine=[dict(s) for s in (x.get("routine") or []) if isinstance(s, dict)],
                 knows=dict(x.get("knows") or {}) if isinstance(x.get("knows"), dict) else {},
+                brain=str(x.get("brain") or "llm"),
+                coins=int(x.get("coins", 0) or 0),
+                trader=bool(x.get("trader", False)),
+                sells=list(x.get("sells") or []),
+                shop_stock=int(x.get("shop_stock", 1) or 1),
+                secret=str(x.get("secret") or ""),
             )
             for x in (data.get("persons") or [])
             if isinstance(x, dict)

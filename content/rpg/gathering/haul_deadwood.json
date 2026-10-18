@@ -1,0 +1,11 @@
+{
+  "id": "haul_deadwood",
+  "label": "Haul a fallen log",
+  "node": "woodlot",
+  "stock": "stock",
+  "yield": {
+    "archetype": "log"
+  },
+  "duration": 3,
+  "narrative": "@c drags a fallen log out of @node."
+}

@@ -45,3 +45,51 @@ def test_rows_for_the_client():
     area = (5, 5, 4, 3)
     rows = shape_rows({(5, 5), (8, 7)}, area)
     assert rows == ["#...", "....", "...#"]
+
+
+class DoorWorld:
+    """Hall | Vault behind a door (locked until the key links them); Store touches Hall but isn't adjacent."""
+
+    def __init__(self):
+        self.locked = True
+        self.areas = {"Hall": (0, 0, 12, 10), "Vault": (12, 0, 10, 10), "Store": (0, 10, 12, 8)}
+        self.door_xy = None
+
+    def run_query(self, q, **k):
+        if "l.area_x IS NOT NULL" in q:
+            return [{"name": n, "x": a[0], "y": a[1], "w": a[2], "h": a[3]} for n, a in self.areas.items()]
+        if "toLower(coalesce(d.item_kind" in q:
+            return [{"door": "VaultDoor", "here": "Hall", "to": "", "locked": self.locked, "locked_to": []}]
+        if "i.effects_on IS NOT NULL" in q:
+            return [{"e": '[{"target": "VaultDoor", "ops": [{"op": "link", "rel": "ADJACENT_TO", "a": "Hall", "b": "Vault"}]}]'}]
+        if "[:ADJACENT_TO]-(b:Location) WHERE a.name < b.name" in q:
+            return [] if self.locked else [{"a": "Hall", "b": "Vault"}]
+        if "[:ADJACENT_TO]-(:Location {name: $b})" in q:
+            return [{"ok": 1}] if (not self.locked and {k["a"], k["b"]} == {"Hall", "Vault"}) else []
+        if "MATCH (i:Item)-[:LOCATED_AT]->(l:Location)" in q and "i.x IS NOT NULL" in q:
+            if self.door_xy is None:
+                return []
+            return [{"loc": "Hall", "x": self.door_xy[0], "y": self.door_xy[1], "portable": False, "w": 1, "h": 1,
+                     "kind": "door", "locked": self.locked}]
+        return []
+
+
+def test_a_locked_door_is_the_only_way_through_a_wall():
+    from spatial import boundary_status, find_path, open_between, walkable_cells
+
+    world = DoorWorld()
+    status = boundary_status(world, world.areas)
+    assert status[frozenset(("Hall", "Vault"))] == "door"
+    assert status[frozenset(("Hall", "Store"))] == "wall", "touching but not adjacent: a wall"
+    hall, vault, store = (6, 5), (17, 5), (6, 14)
+    walk = walkable_cells(world)
+    assert hall in walk and vault in walk
+    assert find_path(walk, hall, {vault}) is None, "locked: no way in"
+    assert find_path(walk, hall, {store}) is None, "a wall, no door"
+    assert not open_between(world, "Hall", "Vault")
+
+    world.locked = False  # the key was used: the door opens, the regions become adjacent
+    walk = walkable_cells(world)
+    path = find_path(walk, hall, {vault})
+    assert path is not None and (11, 5) in path, "through the one-cell doorway"
+    assert open_between(world, "Hall", "Vault")

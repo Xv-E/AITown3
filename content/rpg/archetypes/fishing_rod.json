@@ -1,0 +1,8 @@
+{
+  "archetype": "fishing_rod",
+  "name": "FishingRod",
+  "item_kind": "rod",
+  "portable": true,
+  "value": 6,
+  "description": "A springy stick with a line. Catches fish at the river."
+}

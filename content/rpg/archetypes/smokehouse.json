@@ -1,0 +1,12 @@
+{
+  "archetype": "smokehouse",
+  "name": "Smokehouse",
+  "item_kind": "smokehouse",
+  "portable": false,
+  "value": 0,
+  "footprint": [2, 2],
+  "description": "A small smokehouse. Smoke two fish here to get smoked fish for trading.",
+  "script": {
+    "lore": "Smoked fish keeps for days and traders pay well for it."
+  }
+}

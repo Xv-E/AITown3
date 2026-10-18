@@ -98,7 +98,14 @@ def build_from_blueprint(
             "speech_style": person.speech_style or "",
             "secret_policy": person.secret_policy or "share_gossip",
             "trust_toward_player": int(person.trust_toward_player or 0),
+            "brain": getattr(person, "brain", "llm") or "llm",
+            "coins": int(getattr(person, "coins", 0) or 0),
+            "trader": bool(getattr(person, "trader", False)),
+            "sells": list(getattr(person, "sells", []) or []),
+            "shop_stock": int(getattr(person, "shop_stock", 1) or 1),
         }
+        if getattr(person, "secret", ""):
+            props["secret"] = person.secret
         if person.accepts_from:
             props["accepts_from"] = json.dumps(list(person.accepts_from), ensure_ascii=False)
         if getattr(person, "routine", None):

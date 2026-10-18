@@ -1,0 +1,8 @@
+{
+  "archetype": "smoked_fish",
+  "name": "SmokedFish",
+  "item_kind": "food",
+  "portable": true,
+  "value": 22,
+  "description": "Fish smoked until it keeps for days. Traders pay well for it."
+}

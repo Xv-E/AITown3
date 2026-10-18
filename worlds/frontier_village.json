@@ -124,57 +124,9 @@
   "items": [
     { "name": "VillagePlan", "archetype": "village_plan", "located_at": "Village", "pos": [11, 1] },
     { "name": "Tents", "archetype": "tents", "located_at": "Village", "pos": [2, 9] },
-    {
-      "name": "Woodlot",
-      "value": 0,
-      "located_at": "Forest",
-      "item_kind": "source",
-      "portable": false,
-      "footprint": [3, 2],
-      "pos": [6, 4],
-      "description": "Trees ready for felling.",
-      "script": {
-        "lore": "There are always a few logs lying ready in the forest.",
-        "on_tick": [
-          { "op": "ensure_kind", "item_kind": "log", "min": 3, "at": "Forest", "prefix": "Log",
-            "spawn": { "archetype": "log" } }
-        ]
-      }
-    },
-    {
-      "name": "StoneFace",
-      "value": 0,
-      "located_at": "Quarry",
-      "item_kind": "source",
-      "portable": false,
-      "footprint": [4, 2],
-      "pos": [6, 2],
-      "description": "A cliff of good building stone.",
-      "script": {
-        "lore": "Stone can always be split from the quarry face.",
-        "on_tick": [
-          { "op": "ensure_kind", "item_kind": "stone", "min": 3, "at": "Quarry", "prefix": "Stone",
-            "spawn": { "archetype": "stone" } }
-        ]
-      }
-    },
-    {
-      "name": "WheatRows",
-      "value": 0,
-      "located_at": "Field",
-      "item_kind": "source",
-      "portable": false,
-      "footprint": [6, 3],
-      "pos": [6, 3],
-      "description": "Rows of ripening wheat.",
-      "script": {
-        "lore": "Lia's wheat keeps ripening; sheaves can be cut whenever needed.",
-        "on_tick": [
-          { "op": "ensure_kind", "item_kind": "grain", "min": 3, "at": "Field", "prefix": "Wheat",
-            "spawn": { "archetype": "wheat" } }
-        ]
-      }
-    }
+    {"name": "Woodlot", "value": 0, "located_at": "Forest", "item_kind": "woodlot", "portable": false, "footprint": [3, 2], "pos": [6, 4], "description": "Storm-felled trees. Logs can be hauled out.", "script": {"lore": "Fallen trees. Haul logs out; storms bring more down.", "state_props": ["stock"], "initial_state": {"stock": 4}, "on_tick": [{"op": "add_prop", "prop": "stock", "delta_per_sec": 0.01, "max": 4}]}},
+    {"name": "StoneFace", "value": 0, "located_at": "Quarry", "item_kind": "rock", "portable": false, "footprint": [4, 2], "pos": [6, 2], "description": "A cliff of good building stone. Loose blocks can be gathered.", "script": {"lore": "Gather building stone here; it cracks off slowly.", "state_props": ["stock"], "initial_state": {"stock": 6}, "on_tick": [{"op": "add_prop", "prop": "stock", "delta_per_sec": 0.015, "max": 6}]}},
+    {"name": "WheatRows", "value": 0, "located_at": "Field", "item_kind": "wheat_field", "portable": false, "footprint": [6, 3], "pos": [6, 3], "description": "Rows of ripening wheat ready to harvest.", "script": {"lore": "Harvest wheat here; it grows back over a day.", "state_props": ["stock"], "initial_state": {"stock": 4}, "on_tick": [{"op": "add_prop", "prop": "stock", "delta_per_sec": 0.01, "max": 4}]}}
   ],
   "quests": [
     {

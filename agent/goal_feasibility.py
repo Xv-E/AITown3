@@ -288,6 +288,14 @@ def is_goal_satisfied(
         if _entity_exists(world, target_entity, "Person"):
             return False
         return False
+    if goal == "Fulfil request" and target_entity:
+        from job_board import open_requests
+
+        return not any(r["poster"] == target_entity for r in open_requests(world))
+    if goal == "Form alliance" and target_entity:
+        from relations import are_allies
+
+        return are_allies(world, character, target_entity)
     if goal == "Defeat enemy" and target_entity:
         return _is_dead(world, target_entity)
     if goal in PERFORM_GOALS and target_entity:

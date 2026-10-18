@@ -79,6 +79,7 @@ class Storyteller:
                 "target": goal.get("target_entity"),
                 "reason": str(goal.get("reason") or "")[:160],
                 "player": loop._is_player(s),
+                "routine": loop._routine_only(s),
             })
         items = []
         for r in world.run_query("MATCH (i:Item) RETURN i.name AS name, properties(i) AS p") or []:
@@ -221,7 +222,7 @@ class Storyteller:
 
 def build_prompt(d: Dict[str, Any]) -> str:
     people = "\n".join(
-        f"- {p['name']}{' (player)' if p.get('player') else ''} at {p.get('location')}: "
+        f"- {p['name']}{' (player)' if p.get('player') else ' (background, follows routine; never whisper)' if p.get('routine') else ''} at {p.get('location')}: "
         f"{p.get('status')}; goal {p.get('goal')} -> {p.get('target')}. {p.get('reason') or ''}"
         for p in d["people"]
     )
@@ -260,7 +261,8 @@ Choose at most {MAX_BEATS} beats that move the story forward from here. Tools:
 - announce: something everyone notices. {{"op": "announce", "text": "..."}}
 - whisper: a private message, rumour or thought for ONE person. Set urgent true only if it should
   make them drop what they are doing. {{"op": "whisper", "to": "<name>", "text": "...", "urgent": false}}
-- adjust: change a number on an item listed above (e.g. weather drains fuel). Keep it modest.
+- adjust: lower a number on an item listed above (e.g. weather drains fuel). Keep it modest; nothing is
+  ever added from nowhere, so delta must be negative.
   {{"op": "adjust", "item": "<item>", "prop": "<prop>", "delta": -10, "why": "..."}}
 Never whisper to the player. Build on grudges and conflicts when there are any.
 Vary your beats: do not whisper to the same person as last time, do not adjust the same number twice in
@@ -281,7 +283,8 @@ def parse_plan(raw: str, digest: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return None
     if not isinstance(data, dict):
         return None
-    npcs = {p["name"] for p in digest["people"] if not p.get("player")}
+    # 背景 NPC 只照日程，悄悄话对他们没用：只能对 LLM 角色说
+    npcs = {p["name"] for p in digest["people"] if not p.get("player") and not p.get("routine")}
     items = {i["name"]: i["props"] for i in digest["items"]}
     # 上一轮刚用过的：不许原样再来（LLM 很容易每次都私下找同一个人）
     last = _last_round(digest.get("recent_beats") or [])
@@ -328,6 +331,10 @@ def _validate_beat(b: Dict[str, Any], npcs: set, items: Dict[str, Dict[str, Any]
             return None
         if prop not in props or delta == 0:
             return None
+        from content import get_content
+
+        if delta > 0 and get_content().conservation:
+            return None  # 守恒：剧情只能消耗（风雨、损耗），不能凭空添东西
         cur = float(props[prop])
         cap = max(10.0, abs(cur) * 0.5)
         delta = max(-cap, min(cap, delta))
