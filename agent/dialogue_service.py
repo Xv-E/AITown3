@@ -1009,6 +1009,7 @@ def generate_talk_dialogue(
     player_message: str = "",
     history: Optional[List[Dict[str, str]]] = None,
     listener_speaks: bool = True,
+    apply_trust: bool = True,
 ) -> Dict[str, Any]:
     """
     返回:
@@ -1016,6 +1017,7 @@ def generate_talk_dialogue(
       player_message, utterance_source (provided|llm|empty)
     NPC 台词仅来自 LLM；force_mock / 模型不可用时 source=error 且无 NPC 行。
     无 player_message 时先 LLM 生成发起方发言，再 LLM 生成对方回复。
+    apply_trust=False：只生成不写图（后台预生成用），好感留到 apply_talk_dialogue 再记。
     """
     msg = (player_message or "").strip()
     utterance_source = "provided" if msg else "empty"
@@ -1128,6 +1130,18 @@ def generate_talk_dialogue(
         except Exception:
             pass
 
+    result["player_message"] = msg
+    result["utterance_source"] = utterance_source
+    if utterance_meta.get("trace_id"):
+        result["utterance_trace_id"] = utterance_meta["trace_id"]
+    if not apply_trust:
+        result["trust_base"] = knowledge.trust_toward_player
+        return result
+    return _settle_trust(world, speaker_a, speaker_b, result, knowledge.trust_toward_player)
+
+
+def _settle_trust(world, speaker_a: str, speaker_b: str, result: Dict[str, Any], base: int) -> Dict[str, Any]:
+    """按这段话记好感：NPC 之间改 FEELS，对玩家改 trust_toward_player。"""
     delta = int(result.get("trust_delta") or 0)
     if not _is_player_name(world, speaker_a):
         # NPC 之间：回话的人对发起的人的好感随这段话变（trust_toward_player 只记对玩家的）
@@ -1142,15 +1156,16 @@ def generate_talk_dialogue(
     if world is not None and delta and result.get("source") == "llm":
         new_trust = adjust_trust(world, speaker_b, delta)
     else:
-        new_trust = knowledge.trust_toward_player + (
-            delta if result.get("source") == "llm" else 0
-        )
+        new_trust = base + (delta if result.get("source") == "llm" else 0)
     result["trust"] = new_trust
     result["trust_delta"] = delta if result.get("source") == "llm" else 0
-    result["player_message"] = msg
-    result["utterance_source"] = utterance_source
-    if utterance_meta.get("trace_id"):
-        result["utterance_trace_id"] = utterance_meta["trace_id"]
+    return result
+
+
+def unavailable_dialogue(speaker_a: str, speaker_b: str, location: str, error: str) -> Dict[str, Any]:
+    """没有台词的对话结果（例如预生成超时）。"""
+    result = _llm_unavailable_result(speaker_a, speaker_b, location, "", error=error)
+    result.update(trust=0, player_message="", utterance_source="empty")
     return result
 
 
@@ -1217,8 +1232,6 @@ def handle_talk_dialogue(
     listener_speaks: bool = True,
 ) -> Dict[str, Any]:
     """生成对话、更新信任、写入记忆，并转移可分享事实。"""
-    from npc_knowledge import transfer_shareable_facts
-
     dialogue = generate_talk_dialogue(
         world,
         speaker_a,
@@ -1229,7 +1242,26 @@ def handle_talk_dialogue(
         player_message=player_message,
         history=history,
         listener_speaks=listener_speaks,
+        apply_trust=False,
     )
+    return apply_talk_dialogue(
+        world, dialogue, speaker_a, speaker_b, location, memory=memory, player_message=player_message
+    )
+
+
+def apply_talk_dialogue(
+    world,
+    dialogue: Dict[str, Any],
+    speaker_a: str,
+    speaker_b: str,
+    location: str,
+    *,
+    memory=None,
+    player_message: str = "",
+) -> Dict[str, Any]:
+    """对话真的发生了：记好感、写记忆、转移事实（generate_talk_dialogue 只生成不写）。"""
+    if "trust_base" in dialogue:
+        _settle_trust(world, speaker_a, speaker_b, dialogue, int(dialogue.pop("trust_base") or 0))
     lines = dialogue.get("lines") or []
     resolved_msg = (dialogue.get("player_message") or player_message or "").strip()
     if not resolved_msg:

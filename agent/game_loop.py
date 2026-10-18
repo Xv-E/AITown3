@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 from concurrent.futures import Future, ThreadPoolExecutor, wait
 from contextlib import nullcontext
 from dataclasses import dataclass, field
@@ -50,6 +51,11 @@ ENGAGE_MARGIN = 3.0
 ENGAGE_WAIT = 20.0
 # 和玩家聊天：NPC 站着等玩家回话（每说一句重新计时；玩家关掉对话框就放开）
 PLAYER_REPLY_WAIT = 45.0
+# 对话台词在出发搭话时就丢到后台生成；走到了还没写好就站着等，最多等这么久（真实秒）再作罢
+TALK_PREFETCH_TIMEOUT = float(os.environ.get("AITOWN3_TALK_PREFETCH_TIMEOUT", "60"))
+TALK_PREFETCH_WORKERS = int(os.environ.get("AITOWN3_TALK_WORKERS", "4"))
+# 等台词时每拍往后顺延的模拟秒
+TALK_WAIT_STEP = 0.25
 # 聊完之后要不要改主意：玩家说的话能打断计划（≥ INTERRUPT_PRIORITY），NPC 之间的闲聊等手上这步做完
 TALK_PRIORITY = 0.55
 PLAYER_TALK_PRIORITY = 0.85
@@ -254,6 +260,10 @@ class GameLoop:
         # 可选：定期推动剧情（见 storyteller.py）
         self.storyteller = None
         self._story_future: Optional[Future] = None
+        # 预生成的对话：发起人 -> {"key": converse 参数, "future", "t0": 提交时刻, "timed_out"}
+        # （不挂在 PendingAction 上：存档会 asdict 它，Future 拷不了）
+        self._talk_pool: Optional[ThreadPoolExecutor] = None
+        self._talk_prefetch: Dict[str, Dict[str, Any]] = {}
         # 每拍回调（例如任务线进度）：对象实现 on_tick(loop)；出错只记日志，不影响模拟
         self.hooks: List[Any] = []
         # 最近的对话（逐句台词），给客户端在头顶一句一句地放气泡
@@ -696,6 +706,10 @@ class GameLoop:
         if self._plan_pool is not None:
             self._plan_pool.shutdown(wait=False)
             self._plan_pool = None
+        self._talk_prefetch.clear()
+        if self._talk_pool is not None:
+            self._talk_pool.shutdown(wait=False)
+            self._talk_pool = None
 
     def run(self, max_turns: Optional[int] = None) -> Dict[str, Any]:
         limit = max_turns if max_turns is not None else self.max_turns
@@ -805,8 +819,12 @@ class GameLoop:
                         result["message"] = action_entry.get("message") if action_entry else None
             return result
 
-        # 完成到期动作
-        if state.pending_action and self.sim_time >= state.pending_action.completes_at:
+        # 完成到期动作（搭话的台词还没写好就先站着等，不卡这一拍）
+        if (
+            state.pending_action
+            and self.sim_time >= state.pending_action.completes_at
+            and not self._awaiting_lines(state)
+        ):
             result["phase"] = "completing"
             action_entry = self._complete_pending(state)
             result["action"] = action_entry
@@ -1062,6 +1080,8 @@ class GameLoop:
             # 对方站着等我走过去，说完（或超时）就放开
             partner.engaged_by = state.agent.name
             partner.engaged_until = pending.completes_at + ENGAGE_MARGIN
+        if not instant:
+            self._prefetch_talk(state, action_name, list(args))
         if action_name != act("idle"):
             self._log(
                 state,
@@ -2173,6 +2193,66 @@ class GameLoop:
             state.sim_busy_until = state.pending_action.completes_at
             state.status = "talking"
 
+    def _prefetch_talk(self, state: AgentState, action_name: str, args: List[str]) -> None:
+        """出发去搭话时就在后台写台词（只生成不写图），走到了直接说。"""
+        name = state.agent.name
+        old = self._talk_prefetch.pop(name, None)
+        if old is not None:
+            old["future"].cancel()
+        if action_name != act("converse") or len(args) < 3 or self._rule_based_name(state.agent):
+            return
+        from dialogue_service import generate_talk_dialogue
+
+        listener = self.get_agent_state(args[1])
+        to_player = listener is not None and self._is_player(listener)
+        if self._talk_pool is None:
+            self._talk_pool = ThreadPoolExecutor(
+                max_workers=max(1, TALK_PREFETCH_WORKERS), thread_name_prefix="npc-talk"
+            )
+        future = self._talk_pool.submit(
+            generate_talk_dialogue, self.world, args[0], args[1], args[2],
+            memory=self.memory, listener_speaks=not to_player, apply_trust=False,
+        )
+        self._talk_prefetch[name] = {"key": tuple(args), "future": future, "t0": time.monotonic()}
+
+    def _awaiting_lines(self, state: AgentState) -> bool:
+        """到点的搭话台词还在后台写：把动作往后顺延一点、叫住对方，返回 True。超时就不等了。"""
+        pending = state.pending_action
+        if pending is None or pending.hold or pending.name != act("converse"):
+            return False
+        entry = self._talk_prefetch.get(state.agent.name)
+        if entry is None or entry["key"] != tuple(pending.args) or entry["future"].done():
+            return False
+        if time.monotonic() - entry["t0"] > TALK_PREFETCH_TIMEOUT:
+            entry["timed_out"] = True
+            return False
+        pending.completes_at = self.sim_time + TALK_WAIT_STEP
+        state.sim_busy_until = pending.completes_at
+        for other in pending.args[:2]:
+            if other != state.agent.name:
+                self.engage(other, state.agent.name, TALK_WAIT_STEP + ENGAGE_MARGIN)
+        return True
+
+    def _take_prefetched_talk(self, name: str, args: List[str]) -> Optional[Dict[str, Any]]:
+        """取出预生成的台词；没有预生成（instant / 规则角色）返回 None，由调用方当场生成。"""
+        entry = self._talk_prefetch.pop(name, None)
+        if entry is None or entry["key"] != tuple(args):
+            if entry is not None:
+                entry["future"].cancel()
+            return None
+        from dialogue_service import unavailable_dialogue
+
+        future = entry["future"]
+        if entry.get("timed_out") and not future.done():
+            future.cancel()
+            return unavailable_dialogue(args[0], args[1], args[2], "dialogue generation timed out")
+        try:
+            # 正常路径上已经写好；只有被强制结束动作（_cancel_pending apply=True）时才可能在这里等
+            left = max(1.0, TALK_PREFETCH_TIMEOUT - (time.monotonic() - entry["t0"]))
+            return future.result(timeout=left)
+        except Exception as e:  # noqa: BLE001
+            return unavailable_dialogue(args[0], args[1], args[2], f"dialogue generation failed: {e}")
+
     def _run_hooks(self) -> None:
         for hook in list(self.hooks):
             try:
@@ -2717,17 +2797,25 @@ class GameLoop:
 
                 listener = self.get_agent_state(args[1])
                 to_player = listener is not None and self._is_player(listener)
-                dialogue = handle_talk_dialogue(
-                    self.world,
-                    args[0],
-                    args[1],
-                    args[2],
-                    memory=self.memory,
-                    # 背景 NPC 去找人说话（日程里的寒暄）不调用大模型：不写台词
-                    force_mock=self._rule_based_name(agent),
-                    # 跟玩家说话：只说自己这句，不替玩家回答
-                    listener_speaks=not to_player,
-                )
+                ready = self._take_prefetched_talk(agent.name, args)
+                if ready is not None:
+                    from dialogue_service import apply_talk_dialogue
+
+                    dialogue = apply_talk_dialogue(
+                        self.world, ready, args[0], args[1], args[2], memory=self.memory
+                    )
+                else:
+                    dialogue = handle_talk_dialogue(
+                        self.world,
+                        args[0],
+                        args[1],
+                        args[2],
+                        memory=self.memory,
+                        # 背景 NPC 去找人说话（日程里的寒暄）不调用大模型：不写台词
+                        force_mock=self._rule_based_name(agent),
+                        # 跟玩家说话：只说自己这句，不替玩家回答
+                        listener_speaks=not to_player,
+                    )
                 metadata["dialogue"] = dialogue
                 if to_player and dialogue.get("awaiting_reply"):
                     self.engage(args[0], args[1], PLAYER_REPLY_WAIT)
