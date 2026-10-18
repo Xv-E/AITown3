@@ -1,5 +1,5 @@
 """
-嘀咕：NPC 走在路上偶尔自言自语一句，或者只冒一个心情图标。
+嘀咕：NPC 走在路上、站着干活或发呆时，偶尔自言自语一句，或者只冒一个心情图标（正在跟人说话时不会）。
 
   mood     只有心情图标（开心 / 生气 / 害怕……，客户端画像素图标）
   chatter  有的没的：大模型写一句（后台线程，不卡模拟）；规则角色 / 没模型时用模板
@@ -70,7 +70,7 @@ def mood_icon(mood: str, hp: Optional[float] = None) -> str:
 
 
 class Mutterer:
-    """GameLoop 每拍回调：挑一个正在赶路的人嘀咕一句。"""
+    """GameLoop 每拍回调：挑一个没在跟人说话的人嘀咕一句。"""
 
     def __init__(self, *, rng: Optional[random.Random] = None, use_llm: bool = True,
                  clock=time.monotonic):
@@ -90,10 +90,13 @@ class Mutterer:
         now = self.clock()
         if now - self._last_any < GLOBAL_GAP:
             return
-        walkers = [s for s in self._walkers(loop) if now - self._last.get(s.agent.name, -1e9) >= PERSON_GAP]
-        if not walkers or self.rng.random() >= CHANCE:
+        free = [s for s in self._candidates(loop) if now - self._last.get(s.agent.name, -1e9) >= PERSON_GAP]
+        if not free or self.rng.random() >= CHANCE:
             return
-        state = self.rng.choice(walkers)
+        state = self.rng.choice(free)
+        is_dead = getattr(loop, "_is_dead", None)
+        if is_dead is not None and is_dead(state):
+            return
         self._last_any = self._last[state.agent.name] = now
         self.mutter(loop, state)
 
@@ -118,13 +121,18 @@ class Mutterer:
 
     # ---------- 内部 ----------
 
-    def _walkers(self, loop) -> List[Any]:
+    def _candidates(self, loop) -> List[Any]:
+        """走路的、站着干活的、发呆的都行；正在跟人说话（或被人叫住等着说话）的不行。"""
+        from registry import act
+
         out = []
         for s in loop.agents:
-            p = s.pending_action
-            if p is None or p.hold or not p.path or len(p.path) < 2:
-                continue
             if loop._is_player(s):  # noqa: SLF001
+                continue
+            p = s.pending_action
+            if getattr(s, "status", "") == "talking" or getattr(s, "engaged_by", None):
+                continue
+            if p is not None and p.name == act("converse"):
                 continue
             out.append(s)
         return out
@@ -221,13 +229,17 @@ class Mutterer:
 
 
 def _doing(state) -> str:
+    """说给模型听的「此刻在干嘛」。"""
     p = state.pending_action
+    if p is None or (p.hold and not p.path):
+        return "standing around with nothing in particular to do"
     try:
         from game_loop import _step_text
 
-        return _step_text((p.name, list(p.args)))
+        step = _step_text((p.name, list(p.args)))
     except Exception:  # noqa: BLE001
-        return f"{p.name} {' '.join(p.args)}"
+        step = f"{p.name} {' '.join(p.args)}"
+    return f"on your way to: {step}" if p.path and len(p.path) >= 2 else f"busy with: {step}"
 
 
 def _player_near(world, name: str) -> Optional[str]:
@@ -253,8 +265,8 @@ def _llm_line(name: str, info: Dict[str, Any], doing: str, icon: str) -> str:
 
     prompt = (
         f"You are {name}. Personality: {info.get('personality') or '-'}. Mood: {info.get('mood') or icon}. "
-        f"Goal: {info.get('goal') or '-'}. Right now you are on your way to: {doing}.\n"
-        "Mutter ONE short line to yourself as you walk (at most 12 words): a passing thought, a gripe, "
+        f"Goal: {info.get('goal') or '-'}. Right now you are {doing}.\n"
+        "Mutter ONE short line to yourself (at most 12 words): a passing thought, a gripe, "
         "something you noticed or are worried about. No quotes, no name prefix, no narration."
     )
     raw = invoke_primary(prompt, max_tokens=40, timeout=LLM_TIMEOUT) or ""

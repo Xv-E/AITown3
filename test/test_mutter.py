@@ -71,17 +71,32 @@ def test_mood_words_map_to_icons():
     assert mood_icon("happy", hp=20) == "hurt", "badly hurt shows first"
 
 
-def test_only_people_on_the_road_mutter(monkeypatch):
-    monkeypatch.setattr(m, "CHANCE", 1.0)
-    standing = SimpleNamespace(agent=Agent("Sage"), pending_action=None)
-    loop = _loop(FakeWorld(), standing)
-    Mutterer(rng=random.Random(1), use_llm=False, clock=Clock()).on_tick(loop)
-    assert not getattr(loop, "mutters", None)
+def test_walking_or_standing_people_mutter_but_not_mid_conversation(monkeypatch):
+    from game_loop import PendingAction
 
-    loop = _loop(FakeWorld(), _walking("Reed"))
+    monkeypatch.setattr(m, "CHANCE", 1.0)
+    talking = SimpleNamespace(agent=Agent("Sage"), pending_action=None, status="talking")
+    called = SimpleNamespace(agent=Agent("Moss"), pending_action=None, engaged_by="Reed")
+    chatting = SimpleNamespace(agent=Agent("Fern"), pending_action=PendingAction(
+        name="talk", args=["Fern", "Sage", "Camp"], started_at=0.0, duration=1.0, completes_at=1.0))
+    loop = _loop(FakeWorld(), talking, called, chatting)
     Mutterer(rng=random.Random(1), use_llm=False, clock=Clock()).on_tick(loop)
-    (entry,) = loop.mutters
-    assert entry["who"] == "Reed" and entry["icon"] == "angry" and entry["emoji"]
+    assert not getattr(loop, "mutters", None), "nobody mutters over a conversation"
+
+    for state in (_walking("Reed"), SimpleNamespace(agent=Agent("Reed"), pending_action=None)):
+        loop = _loop(FakeWorld(), state)
+        Mutterer(rng=random.Random(1), use_llm=False, clock=Clock()).on_tick(loop)
+        (entry,) = loop.mutters
+        assert entry["who"] == "Reed" and entry["icon"] == "angry" and entry["emoji"]
+
+
+def test_the_model_is_told_what_they_are_doing():
+    from game_loop import PendingAction
+
+    assert "standing around" in m._doing(SimpleNamespace(pending_action=None))
+    assert "on your way to" in m._doing(_walking("Reed"))
+    chop = PendingAction(name="chop", args=["Reed", "Tree"], started_at=0.0, duration=2.0, completes_at=2.0)
+    assert "busy with" in m._doing(SimpleNamespace(pending_action=chop))
 
 
 def test_people_do_not_mutter_all_the_time(monkeypatch):
