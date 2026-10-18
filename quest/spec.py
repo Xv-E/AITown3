@@ -625,6 +625,9 @@ def normalize(patch: QuestlinePatch, known: KnownWorld) -> List[str]:
         c.known_by = [known.player if n in ("@player", "player") else n for n in c.known_by]
     for st in patch.stages:
         giver = st.giver.strip()
+        if giver.lower() in ("none", "nobody", "n/a", "-", "null"):
+            st.giver = ""
+            continue
         if giver in ("@player", "player", known.player):
             st.giver = ""
             notes.append(f"stage {st.id}: the player can't give themselves a quest; giver cleared")
@@ -634,6 +637,131 @@ def normalize(patch: QuestlinePatch, known: KnownWorld) -> List[str]:
             if head in persons:
                 notes.append(f"stage {st.id}: giver {giver!r} -> {head}")
                 st.giver = head
+    notes += _fix_places(patch, known)
+    notes += _fix_ops(patch)
+    notes += _fix_start_and_listeners(patch, known)
+    from content import get_content
+
+    if get_content().conservation:
+        notes += _fix_conservation(patch, known)
+    return notes
+
+
+def _fix_places(patch: QuestlinePatch, known: KnownWorld) -> List[str]:
+    """写错的地点名：换成最像的那个；一个都不像就放到这条任务线的第一个新地点。"""
+    import difflib
+
+    notes: List[str] = []
+    regions = sorted(known.regions | {r.name for r in patch.regions})
+    fallback = patch.regions[0].name if patch.regions else (regions[0] if regions else "")
+
+    def fix(name: str, where: str) -> str:
+        if not name or name in regions or not fallback:
+            return name
+        close = difflib.get_close_matches(name, regions, n=1, cutoff=0.6)
+        new = close[0] if close else fallback
+        notes.append(f"{where}: {name!r} is not a region -> {new}")
+        return new
+
+    for it in patch.items:
+        it.located_at = fix(it.located_at, f"item {it.name}")
+    for person in patch.persons:
+        person.located_at = fix(person.located_at, f"person {person.name}")
+        for slot in person.routine or []:
+            if isinstance(slot, dict) and slot.get("location"):
+                slot["location"] = fix(str(slot["location"]), f"person {person.name} routine")
+    return notes
+
+
+def _fix_ops(patch: QuestlinePatch) -> List[str]:
+    """add_prop 写成了 value：当 delta 用。"""
+    notes: List[str] = []
+    groups = [st.reward for st in patch.stages] + [(patch.start.omen or {}).get("effects") or []] + [
+        ls.then.get("effects") or [] for ls in patch.listeners]
+    for ops in groups:
+        for op in ops:
+            if isinstance(op, dict) and op.get("op") == "add_prop" and "delta" not in op and "value" in op:
+                op["delta"] = op.pop("value")
+                notes.append(f"add_prop on {op.get('entity')}: used value as delta")
+    return notes
+
+
+def _fix_start_and_listeners(patch: QuestlinePatch, known: KnownWorld) -> List[str]:
+    notes: List[str] = []
+    clues = {c.name: c for c in patch.clues}
+    hear = []
+    for h in patch.start.hear:
+        if h in clues:
+            hear.append(h)
+            continue
+        # 写成了线索的原文（或原文的一部分）：换成那条线索的名字
+        low = h.lower().strip(" .\"'")
+        match = next((c.name for c in patch.clues if low and (low in c.text.lower() or c.text.lower() in low)), "")
+        if match:
+            hear.append(match)
+            notes.append(f"start.hear {h!r} -> {match}")
+        else:
+            notes.append(f"start.hear {h!r} is not a clue; dropped")
+    patch.start.hear = list(dict.fromkeys(hear))
+    for ls in patch.listeners:
+        if ls.on and ls.sequence:
+            ls.on = {}
+            notes.append(f"listener {ls.id}: had both on and sequence; kept sequence")
+    # 异象 / 监听器要挪的东西没列在 items 里：放到第一个新地点「不起眼的地方」
+    items = known.items | {i.name for i in patch.items}
+    spot = patch.regions[0].name if patch.regions else ""
+    groups = [(patch.start.omen or {}).get("effects") or []] + [ls.then.get("effects") or [] for ls in patch.listeners]
+    for ops in groups:
+        for op in ops:
+            name = op.get("entity") if isinstance(op, dict) and op.get("op") == "relocate" else None
+            if name and not str(name).startswith("@") and name not in items and spot and NAME_RE.match(str(name)):
+                patch.items.append(ItemSpec(name=str(name), located_at=spot, item_kind="sign",
+                                            description=f"Something that turns up as the story unfolds ({name})."))
+                items.add(name)
+                notes.append(f"item {name}: moved by an omen / listener but not listed; added at {spot}")
+    return notes
+
+
+def _fix_conservation(patch: QuestlinePatch, known: KnownWorld) -> List[str]:
+    """守恒的两种常见笔误：
+    - 奖励里 spawn_item 给玩家：改成委托人本来就拿着、交给玩家（unlink / link）；
+    - 奖励给玩家钱：从委托人钱里扣同样多。
+    没有委托人的阶段不动（交给校验报错）。"""
+    notes: List[str] = []
+    items = known.items | {i.name for i in patch.items}
+    for st in patch.stages:
+        giver = st.giver
+        if not giver:
+            continue
+        out: List[Dict[str, Any]] = []
+        for op in st.reward:
+            if isinstance(op, dict) and op.get("op") == "spawn_item" and op.get("name") \
+                    and op.get("held_by") in (None, "", "@player", known.player):
+                name = str(op["name"])
+                if name not in items:
+                    patch.items.append(ItemSpec(name=name, held_by=giver, item_kind=str(op.get("item_kind") or ""),
+                                                archetype=str(op.get("archetype") or ""),
+                                                description=str(op.get("description") or "")))
+                    items.add(name)
+                out += [
+                    {"op": "unlink", "a": giver, "a_label": "Person", "b": name, "b_label": "Item", "rel": "HAS_ITEM"},
+                    {"op": "link", "a": "@player", "a_label": "Person", "b": name, "b_label": "Item", "rel": "HAS_ITEM"},
+                ]
+                notes.append(f"stage {st.id}: {name} is now something {giver} has and hands over (no spawn_item)")
+                continue
+            out.append(op)
+        st.reward = out
+        paid = 0.0
+        for op in st.reward:
+            if isinstance(op, dict) and op.get("op") == "add_prop" and op.get("prop") == "coins":
+                try:
+                    paid += float(op.get("delta") or 0) * float(op.get("scale", 1))
+                except (TypeError, ValueError):
+                    pass
+        if paid > 0:
+            st.reward.append({"op": "add_prop", "entity": giver, "label": "Person", "prop": "coins",
+                              "delta": -int(paid) if float(paid).is_integer() else -paid})
+            notes.append(f"stage {st.id}: {giver} pays the {paid:g} coins")
     return notes
 
 
@@ -655,7 +783,7 @@ def substitute(value: Any, placeholder: str, replacement: str) -> Any:
 MIN_NEW_PEOPLE, MAX_NEW_PEOPLE = 1, 3
 
 
-def completeness_problems(patch: QuestlinePatch) -> List[str]:
+def completeness_problems(patch: QuestlinePatch, *, need_start: bool = True) -> List[str]:
     out: List[str] = []
     if not patch.regions:
         out.append("add at least one new region (a place this story happens in)")
@@ -668,7 +796,7 @@ def completeness_problems(patch: QuestlinePatch) -> List[str]:
             out.append(f"person {p.name}: give a daily routine of 2-4 slots (start, end, location, activity)")
     if patch.stages and not patch.stages[0].giver:
         out.append("the first stage needs a giver (who asks the player for help)")
-    if patch.start.empty() and not any(ls.then.get("start") for ls in patch.listeners):
+    if need_start and patch.start.empty() and not any(ls.then.get("start") for ls in patch.listeners):
         out.append('say how the player comes across this story in "start": a clue they hear, '
                    "a thing they find (a note, a token) or a place they reach")
     return out

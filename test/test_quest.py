@@ -126,7 +126,8 @@ def _digest() -> WorldDigest:
 def test_the_author_feeds_problems_back_until_it_works():
     bad = copy.deepcopy(GOOD)
     bad["regions"][0]["next_to"] = "Atlantis"
-    answers = iter(["not json at all", json.dumps(bad), json.dumps(GOOD)])
+    awaken = {"start": {"visit": ["OldMine"]}}
+    answers = iter(["not json at all", json.dumps(bad), json.dumps(GOOD), json.dumps(awaken)])
     prompts = []
 
     def fake_llm(system: str, prompt: str) -> str:
@@ -137,7 +138,8 @@ def test_the_author_feeds_problems_back_until_it_works():
         _digest(), "a mystery", llm=fake_llm,
         verify_fn=lambda p: verify(_camp(), p, "Traveler"), max_attempts=3,
     )
-    assert result.ok and result.attempts == 3
+    assert result.ok and result.attempts == 4, "3 tries for the questline, 1 to bring it to life"
+    assert result.patch.start.visit == ["OldMine"]
     assert "not a JSON object" in prompts[1]
     assert "next_to must be an existing region" in prompts[2]
     assert "Theme from the designer: a mystery" in prompts[0]

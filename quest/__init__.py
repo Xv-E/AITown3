@@ -43,7 +43,7 @@ def _default_llm(system: str, prompt: str) -> str:
     from llm_router import invoke_primary
     from model_instances import creative_model_name
 
-    return invoke_primary(prompt, system=system, max_tokens=5000, timeout=180, model=creative_model_name())
+    return invoke_primary(prompt, system=system, max_tokens=8000, timeout=180, model=creative_model_name())
 
 
 __all__ = [

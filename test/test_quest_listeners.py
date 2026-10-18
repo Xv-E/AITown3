@@ -230,3 +230,100 @@ def test_condition_only_listeners_fire_on_the_rising_edge():
     assert evaluate(ls, [], player="Traveler", hour=None, check=check) is None
     state["dry"] = True
     assert evaluate(ls, [], player="Traveler", hour=None, check=check) is not None
+
+
+def test_what_the_omen_or_a_starting_listener_sets_counts_for_stage_one():
+    stages = copy.deepcopy(GOOD["stages"])
+    stages[0]["complete_when"] = stages[0]["complete_when"] + [
+        {"op": "prop_eq", "entity": "Strongbox", "prop": "cracked", "value": True}]
+    crack = [{"op": "set_prop", "entity": "Strongbox", "prop": "cracked", "value": True}]
+    by_omen = _patch(stages=stages, start={"visit": ["OldMine"], "omen": {"text": "A crack!", "effects": crack}})
+    assert verify(_camp(), by_omen, "Traveler").ok
+    by_listener = _patch(stages=stages, listeners=[{**FOOTSTEPS, "then": {"start": True, "effects": crack}}])
+    assert verify(_camp(), by_listener, "Traveler").ok
+    nothing = _patch(stages=stages, start={"visit": ["OldMine"]})
+    result = verify(_camp(), nothing, "Traveler")
+    assert not result.ok and result.failed_stage == 1 and "nothing in the questline ever makes that true" in result.reason
+
+
+# ---------- 两段式起草 ----------
+
+def _digest():
+    from test_quest import _digest as d
+
+    return d()
+
+
+def _author(answers, **kw):
+    from quest.author import author_questline
+
+    answers, prompts = iter(answers), []
+
+    def llm(system, prompt):
+        prompts.append(prompt)
+        return next(answers)
+
+    result = author_questline(_digest(), "", llm=llm, verify_fn=lambda p: verify(_camp(), p, "Traveler"), **kw)
+    return result, prompts
+
+
+def test_the_second_step_only_rewrites_start_and_listeners():
+    bad = {"start": {"visit": ["Camp"]}, "listeners": [FOOTSTEPS]}  # 玩家本来就在 Camp：一开局就成立
+    good = {"start": {"visit": ["OldMine"]}, "listeners": [FOOTSTEPS, KNOCKING]}
+    result, prompts = _author([json.dumps(GOOD), json.dumps(bad), json.dumps(good)])
+    assert result.ok and result.attempts == 3
+    assert [x.id for x in result.patch.listeners] == ["Footsteps", "Knocking"]
+    assert "do NOT change it" in prompts[1] and '"stages"' in prompts[1], "the settled questline is shown"
+    assert "already true" in prompts[2] and '"listeners"' in prompts[2]
+    assert '"regions"' not in prompts[2].split("Your previous answer:")[1].split("It was rejected")[0], \
+        "only the start / listeners part is fed back"
+
+
+def test_a_worse_rewrite_goes_back_to_the_better_version():
+    one_slip = {"start": {"visit": ["OldMine"]}, "listeners": [{**KNOCKING, "active": "someday"}]}
+    many = {"start": {"visit": ["Moon"]}, "listeners": [{**KNOCKING, "active": "someday", "count": 99, "then": {}}]}
+    result, prompts = _author([json.dumps(GOOD), json.dumps(one_slip), json.dumps(many),
+                               json.dumps({"start": {"visit": ["OldMine"]}, "listeners": [KNOCKING]})])
+    assert result.ok
+    assert "Your last try was worse" in prompts[3] and "someday" in prompts[3]
+
+
+def test_if_it_never_comes_alive_the_questline_still_starts_plainly():
+    junk = json.dumps({"start": {"visit": ["Camp"]}})  # 每次都一开局就成立
+    result, _ = _author([json.dumps(GOOD), junk, junk, junk])
+    assert result.ok and result.patch.start.visit == ["OldMine"] and result.patch.listeners == []
+    assert any("starts plainly" in f for f in result.fixes)
+
+
+# ---------- 自动修掉的笔误 ----------
+
+def test_common_slips_are_fixed_without_asking_again():
+    from quest.spec import _fix_conservation, normalize
+
+    items = copy.deepcopy(GOOD["items"]) + [{"name": "Button", "located_at": "OldMyne", "item_kind": "trinket"},
+                                            {"name": "Feather", "located_at": "Deadfall", "item_kind": "trinket"}]
+    stages = copy.deepcopy(GOOD["stages"])
+    stages[0]["giver"] = "none"
+    stages[2]["reward"] = [{"op": "spawn_item", "name": "MinersMedal", "item_kind": "token", "held_by": "@player"},
+                           {"op": "add_prop", "entity": "@player", "label": "Person", "prop": "coins", "value": 5}]
+    clues = [{"name": "SmokeRumor", "text": "Someone lives in the old mine.", "known_by": ["Mara"]}]
+    listeners = [{**KNOCKING, "on": {"event": "enter", "what": "OldMine"},
+                  "sequence": [{"event": "enter", "what": "OldMine"}],
+                  "then": {"effects": [{"op": "relocate", "entity": "MuddyBootprints", "to": "OldMine"}]}}]
+    p = _patch(items=items, stages=stages, clues=clues, listeners=listeners,
+               start={"hear": ["someone lives in the old mine"]})
+    notes = normalize(p, KNOWN)
+    notes += _fix_conservation(p, KNOWN)
+    by_name = {i.name: i for i in p.items}
+    assert by_name["Button"].located_at == "OldMine", "typo -> closest region"
+    assert by_name["Feather"].located_at == "OldMine", "nothing close -> the questline's first new place"
+    assert p.stages[0].giver == ""
+    assert p.start.hear == ["SmokeRumor"], "the clue's text -> its name"
+    assert p.listeners[0].on == {} and p.listeners[0].sequence
+    assert by_name["MuddyBootprints"].located_at == "OldMine", "moved by a listener -> listed"
+    reward = p.stages[2].reward
+    assert by_name["MinersMedal"].held_by == "Mara" and {"op": "link", "a": "@player", "a_label": "Person",
+                                                         "b": "MinersMedal", "b_label": "Item", "rel": "HAS_ITEM"} in reward
+    assert {"op": "add_prop", "entity": "Mara", "label": "Person", "prop": "coins", "delta": -5} in reward
+    assert any(op.get("delta") == 5 for op in reward if op.get("op") == "add_prop"), "value -> delta"
+    assert len(notes) >= 7

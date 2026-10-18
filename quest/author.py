@@ -1,6 +1,11 @@
 """
 让 LLM 为现有世界写一条任务线：生成 → 校验 → PDDL 验证可完成 → 有问题就把原因回给它改。
 
+分两段写，每段的输出都短、改错时不牵连另一段：
+  1. 骨架：新地点 / 人物 / 物品 / 线索 / 阶段，验证能玩通后定下来；
+  2. 活起来：玩家怎么接下（start）和监听器（listeners），在定下的骨架上补，只重写这一段。
+每段都保留问题最少的那一版：重写变差了，就拿更好的那版回去改，最后也交出最好的那版。
+
 模型调用（llm）和验证（verify_fn）都由调用方传入，这里不碰网络和数据库。
 """
 
@@ -9,7 +14,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .digest import WorldDigest
 from .spec import MAX_STAGES, MIN_STAGES, QuestlinePatch, completeness_problems, normalize, validate
@@ -145,6 +150,25 @@ use "item_kind"); "giver" is just a person's name; every stage needs the player 
 3-5 stages."""
 
 
+# 第一段（骨架）只看条件 / 效果 / 物品动作 / 规则；第二段（活起来）只看接下的途径和监听器
+CORE_VOCAB = VOCAB[:VOCAB.index('How the player comes across it ("start")')] + VOCAB[VOCAB.index("Rules:"):]
+AWAKEN_VOCAB = VOCAB[VOCAB.index('How the player comes across it ("start")'):VOCAB.index("Rules:")].rstrip()
+OPS_VOCAB = VOCAB[:VOCAB.index("Object actions")].rstrip()
+CORE_SCHEMA = "\n".join(
+    line for line in SCHEMA.splitlines()
+    if not line.lstrip().startswith(('"start"', '"pattern"', '"listeners"'))
+)
+AWAKEN_SCHEMA = """Respond with ONE JSON object:
+{
+  "start": {"hear": [...], "find": [...], "visit": [...], "when": [...], "pattern": [...], "within_hours": 2,
+            "at": "night", "omen": {"text": "...", "effects": [ ]}},
+  "listeners": [ <1-4 listeners> ],
+  "items": [ only NEW things an omen or listener moves or needs, e.g.
+             {"name": "MuddyBootprints", "located_at": "<region, out of the way>", "item_kind": "sign"} ],
+  "clues": [ only NEW clues for "hear", {"name": "...", "text": "...", "known_by": ["<NPC>"], "kind": "rumor"} ]
+}"""
+
+
 @dataclass
 class AuthorResult:
     patch: Optional[QuestlinePatch]
@@ -225,6 +249,7 @@ CONSERVATION = """World law: nothing appears from nowhere. Everything is gathere
 
 
 def build_prompt(digest: WorldDigest, theme: str, feedback: str = "", *, complete: bool = False) -> str:
+    """第一段：骨架（地点 / 人物 / 物品 / 线索 / 阶段）。"""
     from content import get_content
 
     ask = f"Theme from the designer: {theme}" if theme.strip() else "Pick a theme that fits this world."
@@ -235,13 +260,39 @@ def build_prompt(digest: WorldDigest, theme: str, feedback: str = "", *, complet
 
 {ask}{package}
 Write a questline of {MIN_STAGES + 1}-{min(5, MAX_STAGES)} stages for the player ({digest.player}).
+(How the player comes across it and how the world reacts are added in a second step - leave them out.)
 
-{VOCAB}
+{CORE_VOCAB}
 
-{SCHEMA}"""
+{CORE_SCHEMA}"""
+
+
+def build_awaken_prompt(digest: WorldDigest, core: QuestlinePatch, feedback: str = "") -> str:
+    """第二段：在定下的骨架上补「怎么接下」和监听器。"""
+    settled = core.to_dict()
+    settled.pop("start", None)
+    settled.pop("listeners", None)
+    return f"""{feedback}{render_digest(digest)}
+
+This questline is settled and already proven playable - do NOT change it:
+{json.dumps(settled, ensure_ascii=False)}
+
+Now bring it to life: decide how the player comes across it ("start") and how the world reacts while it
+runs ("listeners"). Use the names above (its regions, people, items, clues, stage ids) and the world's.
+
+{OPS_VOCAB}
+
+{AWAKEN_VOCAB}
+
+{AWAKEN_SCHEMA}"""
 
 
 def parse(raw: str) -> Optional[QuestlinePatch]:
+    data = _json(raw)
+    return QuestlinePatch.from_dict(data) if data is not None else None
+
+
+def _json(raw: str) -> Optional[Dict[str, Any]]:
     match = re.search(r"\{.*\}", raw or "", re.S)
     if not match:
         return None
@@ -249,7 +300,76 @@ def parse(raw: str) -> Optional[QuestlinePatch]:
         data = json.loads(match.group(0))
     except json.JSONDecodeError:
         return None
-    return QuestlinePatch.from_dict(data) if isinstance(data, dict) else None
+    return data if isinstance(data, dict) else None
+
+
+def merge_awaken(core: QuestlinePatch, data: Dict[str, Any]) -> QuestlinePatch:
+    """骨架 + 第二段的回答 -> 完整的任务线（骨架里已有的名字不重复加）。"""
+    from .spec import ClueSpec, ItemSpec, _fields, _listener, _start
+
+    out = QuestlinePatch.from_dict(core.to_dict())
+    out.start = _start(data.get("start"))
+    out.listeners = [_listener(x) for x in data.get("listeners") or [] if isinstance(x, dict)]
+    taken = set(out.new_names())
+    for key, cls, group in (("items", ItemSpec, out.items), ("clues", ClueSpec, out.clues)):
+        for raw in data.get(key) or []:
+            if isinstance(raw, dict) and raw.get("name") and raw["name"] not in taken:
+                group.append(cls(**{k: v for k, v in raw.items() if k in _fields(cls)}))
+                taken.add(raw["name"])
+    return out
+
+
+@dataclass
+class _Try:
+    patch: Optional[QuestlinePatch]
+    problems: List[str]
+    raw: str
+    fixes: List[str]
+    verification: Optional[Verification] = None
+
+    @property
+    def score(self) -> float:
+        """越小越好：0 = 通过；0.5 = 只差规划器那一关；否则是校验问题的条数。"""
+        if self.patch is None:
+            return 1e9
+        if not self.problems:
+            return 0.0
+        return 0.5 if self.verification is not None else float(len(self.problems))
+
+
+def _rounds(
+    llm: LLM,
+    prompt_for: Callable[[str], str],
+    build: Callable[[str], Optional[QuestlinePatch]],
+    check: Callable[[QuestlinePatch], _Try],
+    max_attempts: int,
+    shown: Callable[[QuestlinePatch], str],
+) -> Tuple[_Try, int]:
+    """写 → 查 → 带着问题重写，保留最好的一版。返回 (最好的那次, 用了几轮)。"""
+    best: Optional[_Try] = None
+    feedback = ""
+    for attempt in range(1, max_attempts + 1):
+        raw = llm(SYSTEM, prompt_for(feedback))
+        patch = build(raw)
+        now = check(patch) if patch is not None else _Try(None, ["the answer was not a JSON object"], raw, [])
+        now.raw = raw
+        if not now.problems:
+            return now, attempt
+        worse = best is not None and now.score > best.score
+        if best is None or not worse:
+            best = now
+        # 带上最好的那一版：只改出问题的地方，不要整条重写（重写会冒出新错误，收敛不了）
+        previous = shown(best.patch) if best.patch else (best.raw or "")[:6000]
+        note = (f"(Your last try was worse - {len(now.problems)} problems. Start again from this better version.)\n"
+                if worse else "")
+        feedback = (
+            f"{note}Your previous answer:\n{previous}\n\n"
+            "It was rejected for these reasons:\n- "
+            + "\n- ".join(best.problems[:8])
+            + "\nKeep the story and everything that was fine; change only what is needed to fix these, "
+            "and return the complete corrected JSON.\n\n"
+        )
+    return best, max_attempts  # type: ignore[return-value]
 
 
 def author_questline(
@@ -260,34 +380,64 @@ def author_questline(
     verify_fn: VerifyFn,
     max_attempts: int = 4,
     complete: bool = False,
+    awaken_attempts: int = 3,
 ) -> AuthorResult:
     known = digest.known()
-    fixes: List[str] = []
-    feedback = ""
-    problems: List[str] = []
-    patch: Optional[QuestlinePatch] = None
-    verification: Optional[Verification] = None
-    raw = ""
-    for attempt in range(1, max_attempts + 1):
-        raw = llm(SYSTEM, build_prompt(digest, theme, feedback, complete=complete))
-        patch = parse(raw)
-        if patch is None:
-            problems = ["the answer was not a JSON object"]
-        else:
-            fixes = normalize(patch, known)
-            problems = validate(patch, known) + (completeness_problems(patch) if complete else [])
-            if not problems:
-                verification = verify_fn(patch)
-                if verification.ok:
-                    return AuthorResult(patch, verification, attempt, [], raw, fixes)
-                problems = [verification.reason]
-        # 带上它上一版：只改出问题的地方，不要整条重写（重写会冒出新错误，收敛不了）
-        previous = json.dumps(patch.to_dict(), ensure_ascii=False) if patch else (raw or "")[:6000]
-        feedback = (
-            f"Your previous answer:\n{previous}\n\n"
-            "It was rejected for these reasons:\n- "
-            + "\n- ".join(problems[:8])
-            + "\nKeep the story and everything that was fine; change only what is needed to fix these, "
-            "and return the complete corrected JSON.\n\n"
-        )
-    return AuthorResult(patch, verification, max_attempts, problems, raw, fixes)
+
+    def checked(patch: QuestlinePatch, *, need_start: bool) -> _Try:
+        fixes = normalize(patch, known)
+        problems = validate(patch, known) + (completeness_problems(patch, need_start=need_start) if complete else [])
+        if problems:
+            return _Try(patch, problems, "", fixes)
+        verification = verify_fn(patch)
+        return _Try(patch, [] if verification.ok else [verification.reason], "", fixes, verification)
+
+    def core_only(patch: QuestlinePatch) -> QuestlinePatch:
+        patch.start, patch.listeners = type(patch.start)(), []
+        return patch
+
+    # 第一段：骨架
+    core, used = _rounds(
+        llm, lambda fb: build_prompt(digest, theme, fb, complete=complete),
+        lambda raw: (lambda p: core_only(p) if p else None)(parse(raw)),
+        lambda p: checked(p, need_start=False), max_attempts,
+        lambda p: json.dumps(p.to_dict(), ensure_ascii=False),
+    )
+    if core.problems or core.patch is None:
+        return AuthorResult(core.patch, core.verification, used, core.problems, core.raw, core.fixes)
+
+    # 第二段：怎么接下 + 监听器（骨架不动，只重写这一段）
+    def shown(p: QuestlinePatch) -> str:
+        return json.dumps({"start": p.to_dict()["start"], "listeners": p.to_dict()["listeners"]}, ensure_ascii=False)
+
+    alive, more = _rounds(
+        llm, lambda fb: build_awaken_prompt(digest, core.patch, fb),
+        lambda raw: (lambda d: merge_awaken(core.patch, d) if d is not None else None)(_json(raw)),
+        lambda p: checked(p, need_start=complete), awaken_attempts, shown,
+    )
+    if not alive.problems:
+        return AuthorResult(alive.patch, alive.verification, used + more, [], alive.raw, core.fixes + alive.fixes)
+
+    # 第二段没写成：骨架照样能用 —— 退回最朴素的接下方式（走到它的第一个新地点 / 捡到一样东西）
+    fallback = _plain_start(core.patch, known, lambda p: checked(p, need_start=complete))
+    if fallback is not None:
+        note = (f"couldn't bring the questline to life in {more} tries ({alive.problems[0][:160]}); "
+                "it starts plainly instead")
+        return AuthorResult(fallback.patch, fallback.verification, used + more, [], alive.raw,
+                            core.fixes + [note] + fallback.fixes)
+    if not complete:
+        return AuthorResult(core.patch, core.verification, used + more, [], core.raw,
+                            core.fixes + ["no start or listeners: the questline begins at once"])
+    return AuthorResult(alive.patch, alive.verification, used + more, alive.problems, alive.raw,
+                        core.fixes + alive.fixes)
+
+
+def _plain_start(core: QuestlinePatch, known, check: Callable[[QuestlinePatch], _Try]) -> Optional[_Try]:
+    tries = [{"visit": [r.name]} for r in core.regions] + [
+        {"find": [i.name]} for i in core.items if i.located_at and i.portable]
+    for start in tries[:4]:
+        candidate = merge_awaken(core, {"start": start})
+        result = check(candidate)
+        if not result.problems:
+            return result
+    return None
