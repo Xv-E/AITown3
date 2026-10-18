@@ -31,6 +31,8 @@
       "name": "Shelter",
       "description": "A rough wooden lean-to. Everyone sleeps packed together here at night.",
       "tags": "home,rest",
+      "indoor": true,
+      "parent": "CampfireClearing",
       "area": [20, 0, 20, 13]
     }
   ],

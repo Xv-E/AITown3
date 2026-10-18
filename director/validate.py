@@ -350,6 +350,7 @@ def ensure_cast_quality(
         rumors=cleaned_rumors,
         social=social,
         source=bp.source,
+        terrain=getattr(bp, "terrain", None),
     )
 
 
@@ -546,6 +547,7 @@ def ensure_playable_mechanics(bp: EventBlueprint) -> EventBlueprint:
                 rumors=list(bp.rumors),
                 social=list(bp.social),
                 source=bp.source,
+                terrain=getattr(bp, "terrain", None),
             ),
             door,
         )
@@ -638,6 +640,7 @@ def ensure_playable_mechanics(bp: EventBlueprint) -> EventBlueprint:
         rumors=list(bp.rumors),
         social=list(bp.social),
         source=bp.source,
+        terrain=getattr(bp, "terrain", None),
     )
 
 

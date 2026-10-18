@@ -13,24 +13,32 @@
       "name": "GuildHall",
       "description": "The adventurers' guild: a long hall of maps and trophies. An iron gate at the back leads down to the old crypt.",
       "tags": "guild,social",
+      "indoor": true,
+      "parent": "TownSquare",
       "area": [24, 2, 18, 12]
     },
     {
       "name": "Crypt",
       "description": "Cold stone vaults under the Guild Hall, sealed for years. Something old is still down here.",
       "tags": "dungeon,danger",
+      "indoor": true,
+      "parent": "TownSquare",
       "area": [6, 2, 18, 12]
     },
     {
       "name": "Tavern",
       "description": "The Rusty Tankard: smoke, stew and stories. Rooms upstairs for whoever can pay.",
       "tags": "food,social,rest,meal",
+      "indoor": true,
+      "parent": "TownSquare",
       "area": [4, 14, 18, 14]
     },
     {
       "name": "Smithy",
       "description": "Mira's forge. Hammers ring from dawn; tools and weapons hang on the walls.",
       "tags": "work,craft",
+      "indoor": true,
+      "parent": "TownSquare",
       "area": [44, 14, 16, 14]
     },
     {

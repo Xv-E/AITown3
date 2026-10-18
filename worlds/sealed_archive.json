@@ -11,12 +11,16 @@
     {
       "name": "Tavern",
       "description": "A tavern lit with warm yellow lamps. The innkeeper hears everything.",
-      "tags": "social,info"
+      "tags": "social,info",
+      "indoor": true,
+      "parent": "MarketSquare"
     },
     {
       "name": "Workshop",
       "description": "The blacksmith's shop. Tools cover the walls; metal scraps litter the floor.",
-      "tags": "item,craft"
+      "tags": "item,craft",
+      "indoor": true,
+      "parent": "MarketSquare"
     },
     {
       "name": "Courtyard",
@@ -26,17 +30,23 @@
     {
       "name": "Cellar",
       "description": "A damp, cold cellar. Old things may hide on the shelves. Only reachable once the trapdoor is open.",
-      "tags": "secret,item"
+      "tags": "secret,item",
+      "indoor": true,
+      "parent": "Courtyard"
     },
     {
       "name": "ArchiveAntechamber",
       "description": "The archive antechamber. A heavy sealed door blocks the far end; an injured scholar slumps against the wall.",
-      "tags": "quest"
+      "tags": "quest",
+      "indoor": true,
+      "parent": "Courtyard"
     },
     {
       "name": "SealedArchive",
       "description": "The dusty archive inner chamber. Enter only after the door is unlocked.",
-      "tags": "secret,goal"
+      "tags": "secret,goal",
+      "indoor": true,
+      "parent": "Courtyard"
     }
   ],
   "adjacencies": [

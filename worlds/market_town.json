@@ -16,12 +16,16 @@
     {
       "name": "Tavern",
       "description": "A warm tavern with a kitchen stove and an order counter.",
-      "tags": "work,food,social"
+      "tags": "work,food,social",
+      "indoor": true,
+      "parent": "TownSquare"
     },
     {
       "name": "Warehouse",
       "description": "A dusty warehouse where crates of goods are delivered.",
-      "tags": "work,storage"
+      "tags": "work,storage",
+      "indoor": true,
+      "parent": "TownSquare"
     },
     {
       "name": "Farm",

@@ -1090,6 +1090,17 @@ pub struct WorldView {
     pub items: Vec<Thing>,
     #[serde(default)]
     pub persons: Vec<Actor>,
+    /// The whole terrain, one string per row of world cells: '.' outdoor ground, ',' indoor
+    /// floor, '+' doorway, '#' wall, '%' fence / hedge, '~' water, ' ' wilderness.
+    #[serde(default)]
+    pub tiles: Vec<String>,
+}
+
+impl WorldView {
+    /// The place a world cell belongs to (walls, fences and wilderness belong to none).
+    pub fn region_at(&self, cell: IVec2) -> Option<&RegionView> {
+        self.regions.iter().find(|r| r.contains(cell))
+    }
 }
 
 #[derive(Deserialize, Clone, Default)]
@@ -1104,11 +1115,23 @@ pub struct RegionView {
     pub w: i32,
     #[serde(default)]
     pub h: i32,
-    /// Shape inside the area: one string per row, '#' = ground (empty = the whole rectangle).
+    /// This place's own ground inside the bounding area: one string per row, '#' = ground
+    /// (empty = the whole rectangle). Walls and buildings nested inside are not part of it.
     #[serde(default)]
     pub rows: Vec<String>,
     #[serde(default, deserialize_with = "lenient_string")]
     pub description: String,
+    /// A room inside a building (walls around it, entered through a doorway).
+    #[serde(default)]
+    pub indoor: bool,
+    /// The outdoor place an indoor room's building stands in.
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub parent: String,
+    /// A cell in the middle of this place's ground (label / where to walk to).
+    #[serde(default)]
+    pub cx: Option<i32>,
+    #[serde(default)]
+    pub cy: Option<i32>,
 }
 
 impl RegionView {
@@ -1125,7 +1148,10 @@ impl RegionView {
     }
 
     pub fn center(&self) -> IVec2 {
-        IVec2::new(self.x + self.w / 2, self.y + self.h / 2)
+        match (self.cx, self.cy) {
+            (Some(x), Some(y)) => IVec2::new(x, y),
+            _ => IVec2::new(self.x + self.w / 2, self.y + self.h / 2),
+        }
     }
 }
 

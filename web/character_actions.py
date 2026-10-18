@@ -590,7 +590,9 @@ def get_location_info(world, loc: str) -> Optional[Dict[str, Any]]:
         MATCH (l:Location {name: $loc})
         RETURN l.name AS name,
                coalesce(l.description, '') AS description,
-               coalesce(l.tags, '') AS tags
+               coalesce(l.tags, '') AS tags,
+               coalesce(l.indoor, false) AS indoor,
+               coalesce(l.parent, '') AS parent
         """,
         loc=loc,
     )
@@ -606,6 +608,8 @@ def get_location_info(world, loc: str) -> Optional[Dict[str, Any]]:
         "tags": r.get("tags") or "",
         "grid_w": grid_w,
         "grid_h": grid_h,
+        "indoor": bool(r.get("indoor")),
+        "parent": r.get("parent") or "",
     }
 
 
@@ -718,10 +722,11 @@ def get_character_actions(world, person: str) -> Dict[str, Any]:
 
 
 def world_view(world, viewer: Optional[str]) -> Dict[str, Any]:
-    """无缝世界的全貌（世界格子坐标）：区域范围、地上的东西、所有人站在哪。"""
-    from spatial import person_cell, region_areas, region_shapes, shape_rows
+    """无缝世界的全貌（世界格子坐标）：地形、各地点的地、地上的东西、所有人站在哪。"""
+    from spatial import person_cell, region_areas, region_shapes, shape_rows, terrain_of
     from rpg_content import gather_options, gather_node_kinds
 
+    terrain = terrain_of(world)
     areas = region_areas(world)
     node_kinds = gather_node_kinds()
     try:
@@ -735,12 +740,18 @@ def world_view(world, viewer: Optional[str]) -> Dict[str, Any]:
     items: List[Dict[str, Any]] = []
     for name, (ax, ay, aw, ah) in sorted(areas.items()):
         info = get_location_info(world, name) or {}
+        mid = terrain.anchor(name) if terrain else None
         regions.append({
             "name": name, "x": ax, "y": ay, "w": aw, "h": ah,
-            # 形状：每行一串 '#'（地）/ '.'（空），区域不再是方方正正的
+            # 这个地点自己的地：每行一串 '#'（地）/ '.'（不是：墙、别的地点、嵌在里面的房子）
             "rows": shape_rows(shapes.get(name, set()), (ax, ay, aw, ah)),
             "description": info.get("description") or "",
             "tags": info.get("tags") or "",
+            "indoor": bool(terrain and name in terrain.indoor),
+            "parent": (terrain.parents.get(name, "") if terrain else ""),
+            # 标签 / 走过去的落脚处：地点中间的一格
+            "cx": mid[0] if mid else None,
+            "cy": mid[1] if mid else None,
         })
         for it in _items_at_location(world, name):
             if it.get("x") is None or it.get("y") is None:
@@ -761,9 +772,16 @@ def world_view(world, viewer: Optional[str]) -> Dict[str, Any]:
     for c in list_characters(world):
         cell = person_cell(world, c["name"])
         persons.append({**c, "x": cell[0] if cell else None, "y": cell[1] if cell else None})
-    width = max((x + w for x, _, w, _ in areas.values()), default=0)
-    height = max((y + h for _, y, _, h in areas.values()), default=0)
-    return {"width": width, "height": height, "regions": regions, "items": items, "persons": persons}
+    if terrain is not None:
+        width, height = terrain.width, terrain.height
+        # 整张地形的格子种类：'.' 室外地 ',' 室内地板 '+' 门洞 '#' 墙 '%' 篱笆 '~' 水 ' ' 荒野
+        tiles = terrain.kind_rows()
+    else:
+        width = max((x + w for x, _, w, _ in areas.values()), default=0)
+        height = max((y + h for _, y, _, h in areas.values()), default=0)
+        tiles = []
+    return {"width": width, "height": height, "regions": regions, "items": items, "persons": persons,
+            "tiles": tiles}
 
 
 def get_play_state(world) -> Dict[str, Any]:

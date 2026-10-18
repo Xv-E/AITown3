@@ -38,16 +38,19 @@ def test_a_questline_is_checked_against_the_real_world(camp):
 
 
 def test_applying_adds_to_the_world_without_clearing_it(camp):
-    from spatial import person_cell, region_areas
+    from spatial import person_cell, terrain_of
+    from terrain_gen import links_present
 
     before = set(camp.list_entities("Location"))
+    old = terrain_of(camp)
+    old_cells = {n: len(old.cells_of(n)) for n in before}
     out = apply_questline(camp, _camp_patch())
     assert out["quest"] == "TheOldMine"
     assert set(camp.list_entities("Location")) == before | {"OldMine"}
-    areas = region_areas(camp)
-    mine, forest = areas["OldMine"], areas["Forest"]
-    assert all(not _overlap(mine, areas[r]) for r in before)
-    assert _touch(mine, forest), (mine, forest)
+    t = terrain_of(camp)
+    assert t.cells_of("OldMine"), "the mine got its own ground"
+    assert {n: len(t.cells_of(n)) for n in before} == old_cells, "existing places keep their ground"
+    assert frozenset(("OldMine", "Forest")) in links_present(t), "the mine opens onto the forest"
     assert person_cell(camp, "Hollis") is not None
     q = camp.run_query("MATCH (q:Quest {name: 'TheOldMine'}) RETURN q.state AS s, q.objective AS o")[0]
     assert q["s"] == "active" and q["o"].startswith("Find whoever")

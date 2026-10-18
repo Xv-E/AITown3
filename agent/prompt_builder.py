@@ -302,11 +302,15 @@ Respond with a JSON object:
             desc_rows = self.world.run_query(
                 """
                 MATCH (l:Location {name: $loc})
-                RETURN coalesce(l.description, '') AS d
+                RETURN coalesce(l.description, '') AS d,
+                       coalesce(l.indoor, false) AS indoor, coalesce(l.parent, '') AS parent
                 LIMIT 1
                 """,
                 loc=loc,
             )
+            if desc_rows and desc_rows[0].get("indoor"):
+                parent = desc_rows[0].get("parent")
+                lines.append(f"Indoors (a building in {parent})" if parent else "Indoors")
             if desc_rows and desc_rows[0].get("d"):
                 lines.append(f"Place: {desc_rows[0]['d']}")
         except Exception:
