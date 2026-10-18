@@ -35,7 +35,8 @@ object actions you write). If you need something to exist, put it in the world o
 SCHEMA = """Respond with ONE JSON object:
 {
   "title": "...", "premise": "1-2 sentences", "hook": "how the player first hears of it",
-  "start": {"hear": ["<clue>"], "find": ["<item>"], "visit": ["<region>"]},
+  "start": {"hear": ["<clue>"], "find": ["<item>"], "visit": ["<region>"], "when": [ <conditions> ],
+            "pattern": [ <steps> ], "within_hours": 2, "at": "night", "omen": {"text": "...", "effects": [ ]}},
   "regions": [{"name": "OldMine", "next_to": "<existing region>", "description": "...", "tags": "a,b", "w": 18, "h": 14}],
   "persons": [{"name": "Hollis", "located_at": "<region>", "personality": "...", "background": "...",
                "goal": "...", "secret": "...", "mood": "wary", "speech_style": "...",
@@ -80,12 +81,28 @@ How things reach the player:
   {"op": "link", "a": "@player", "a_label": "Person", "b": "MineKey", "b_label": "Item", "rel": "HAS_ITEM"}
 - Use spawn_item only for new things no condition refers to by name.
 
-How the player comes across it ("start"): the questline sleeps until ANY of these happens, then
-its stages begin. Make it feel natural, not a quest board:
-  "hear":  clues the player hears from whoever knows them (one of your clues, known_by an NPC;
-           that NPC will look for the player to tell them)
-  "find":  things the player picks up - a torn note, a dropped token (an item located_at a region)
-  "visit": places where the player stumbles onto it
+How the player comes across it ("start"): the questline sleeps until ANY way in happens, then
+its stages begin. Anything can be a way in - make it feel natural and a little surprising, not a
+quest board:
+  "hear":    clues the player hears from whoever knows them (one of your clues, known_by an NPC;
+             NPCs who know it will look for the player, or let it slip while muttering nearby)
+  "find":    things the player picks up - a torn note, a dropped token (an item located_at a region)
+  "visit":   places where the player stumbles onto it
+  "when":    any conditions (same vocabulary as complete_when), all true at once - e.g. the well's
+             "water" drops below 10, the player carries both halves of a medallion
+  "pattern": things the player does in order (other things may happen in between):
+             {"event": "enter", "what": "<region>"}   {"event": "pick_up" | "drop", "what": "<item>"}
+             {"event": "talk", "what": "<NPC>"}        {"event": "do", "what": "<action>", "target": "<thing>"}
+             add "times": N to repeat a step. Example - pacing back and forth wakes mysterious footsteps:
+             "pattern": [{"event": "enter", "what": "Forest"}, {"event": "enter", "what": "Camp"},
+                         {"event": "enter", "what": "Forest"}], "within_hours": 2
+Optional for all of them:
+  "at":   only counts at this time of day: night, dawn, morning, day, afternoon, dusk, evening, or "22-4"
+  "omen": what happens the moment it triggers - a line the player notices, and effects that change the
+          world (@player, @here = where the player is), e.g.
+          {"text": "Footsteps echo yours... and stop a beat after you do.",
+           "effects": [{"op": "relocate", "entity": "MuddyBootprints", "to": "@here"}]}
+          (an item an omen moves must be listed in "items" somewhere out of the way)
 Give at least two different ways in when you can, so the player doesn't miss it. None of them may
 be true already (the player must not start out knowing / holding / standing there).
 

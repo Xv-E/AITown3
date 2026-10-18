@@ -228,8 +228,19 @@ app.include_router(
 from rpg_api import make_router as _rpg_router  # noqa: E402
 
 
+def _note_player_action(me: str, action: str, target: str) -> None:
+    """玩家足迹（quest.trail）：任务线的 start.pattern 靠它认出「玩家做了什么」。"""
+    try:
+        from quest.trail import note
+
+        note(me, "do", action, at=get_world_simulator().sim_time, target=target)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _after_player_action(world, me: str, action: str, params: Dict[str, str]) -> None:
-    """玩家做完采集 / 制造 / 交易：关系系统在这里记一笔（见 relations.py）。"""
+    """玩家做完采集 / 制造 / 交易：关系系统在这里记一笔（见 relations.py），任务线足迹也记一笔。"""
+    _note_player_action(me, action, params.get("i") or params.get("node") or "")
     try:
         from relations import after_action
 
@@ -486,6 +497,8 @@ async def api_execute(req: ExecuteActionRequest):
         capability = get_content().capability_of(req.action)
         # 按能力签名的参数位置取值（内容包可自由命名参数）
         positional = [kwargs.get(p.name, "") for p in reg.get(req.action).parameters] if ok else []
+        if ok and positional:
+            _note_player_action(positional[0], req.action, positional[1] if len(positional) > 1 else "")
         if ok and capability == "converse":
             try:
                 import sys as _sys

@@ -37,10 +37,21 @@ def _hook_text(patch: Dict[str, Any]) -> str:
     start = patch.get("start") or {}
     ways = [f"{verb} {', '.join(start.get(k) or [])}"
             for k, verb in (("hear", "hears"), ("find", "finds"), ("visit", "reaches")) if start.get(k)]
+    if start.get("when"):
+        ways.append("makes something true (" + str(len(start["when"])) + " condition(s))")
+    if start.get("pattern"):
+        steps = " -> ".join(
+            f"{s.get('event')} {s.get('what')}" + (f" x{s['times']}" if int(s.get("times") or 1) > 1 else "")
+            for s in start["pattern"]
+        )
+        within = f" within {start['within_hours']}h" if start.get("within_hours") else ""
+        ways.append(f"does {steps}{within}")
     hook = str(patch.get("hook") or "")
     if not ways:
         return hook
-    return f"{hook} (starts when the player {'; or '.join(ways)})".strip()
+    at = f" at {start['at']}" if start.get("at") else ""
+    omen = f" Then: {start['omen'].get('text')}" if (start.get("omen") or {}).get("text") else ""
+    return f"{hook} (starts when the player {'; or '.join(ways)}{at}).{omen}".strip()
 
 
 def _stage_rows(stages: List[Dict[str, Any]], current: int, state: str) -> List[Dict[str, str]]:

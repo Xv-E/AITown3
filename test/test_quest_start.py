@@ -92,6 +92,8 @@ class FakeWorld:
             return [{"ok": 1}] if p["c"] in self.knows else []
         if "HAS_ITEM" in cypher:
             return [{"ok": 1}] if p["i"] in self.holds else []
+        if "RETURN l.name AS loc" in cypher:
+            return [{"loc": self.at}]
         if "LOCATED_AT" in cypher:
             return [{"ok": 1}] if p["r"] == self.at else []
         raise AssertionError(cypher)
@@ -135,3 +137,101 @@ def test_whoever_knows_the_clue_is_nudged_to_tell_the_player():
     assert (t["person"], t["clue"]) == ("Mara", "SmokeRumor")
     world.quest["hook_told"] = True
     assert tellers_to_nudge(world, "Traveler") == [], "only once per questline"
+
+
+# ---------- 任何事都能是接下任务的途径：条件、按顺序发生的事、时段、异象 ----------
+
+from quest import trail  # noqa: E402
+from quest.runtime import came_across  # noqa: E402
+
+BACK_AND_FORTH = [{"event": "enter", "what": "Forest"}, {"event": "enter", "what": "Camp"},
+                  {"event": "enter", "what": "Forest"}]
+
+
+def _ev(event, what, t, target=""):
+    return {"who": "Traveler", "event": event, "what": what, "target": target, "t": float(t)}
+
+
+def test_a_pattern_matches_in_order_with_other_things_in_between():
+    seen = [_ev("enter", "Forest", 1), _ev("pick_up", "Stick", 2), _ev("enter", "Camp", 3),
+            _ev("talk", "Mara", 4), _ev("enter", "Forest", 5)]
+    assert trail.matches(BACK_AND_FORTH, seen)
+    assert not trail.matches(BACK_AND_FORTH, seen[:3]), "not back yet"
+    assert not trail.matches(BACK_AND_FORTH, seen, within=3.0), "too slow"
+    poke = [{"event": "do", "what": "interact", "target": "OldWell", "times": 2}]
+    assert trail.matches(poke, [_ev("do", "interact", 1, "OldWell"), _ev("do", "interact", 2, "OldWell")])
+    assert not trail.matches(poke, [_ev("do", "interact", 1, "OldWell"), _ev("do", "interact", 2, "Tree")])
+
+
+class TrailWorld:
+    def __init__(self):
+        self.loc, self.items = "Camp", []
+
+    def run_query(self, cypher, **p):
+        return [{"loc": self.loc, "items": list(self.items)}]
+
+
+def test_the_observer_turns_changes_into_events():
+    trail.clear()
+    w, obs = TrailWorld(), trail.Observer()
+    old = [{"id": "1:Mara:Traveler", "a": "Mara", "b": "Traveler"}]
+    obs.observe(w, "Traveler", now=0.0, conversations=old)
+    assert trail.events("Traveler") == [], "what was already there is not news"
+    w.loc, w.items = "Forest", ["TornNote"]
+    obs.observe(w, "Traveler", now=1.0, conversations=old + [{"id": "2:Traveler:Reed", "a": "Traveler", "b": "Reed"}])
+    got = [(e["event"], e["what"]) for e in trail.events("Traveler")]
+    assert got == [("enter", "Forest"), ("pick_up", "TornNote"), ("talk", "Reed")]
+    trail.clear()
+
+
+def test_new_kinds_of_start_validate():
+    p = _with_start({"pattern": BACK_AND_FORTH, "within_hours": 2, "at": "night",
+                     "when": [{"op": "prop_gte", "entity": "Strongbox", "prop": "value", "value": 0}],
+                     "omen": {"text": "Footsteps echo yours.",
+                              "effects": [{"op": "relocate", "entity": "TornNote", "to": "@here"}]}})
+    assert validate(p, KNOWN) == []
+    assert p.to_dict()["start"]["at"] == "night"
+
+
+def test_bad_new_starts_are_explained():
+    cases = [
+        ({"pattern": [{"event": "fly", "what": "Forest"}]}, "event is one of"),
+        ({"pattern": [{"event": "enter", "what": "Moon"}]}, "is not a region"),
+        ({"pattern": [{"event": "talk", "what": "Traveler"}]}, "is not an NPC"),
+        ({"pattern": [{"event": "do", "what": "teleport"}]}, "is not an action"),
+        ({"pattern": BACK_AND_FORTH, "at": "teatime"}, "start.at"),
+        ({"pattern": BACK_AND_FORTH, "omen": {"effects": []}}, "omen needs a text"),
+    ]
+    for start, needle in cases:
+        problems = validate(_with_start(start), KNOWN)
+        assert any(needle in x for x in problems), (start, problems)
+
+
+def test_a_pacing_pattern_verifies_and_an_unreachable_one_does_not():
+    assert verify(_camp(), _with_start({"pattern": BACK_AND_FORTH}), "Traveler").ok
+    hidden = {**NOTE, "located_at": "", "held_by": "Hollis"}
+    bad = _with_start({"pattern": [{"event": "pick_up", "what": "TornNote"}]}, [hidden])
+    result = verify(_camp(), bad, "Traveler")
+    assert not result.ok and "can't reach any way into" in result.reason, result.reason
+
+
+def test_time_of_day_gates_every_way_in():
+    world = FakeWorld(_quest(), holds={"TornNote"})
+    start = {"find": ["TornNote"], "at": "night"}
+    assert came_across(world, "Traveler", start, hour=14.0) is None, "daytime: doesn't count"
+    assert came_across(world, "Traveler", start, hour=23.5) == "found TornNote"
+    assert came_across(world, "Traveler", {**start, "at": "22-4"}, hour=2.0) == "found TornNote"
+
+
+def test_pacing_back_and_forth_wakes_the_footsteps():
+    import json
+
+    q = _quest()
+    q["start"] = json.dumps({"pattern": BACK_AND_FORTH, "omen": {"text": "Footsteps echo yours..."}})
+    world, news = FakeWorld(q), []
+    seen = [_ev("enter", "Forest", 1), _ev("enter", "Camp", 2)]
+    assert check_progress(world, announce=news.append, seen_since=lambda _: seen) == []
+    seen.append(_ev("enter", "Forest", 3))
+    (done,) = check_progress(world, announce=news.append, seen_since=lambda _: seen)
+    assert done["started"] and world.quest["state"] == "active"
+    assert news[0] == "Footsteps echo yours...", "the omen comes first"

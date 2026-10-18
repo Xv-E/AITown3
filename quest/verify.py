@@ -98,16 +98,9 @@ def verify(snap, patch: QuestlinePatch, player: str, *, solve=None) -> Verificat
         result = solve(compiled.domain, compiled.problem)
         return compiled, result, unsupported
 
-    # 接下任务的途径：不能一开局就成立；能拿到 / 走到的至少要有一条（只有「听说」时靠对话，证明不了）
-    reachable = False
-    for cond in patch.start.planner_conditions():
-        plan = solve_goal(world, player, [substitute(cond, "player", player)], cfg, solve)
-        if plan is not None and not plan:
-            return Verification(False, f"start {_cond_text(cond)} is already true, so the questline would "
-                                       "start at once; pick something the player still has to find or reach")
-        reachable = reachable or plan is not None
-    if patch.start.planner_conditions() and not reachable and not patch.start.hear:
-        return Verification(False, "the player can't reach any way into the questline (start.find / start.visit)")
+    problem = _start_problem(world, patch, player, cfg, solve)
+    if problem:
+        return Verification(False, problem)
 
     # 一开局就成立的阶段：玩家什么都不用做，不算任务
     for k, st in enumerate(patch.stages, 1):
@@ -153,6 +146,53 @@ def verify(snap, patch: QuestlinePatch, player: str, *, solve=None) -> Verificat
         else:
             walkthrough[-1].append((name, args))
     return Verification(True, walkthrough=walkthrough[:n])
+
+
+def _start_problem(world, patch: QuestlinePatch, player: str, cfg, solve) -> str:
+    """接下任务的途径：不能一开局就成立；至少一条玩家做得到（只有「听说」时靠对话，证明不了）。
+
+    find / visit / when 交给规划器；pattern 里能证明的步骤（走到、拿到）每一步都要做得到，
+    说话 / 做动作 / 放下这类步骤只查名字（validate 里查过）。
+    """
+    st = patch.start
+    if st.empty():
+        return ""
+
+    def plan_for(goal):
+        return solve_goal(world, player, list(substitute(goal, "player", player)), cfg, solve)
+
+    routes = []  # 每条途径能不能做到
+    for cond in st.planner_conditions():
+        plan = plan_for([cond])
+        if plan is not None and not plan:
+            return (f"start {_cond_text(cond)} is already true, so the questline would start at once; "
+                    "pick something the player still has to find or reach")
+        routes.append(plan is not None)
+    if st.when:
+        try:
+            plan = plan_for(st.when)
+        except Exception:  # noqa: BLE001  @here 之类规划器不认：当作证明不了，但不拦
+            plan = None
+        if plan is not None and not plan:
+            return (f"start.when ({'; '.join(_cond_text(c) for c in st.when)}) is already true, "
+                    "so the questline would start at once")
+        routes.append(plan is not None)
+    if st.pattern:
+        steps = {"enter": lambda w: {"op": "person_at", "person": "@player", "location": w},
+                 "pick_up": lambda w: {"op": "has_item", "person": "@player", "item": w}}
+        ok = True
+        for step in st.pattern:
+            make = steps.get(step.get("event"))
+            if make is None:
+                continue
+            plan = plan_for([make(step.get("what"))])
+            if plan is None:
+                ok = False
+                break
+        routes.append(ok)
+    if not any(routes) and not st.hear:
+        return "the player can't reach any way into the questline (check start.find / visit / when / pattern)"
+    return ""
 
 
 def solve_goal(world, player: str, goal, cfg, solve) -> Optional[List[Tuple[str, List[str]]]]:

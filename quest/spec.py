@@ -84,19 +84,48 @@ class StageSpec:
     news: str = ""
 
 
+# 时段：start.at 用这些词或 "22-4" 这样的小时区间
+TIMES_OF_DAY = {"night": (21, 5), "dawn": (5, 8), "morning": (6, 12), "day": (7, 19),
+                "afternoon": (12, 18), "dusk": (18, 21), "evening": (18, 23)}
+PATTERN_EVENTS = ("enter", "pick_up", "drop", "talk", "do")
+
+
+def parse_hours(at: str) -> Optional[tuple]:
+    """'night' / '22-4' -> (起, 止) 小时；看不懂返回 None。"""
+    at = (at or "").strip().lower()
+    if at in TIMES_OF_DAY:
+        return TIMES_OF_DAY[at]
+    m = re.fullmatch(r"(\d{1,2})\s*-\s*(\d{1,2})", at)
+    if m and 0 <= int(m.group(1)) <= 24 and 0 <= int(m.group(2)) <= 24:
+        return int(m.group(1)), int(m.group(2))
+    return None
+
+
+def in_hours(hour: float, span: tuple) -> bool:
+    start, end = span
+    return start <= hour < end if start <= end else hour >= start or hour < end
+
+
 @dataclass
 class StartSpec:
-    """玩家怎么接下这条任务线：任一条成立就算接下（之前任务线休眠，不推进阶段）。
+    """玩家怎么接下这条任务线：任一条途径成立就算接下（之前任务线休眠，不推进阶段）。
 
+    途径：听说 / 拿到 / 走到 / 任意条件 / 一串按顺序发生的事（pattern）。
+    at：只有这个时段才算；omen：接下的那一刻发生的异象（一句话 + 改世界的效果）。
     都不写 = 一写进世界就开始（旧行为）。
     """
 
     hear: List[str] = field(default_factory=list)   # 线索：玩家听说了（KNOWS_FACT / BELIEVES）
     find: List[str] = field(default_factory=list)   # 物品：玩家拿到了（小纸条、信物……）
     visit: List[str] = field(default_factory=list)  # 地点：玩家走到了
+    when: List[Dict[str, Any]] = field(default_factory=list)     # 条件（同阶段 complete_when），全部成立
+    pattern: List[Dict[str, Any]] = field(default_factory=list)  # 玩家依次做了这些事（见 quest.trail）
+    within_hours: float = 0.0  # pattern 首尾不超过这么多游戏小时（0 = 不限）
+    at: str = ""               # 时段：night / dawn / dusk / "22-4" ……
+    omen: Dict[str, Any] = field(default_factory=dict)  # {"text": "...", "effects": [...]}
 
     def empty(self) -> bool:
-        return not (self.hear or self.find or self.visit)
+        return not (self.hear or self.find or self.visit or self.when or self.pattern)
 
     def planner_conditions(self) -> List[Dict[str, Any]]:
         """规划器能证明的那几条（听说靠对话里真的说出口，证明不了）。"""
@@ -165,7 +194,21 @@ def _start(raw: Any) -> StartSpec:
         v = raw.get(key) or []
         return [str(x).strip() for x in ([v] if isinstance(v, str) else v) if str(x).strip()]
 
-    return StartSpec(hear=names("hear"), find=names("find"), visit=names("visit"))
+    def dicts(key: str) -> List[Dict[str, Any]]:
+        return [x for x in raw.get(key) or [] if isinstance(x, dict)]
+
+    try:
+        within = max(0.0, float(raw.get("within_hours") or 0))
+    except (TypeError, ValueError):
+        within = -1.0  # 校验时报出来
+    omen = raw.get("omen")
+    if isinstance(omen, str):
+        omen = {"text": omen}
+    return StartSpec(
+        hear=names("hear"), find=names("find"), visit=names("visit"),
+        when=dicts("when"), pattern=dicts("pattern"), within_hours=within,
+        at=str(raw.get("at") or "").strip(), omen=dict(omen) if isinstance(omen, dict) else {},
+    )
 
 
 # ----- 物品属性：写进快照（验证）和写进数据库（应用）共用 -----
@@ -301,7 +344,7 @@ def validate(patch: QuestlinePatch, known: KnownWorld) -> List[str]:
         if not c.known_by or bad:
             errors.append(f"clue {c.name}: known_by must list people who know it (bad: {bad or 'none given'})")
 
-    errors += _start_problems(patch, known, regions, items)
+    errors += _start_problems(patch, known, regions, items, persons, all_names)
 
     check = OpsChecker(placeholders=("player",), entity_names=all_names, archetypes=known.archetypes)
     ids: Set[str] = set()
@@ -324,7 +367,10 @@ def validate(patch: QuestlinePatch, known: KnownWorld) -> List[str]:
     return errors
 
 
-def _start_problems(patch: QuestlinePatch, known: KnownWorld, regions: Set[str], items: Set[str]) -> List[str]:
+def _start_problems(patch: QuestlinePatch, known: KnownWorld, regions: Set[str], items: Set[str],
+                    persons: Set[str], all_names: Set[str]) -> List[str]:
+    from ephemeral_action_dsl import OpsChecker
+
     st = patch.start
     out: List[str] = []
     clues = {c.name: c for c in patch.clues}
@@ -345,6 +391,56 @@ def _start_problems(patch: QuestlinePatch, known: KnownWorld, regions: Set[str],
     for name in st.visit:
         if name not in regions:
             out.append(f"start.visit {name!r} is not a region")
+
+    check = OpsChecker(placeholders=("player", "here"), entity_names=all_names, archetypes=known.archetypes)
+    if st.when:
+        err = check.conditions(st.when, "start.when")
+        if err:
+            out.append(err)
+    out += _pattern_problems(st.pattern, regions, items, persons - {known.player}, all_names)
+    if st.within_hours < 0:
+        out.append("start.within_hours is a number of game hours (0 = no limit)")
+    if st.at and parse_hours(st.at) is None:
+        out.append(f"start.at {st.at!r}: use one of {', '.join(TIMES_OF_DAY)} or hours like \"22-4\"")
+    if st.omen:
+        if not str(st.omen.get("text") or "").strip():
+            out.append("start.omen needs a text: what the player notices when it happens")
+        err = check.effects(st.omen.get("effects") or [], "start.omen.effects")
+        if err:
+            out.append(err)
+    return out
+
+
+def _pattern_problems(pattern: List[Dict[str, Any]], regions: Set[str], items: Set[str], npcs: Set[str],
+                      all_names: Set[str]) -> List[str]:
+    out: List[str] = []
+    try:
+        from registry import get_registry
+
+        actions = set(get_registry().names())
+    except Exception:  # noqa: BLE001
+        actions = None
+    expect = {"enter": ("a region", regions), "pick_up": ("an item", items), "drop": ("an item", items),
+              "talk": ("an NPC", npcs)}
+    for i, step in enumerate(pattern):
+        where = f"start.pattern step {i + 1}"
+        event, what = step.get("event"), str(step.get("what") or "")
+        if event not in PATTERN_EVENTS:
+            out.append(f"{where}: event is one of {', '.join(PATTERN_EVENTS)}")
+            continue
+        if event == "do":
+            if actions is not None and what not in actions:
+                out.append(f"{where}: {what!r} is not an action")
+        elif what not in expect[event][1]:
+            out.append(f"{where}: {what!r} is not {expect[event][0]}")
+        if step.get("target") and step["target"] not in all_names:
+            out.append(f"{where}: target {step['target']!r} does not exist")
+        try:
+            ok = 1 <= int(step.get("times") or 1) <= 5
+        except (TypeError, ValueError):
+            ok = False
+        if not ok:
+            out.append(f"{where}: times is 1-5")
     return out
 
 
@@ -430,6 +526,7 @@ def conservation_problems(patch: QuestlinePatch) -> List[str]:
     """守恒：奖励和物品动作不能凭空生成东西；给钱只能从别人的钱里转。"""
     out: List[str] = []
     groups = [(f"stage {st.id} reward", st.reward) for st in patch.stages] + [
+        ("start.omen", (patch.start.omen or {}).get("effects") or [])] + [
         (f"item {it.name} action {a.get('id')}", a.get("effects") or [])
         for it in patch.items for a in it.actions if isinstance(a, dict)
     ]
