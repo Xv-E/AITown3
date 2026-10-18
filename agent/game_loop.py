@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import os
 import threading
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
@@ -29,6 +29,18 @@ REPLAN_BACKOFF = 3.0
 IDLE_REDECIDE_HOURS = 2.0
 # 决策阶段并行规划的 NPC 数（LLM 选目标 + PDDL 求解）；1 = 串行
 PLAN_WORKERS = int(os.environ.get("AITOWN3_PLAN_WORKERS", "4"))
+# 一拍最多等决策（PDDL / LLM）这么多真实秒；默认不等：决策在后台算，做完后的下一拍再收，别人照常行动
+DECISION_WAIT_SEC = float(os.environ.get("AITOWN3_DECISION_WAIT", "0"))
+
+PERSON_FLAGS_QUERY = """
+MATCH (p:Person {name: $n})
+RETURN coalesce(p.is_player, false) AS is_player,
+       coalesce(p.role, '') AS role,
+       coalesce(p.dead, false) AS dead, coalesce(p.hp, 0) AS hp,
+       coalesce(p.brain, 'llm') AS brain,
+       coalesce(p.follows, '') AS follows
+LIMIT 1
+"""
 # 物品被别人动过多久之内（模拟秒），自己因它失败算作「被抢」；同一冲突在此期间不重复记
 CONFLICT_MEMORY = 30.0
 # 客户端拿得到的最近对话条数
@@ -43,6 +55,18 @@ TALK_PRIORITY = 0.55
 PLAYER_TALK_PRIORITY = 0.85
 # 决策时「刚才说过的话」看多久以内的（模拟秒；一天 = 300）
 RECENT_TALK_WINDOW = 25.0
+# 两种人：llm（用大模型想要做什么）/ routine（背景 NPC：只照日程行动，从不调用大模型做决策）
+BRAINS = ("llm", "routine")
+# 卡住：日程 / 店里要做的事连着做不成几次就挂委托、再多就临时请大模型想办法
+REQUEST_AFTER = 2
+STUCK_LIMIT = 3
+# 背景 NPC 临时用大模型想事情多久（模拟秒；两个游戏小时）
+ESCALATE_FOR = 25.0
+
+
+def normalize_brain(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    return "routine" if text in ("routine", "npc", "rules", "rule") else "llm"
 
 
 def reading_seconds(text: str) -> float:
@@ -145,6 +169,10 @@ class AgentState:
     engaged_until: float = 0.0
     # 想找谁说话但对方正忙：在等谁（给 UI 看）
     waiting_for: Optional[str] = None
+    # 卡住了几次、卡在什么上；背景 NPC 临时改用大模型想事情到什么时候
+    stuck_count: int = 0
+    stuck_on: str = ""
+    escalated_until: float = 0.0
     # 上次观察（knowledge.observe）时所在地点；换地点时才更新「知道的地点」
     seen_loc: Optional[str] = None
     # 行为日志：决策 / 动作开始与结果 / 打断（最近 HISTORY_LIMIT 条）
@@ -214,6 +242,8 @@ class GameLoop:
         self.chronicle: List[Dict[str, Any]] = []
         self.plan_workers = max(1, int(plan_workers))
         self._plan_pool: Optional[ThreadPoolExecutor] = None
+        # 还在后台决策的角色：name -> (state, future)；决策线程独占这个 AgentState，别的阶段先跳过
+        self._inflight: Dict[str, Tuple[AgentState, Future]] = {}
         # 计划冲突：谁抢走了谁要的东西（最近 HISTORY_LIMIT 条，给 UI / Storyteller）
         self.conflicts: List[Dict[str, Any]] = []
         # 并行决策线程里发现的冲突先排队，主线程统一生效（会改别人的状态）
@@ -280,17 +310,139 @@ class GameLoop:
 
     def _person_flags(self, state: AgentState) -> Optional[Dict[str, Any]]:
         # 同一条查询：tick 读缓存下 _is_player / _is_dead 共用一次读取
-        rows = self.world.run_query(
-            """
-            MATCH (p:Person {name: $n})
-            RETURN coalesce(p.is_player, false) AS is_player,
-                   coalesce(p.role, '') AS role,
-                   coalesce(p.dead, false) AS dead, coalesce(p.hp, 0) AS hp
-            LIMIT 1
-            """,
-            n=state.agent.name,
-        )
+        rows = self.world.run_query(PERSON_FLAGS_QUERY, n=state.agent.name)
         return rows[0] if rows else None
+
+    def preload_tick_reads(self) -> None:
+        """tick 开头两条批量查询，把每个人 / 每件物品最常读的几条单条查询预先填进读缓存。
+
+        要在 world.read_cache() 作用域里调用（WorldSimulator.tick）。之后谁写了 Person / Item，
+        对应的缓存按标签失效，再读就照常单条查库。失败只打印，不影响这一拍。
+        """
+        try:
+            self._preload_tick_reads()
+        except Exception as e:
+            if self.verbose:
+                print(f"[WARN] tick preload: {e}")
+
+    def _preload_tick_reads(self) -> None:
+        seed = getattr(self.world, "seed_cache", None)
+        if seed is None:
+            return
+        from action import properties_query
+        from agent_profile import HP_QUERY, LOCATION_QUERY
+        from neo4j_world import entity_query
+
+        person_qs = (entity_query("Person"), properties_query("Person"), HP_QUERY, LOCATION_QUERY, PERSON_FLAGS_QUERY)
+        ver = {q: self.world.cache_version(q) for q in (*person_qs, properties_query("Item"))}
+        people = self.world.run_query(
+            """
+            MATCH (p:Person)
+            OPTIONAL MATCH (p)-[:LOCATED_AT]->(l:Location)
+            WITH p, collect(l.name) AS locs
+            RETURN p.name AS name, properties(p) AS props, locs
+            """
+        )
+        items = self.world.run_query("MATCH (n:Item) RETURN n.name AS name, properties(n) AS props")
+
+        def _or(props: Dict[str, Any], key: str, default: Any) -> Any:
+            v = props.get(key)
+            return default if v is None else v
+
+        for row in people:
+            name, props = row["name"], row["props"] or {}
+            if name is None:
+                continue
+            seed(entity_query("Person"), [{"n": props}], version=ver[entity_query("Person")], name=name)
+            seed(properties_query("Person"), [{"p": props}], version=ver[properties_query("Person")], name=name)
+            seed(HP_QUERY, [{"hp": _or(props, "hp", 0)}], version=ver[HP_QUERY], n=name)
+            locs = row["locs"] or []
+            seed(LOCATION_QUERY, [{"loc": locs[0]}] if locs else [], version=ver[LOCATION_QUERY], n=name)
+            seed(PERSON_FLAGS_QUERY, [{
+                "is_player": _or(props, "is_player", False),
+                "role": _or(props, "role", ""),
+                "dead": _or(props, "dead", False),
+                "hp": _or(props, "hp", 0),
+                "brain": _or(props, "brain", "llm"),
+                "follows": _or(props, "follows", ""),
+            }], version=ver[PERSON_FLAGS_QUERY], n=name)
+        for row in items:
+            if row["name"] is not None:
+                seed(properties_query("Item"), [{"p": row["props"] or {}}],
+                     version=ver[properties_query("Item")], name=row["name"])
+
+    def _routine_only(self, state: AgentState) -> bool:
+        """背景 NPC：只照日程行动（Person.brain = routine）——除非遇到急事或卡住了，暂时请大模型想办法。"""
+        row = self._person_flags(state)
+        if not (bool(row) and normalize_brain(row.get("brain")) == "routine"):
+            return False
+        if self.sim_time < state.escalated_until:
+            return False
+        from triggers import INTERRUPT_PRIORITY
+
+        urgent = [t for t in state.pending_triggers if t.priority >= INTERRUPT_PRIORITY]
+        if urgent and not self.force_mock and _llm_configured():
+            self._escalate(state, f"something urgent: {urgent[0].text}")
+            return False
+        return True
+
+    def _escalate(self, state: AgentState, why: str) -> None:
+        """背景 NPC 临时改用大模型做决策（急事 / 卡住），过一阵自动回到只照日程。"""
+        if self.sim_time < state.escalated_until:
+            return
+        state.escalated_until = self.sim_time + ESCALATE_FOR
+        self._log(state, "state", f"Thinks it over properly ({why})", reason=why)
+        from triggers import Trigger
+
+        self._push_triggers(state, [Trigger("event", "stuck", f"You need to think: {why}", 0.7, self.sim_time)])
+
+    def _note_progress(self, state: AgentState, wanted: Optional[Dict[str, Any]], picked: Any) -> None:
+        """想做的事（日程 / 店 / 大模型的目标）做不成：记一次；够次数就挂委托，再多就请大模型。"""
+        if wanted is None or self._is_player(state):
+            return
+        if picked is not None and _goal_key(picked.goal_data) == _goal_key(wanted):
+            state.stuck_count, state.stuck_on = 0, ""
+            return
+        what = _goal_text(wanted)
+        state.stuck_count = state.stuck_count + 1 if state.stuck_on == what else 1
+        state.stuck_on = what
+        target = str(wanted.get("target_entity") or "")
+        if state.stuck_count >= REQUEST_AFTER and target.startswith("kind:"):
+            self._post_request(state, target[len("kind:"):], str(wanted.get("reason") or what))
+        if state.stuck_count >= STUCK_LIMIT and not self.force_mock and _llm_configured():
+            row = self._person_flags(state) or {}
+            if normalize_brain(row.get("brain")) == "routine":
+                self._escalate(state, f"stuck on {what}")
+
+    def _post_request(self, state: AgentState, kind: str, why: str) -> None:
+        from job_board import post
+
+        try:
+            req = post(self.world, state.agent.name, kind, at=self.sim_time, reason=why)
+        except Exception as e:  # noqa: BLE001
+            if self.verbose:
+                print(f"[WARN] request {state.agent.name}: {e}")
+            return
+        if not req:
+            return
+        pay = f", paying {req['reward']} coins" if req["reward"] else ""
+        text = f"{state.agent.name} is asking for {kind}{pay}."
+        self._log(state, "event", f"Posted a request: need {kind}{pay}", reason=why)
+        # 公告：所有人（包括玩家）都听得到，谁能帮就来
+        self._record_announcements({"events": [{"type": "announce", "text": text}]})
+
+    def _leader(self, state: AgentState) -> str:
+        """组队：这个人在跟着谁走（没有 = ""）。"""
+        row = self._person_flags(state)
+        return str(row.get("follows") or "") if row else ""
+
+    def _rule_based(self, state: AgentState) -> bool:
+        """这个人这一拍不用大模型做决策：规则模式，或者他本来就是只照日程的 NPC。"""
+        return self.force_mock or self._routine_only(state)
+
+    def _rule_based_name(self, agent: AgentProfile) -> bool:
+        state = self.get_agent_state(agent.name)
+        return self.force_mock if state is None else self._rule_based(state)
 
     def _is_player(self, state: AgentState) -> bool:
         row = self._person_flags(state)
@@ -365,6 +517,8 @@ class GameLoop:
                 print(f"[WARN] world_systems: {e}")
         self._record_announcements(world_report)
         self._story_step()
+        self._relations_step()
+        self._economy_step()
         self._run_hooks()
         if self.verbose:
             print(f"\n{'=' * 60}")
@@ -390,6 +544,8 @@ class GameLoop:
 
         if auto_plan:
             for state in targets:
+                if state.agent.name in self._inflight:
+                    continue
                 if not self._may_auto_plan(state, include_player=include_player):
                     continue
                 try:
@@ -402,6 +558,8 @@ class GameLoop:
         # 避免某个角色的 LLM/PDDL 卡住整拍，导致其他人的 move 永远完不成。
         by_name: Dict[str, Dict[str, Any]] = {}
         for state in targets:
+            if state.agent.name in self._inflight:
+                continue
             try:
                 by_name[state.agent.name] = self._process_agent_tick(
                     state,
@@ -427,7 +585,17 @@ class GameLoop:
 
         if auto_plan:
             limit = self.plan_workers if max_decisions_per_tick is None else max(0, int(max_decisions_per_tick))
-            deciders = self._pick_deciders(targets, include_player=include_player, limit=limit)
+            if not instant and self.plan_workers > 1:
+                # 后台还在算的占着线程；没有空位就这拍不派新决策（_pick_deciders 的 limit=0 是不限）
+                free = self.plan_workers - len(self._inflight)
+                limit = min(limit, free) if limit else free
+                deciders = (
+                    self._pick_deciders(targets, include_player=include_player, limit=limit)
+                    if limit > 0
+                    else []
+                )
+            else:
+                deciders = self._pick_deciders(targets, include_player=include_player, limit=limit)
             by_name.update(self._run_decisions(deciders, instant=instant, include_player=include_player))
         self._flush_conflicts()
 
@@ -446,7 +614,9 @@ class GameLoop:
         for state in targets:
             if limit and len(out) >= limit:
                 break
-            if state.pending_action or self._engaged(state):
+            if state.agent.name in self._inflight:
+                continue
+            if state.pending_action or self._engaged(state) or self._leader(state):
                 continue
             in_plan = bool(state.current_plan and state.plan_index < len(state.current_plan))
             # 第一轮里下一步预检失败（status=failed）的计划也要在这一轮重规划
@@ -494,19 +664,35 @@ class GameLoop:
         instant 模式下决策后会立刻执行动作（写世界），为避免两人同时改同一物品，仍串行。
         非 instant 模式只启动动作，真正落地在下一拍第一阶段串行完成，冲突由预检 + 重规划处理。
         """
-        if instant or self.plan_workers <= 1 or len(deciders) <= 1:
+        if instant or self.plan_workers <= 1:
             return {
                 s.agent.name: self._decide_one(s, instant=instant, include_player=include_player)
                 for s in deciders
             }
+        # 慢的规划（ENHSP 子进程要 1–3 秒）不卡整拍：最多等 DECISION_WAIT_SEC，
+        # 没做完的留在 _inflight，之后哪一拍做完了就在哪一拍收结果
         pool = self._pool()
-        futures = [
-            (s, pool.submit(self._decide_one, s, instant=instant, include_player=include_player))
-            for s in deciders
-        ]
-        return {s.agent.name: f.result() for s, f in futures}
+        for s in deciders:
+            self._inflight[s.agent.name] = (
+                s,
+                pool.submit(self._decide_one, s, instant=instant, include_player=include_player),
+            )
+        if DECISION_WAIT_SEC > 0:
+            wait([f for _, f in self._inflight.values()], timeout=DECISION_WAIT_SEC)
+        out: Dict[str, Dict[str, Any]] = {}
+        for name, (_, f) in list(self._inflight.items()):
+            if f.done():
+                del self._inflight[name]
+                out[name] = f.result()  # _decide_one 自己兜住异常
+        return out
+
+    def wait_decisions(self, timeout: Optional[float] = None) -> None:
+        """等后台决策做完（存档 / 读档前调用，免得存下改了一半的 AgentState）；结果仍由下一拍收。"""
+        if self._inflight:
+            wait([f for _, f in self._inflight.values()], timeout=timeout)
 
     def close(self) -> None:
+        self._inflight.clear()
         if self._plan_pool is not None:
             self._plan_pool.shutdown(wait=False)
             self._plan_pool = None
@@ -594,7 +780,7 @@ class GameLoop:
         # LLM 模式下这些都是触发器，交给 LLM 决策
         if (
             can_plan
-            and self.force_mock
+            and self._rule_based(state)
             and not state.pending_action
             and not self._is_dead(state)
             and not self._engaged(state)
@@ -649,6 +835,14 @@ class GameLoop:
             result["phase"] = "acting"
             result["pending"] = state.pending_action.to_dict()
             result["busy_remaining"] = max(0.0, state.sim_busy_until - self.sim_time)
+            result["status"] = state.status
+            return result
+
+        # 组队：跟着队长走，不自己做决定
+        leader = self._leader(state)
+        if leader and not instant and not self._is_player(state) and self.get_agent_state(leader) is not None:
+            self._follow_step(state, leader)
+            result["phase"] = "following"
             result["status"] = state.status
             return result
 
@@ -900,6 +1094,11 @@ class GameLoop:
             state.pending_action = None
             state.sim_busy_until = 0.0
             state.status = "idle"
+            if pending.path:
+                # 只是走过去（跟着队长）：走到了就站在那里
+                from spatial import set_person_cell
+
+                set_person_cell(self.world, state.agent.name, tuple(pending.path[-1]))
             return None
         agent = state.agent
         action_name, args = pending.name, pending.args
@@ -933,6 +1132,9 @@ class GameLoop:
             self._absorb_own_changes(state, inventory_before)
         except Exception:
             pass
+        if action_result.success:
+            self._feelings_after(agent, action_name, args)
+            self._list_new_goods(state)
         if pending.path and (action_result.success or not pending.travel):
             # 走到了（赶路失败的人还留在原区域，不挪）
             from spatial import set_person_cell
@@ -1247,12 +1449,12 @@ class GameLoop:
         return not self.force_mock
 
     def _wants_decision(self, state: AgentState) -> bool:
-        if not self.trigger_driven:
+        if self._rule_based(state):
             return True
         return bool(state.pending_triggers)
 
     def _wants_interrupt(self, state: AgentState) -> bool:
-        if not self.trigger_driven:
+        if self._rule_based(state):
             return False
         from triggers import INTERRUPT_PRIORITY
 
@@ -1485,6 +1687,14 @@ class GameLoop:
         fire_goal = urgent_alert_goal(self.world, state.agent.name, sim_time=self.sim_time)
         if fire_goal:
             out.append(fire_goal)
+        # 商人的店缺货：去弄来（采集 / 制造 / 收购交给规划器）—— 这是他的活，日程里也算
+        try:
+            from economy import restock_candidates
+
+            out.extend(restock_candidates(self.world, state.agent.name))
+        except Exception as e:  # noqa: BLE001
+            if self.verbose:
+                print(f"[WARN] restock {state.agent.name}: {e}")
 
         slots = load_person_routine(self.world, state.agent.name)
         if not slots:
@@ -1620,6 +1830,8 @@ class GameLoop:
                 for other in self.agents:
                     if other.agent.name == c["culprit"] or not self._plan_mentions(other, c["item"]):
                         continue
+                    if other.agent.name in self._inflight:
+                        continue  # 正在重新决策；新计划的预检会发现东西没了
                     if other.last_decision_at > c["t"]:
                         continue  # 计划是在东西被拿走之后才定的
                     if other.pending_action is not None:
@@ -1663,6 +1875,12 @@ class GameLoop:
         self.conflicts.append(entry)
         del self.conflicts[:-HISTORY_LIMIT]
         level = add_tension(self.world, name, culprit, reason=f"took {item}", at=self.sim_time)
+        try:
+            from relations import TAKEN, adjust
+
+            adjust(self.world, name, culprit, TAKEN, reason=f"took {item} I needed", at=self.sim_time)
+        except Exception:  # noqa: BLE001
+            pass
         entry["tension"] = level
         self._push_triggers(loser, [Trigger(
             "event", "conflict",
@@ -1681,6 +1899,44 @@ class GameLoop:
             print(f"[CONFLICT] {culprit} took {item} from {name} (tension {level})")
 
     # ----- 剧情 -----
+
+    def _economy_step(self) -> None:
+        """每个游戏小时：价格随供需变、商店缺货记成需求、做好的东西上架、过期的委托撤下。"""
+        from economy import ECONOMY_EVERY, economy_step
+        from job_board import tidy
+
+        due = getattr(self, "_next_economy_at", None)
+        if due is not None and self.sim_time < due:
+            return
+        self._next_economy_at = self.sim_time + ECONOMY_EVERY
+        try:
+            tidy(self.world, now=self.sim_time)
+            report = economy_step(self.world)
+        except Exception as e:  # noqa: BLE001
+            if self.verbose:
+                print(f"[WARN] economy: {e}")
+            return
+        for trader, items in (report.get("listed") or {}).items():
+            state = self.get_agent_state(trader)
+            if state is not None:
+                self._log(state, "event", f"Put {', '.join(items)} up for sale")
+
+    def _relations_step(self) -> None:
+        """每两个游戏小时：好感回落、矛盾消退，够亲近的人自然结盟。"""
+        from relations import DECAY_EVERY, decay
+
+        due = getattr(self, "_next_relations_at", None)
+        if due is None:
+            self._next_relations_at = self.sim_time + DECAY_EVERY
+            return
+        if self.sim_time < due:
+            return
+        self._next_relations_at = self.sim_time + DECAY_EVERY
+        try:
+            decay(self.world, at=self.sim_time)
+        except Exception as e:  # noqa: BLE001
+            if self.verbose:
+                print(f"[WARN] relations decay: {e}")
 
     def _story_step(self) -> None:
         """到点就让 Storyteller 出一拍剧情；LLM 在线程池里写，下一拍生效，不卡模拟。"""
@@ -1729,13 +1985,89 @@ class GameLoop:
         })
         del self.conversations[:-CONVERSATION_LIMIT]
 
+    def _feelings_after(self, agent: AgentProfile, action_name: str, args: List[str]) -> None:
+        """送东西、做成买卖之类的事会改变别人对他的好感（见 relations.py）。"""
+        try:
+            from registry import get_registry
+            from relations import after_action
+
+            action = get_registry().get(action_name)
+            if action is None:
+                return
+            params = {p.name: str(v) for p, v in zip(action.parameters, args)}
+            after_action(self.world, agent.name, action_name, params, at=self.sim_time)
+        except Exception as e:  # noqa: BLE001
+            if self.verbose:
+                print(f"[WARN] feelings after {action_name}: {e}")
+
+    def _list_new_goods(self, state: AgentState) -> None:
+        """商人刚做好 / 收来一件他卖的东西：马上上架。"""
+        try:
+            from economy import list_goods
+
+            listed = list_goods(self.world, state.agent.name)
+        except Exception:  # noqa: BLE001
+            return
+        if listed:
+            self._log(state, "event", f"Put {', '.join(listed)} up for sale")
+
+    def _follow_step(self, state: AgentState, leader: str) -> None:
+        """组队成员：队长在别的区域就赶过去；同一区域就走到他身边站着。"""
+        from spatial import find_path, person_cell, walkable_cells, WALK_CELLS_PER_SEC, path_length
+
+        if state.pending_action is not None:
+            return
+        name = state.agent.name
+        rows = self.world.run_query(
+            """
+            MATCH (me:Person {name: $me})-[:LOCATED_AT]->(a:Location)
+            MATCH (l:Person {name: $l})-[:LOCATED_AT]->(b:Location)
+            RETURN a.name AS mine, b.name AS theirs
+            """,
+            me=name, l=leader,
+        ) or []
+        if not rows:
+            return
+        mine, theirs = rows[0]["mine"], rows[0]["theirs"]
+        state.status = "following"
+        if mine != theirs:
+            # 另一个区域：规划一条去那里的路（已经在路上就接着走）
+            goal = {"goal": "Go to location", "target_entity": theirs, "reason": f"keeping up with {leader}",
+                    "source": "follow"}
+            if not (state.current_plan and state.plan_index < len(state.current_plan)
+                    and (state.last_goal or {}).get("target_entity") == theirs):
+                from goal_feasibility import assess_goal
+
+                assessed = assess_goal(self.world, name, goal, engines=self.plan_engines)
+                if not (assessed.ok and assessed.plan):
+                    return
+                state.last_goal = dict(goal)
+                state.current_plan, state.plan_index = list(assessed.plan), 0
+            self._start_next_step(state)
+            return
+        state.current_plan, state.plan_index = None, 0
+        here, there = person_cell(self.world, name), person_cell(self.world, leader)
+        if here is None or there is None or max(abs(here[0] - there[0]), abs(here[1] - there[1])) <= 2:
+            return
+        walkable = walkable_cells(self.world) | {here}
+        goals = {(there[0] + dx, there[1] + dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1) if dx or dy}
+        path = find_path(walkable, here, goals)
+        if not path or len(path) < 2:
+            return
+        secs = max(0.3, path_length(path) / WALK_CELLS_PER_SEC)
+        state.pending_action = PendingAction(
+            name=act("idle"), args=[name], started_at=self.sim_time, duration=secs,
+            completes_at=self.sim_time + secs, path=list(path), hold=True, walk_seconds=secs,
+        )
+        state.sim_busy_until = state.pending_action.completes_at
+
     def heard(self, name: str, other: str, lines: List[Any]) -> bool:
         """name 刚和 other 说完话：推一个「要不要因此改主意」的触发器（带上说了什么）。"""
         from triggers import Trigger
 
         state = self.get_agent_state(name)
-        if state is None or self._is_player(state):
-            return False
+        if state is None or self._is_player(state) or self._routine_only(state):
+            return False  # 玩家自己拿主意；背景 NPC 只照日程，聊什么都不改主意
         other_state = self.get_agent_state(other)
         from_player = other_state is not None and self._is_player(other_state)
         said = [
@@ -1921,7 +2253,22 @@ class GameLoop:
             goal=dict(goal) if goal else None,
             outcome=outcome,
         )
+        self._remember_doing(state, goal if outcome == "chosen" else None, reason)
         return out
+
+    def _remember_doing(self, state: AgentState, goal: Optional[Dict[str, Any]], reason: Any) -> None:
+        """把「正在做什么、为什么」写在人身上：聊天时他说得出自己在忙什么、缺什么。"""
+        try:
+            from narration import goal_phrase
+
+            text = ""
+            if goal:
+                text = goal_phrase(goal, self.world)
+                if reason:
+                    text += f" (because {str(reason)[:160]})"
+            self.world.run_query("MATCH (p:Person {name: $n}) SET p.doing = $d", n=state.agent.name, d=text)
+        except Exception:  # noqa: BLE001
+            pass
 
     def _decide_and_plan_core(
         self,
@@ -1955,10 +2302,22 @@ class GameLoop:
 
         # 清空旧候选，重新生成
         agent.goal_manager.clear_all()
+        routine_only = self._routine_only(state)
         routine_cands = self._routine_candidates(state)
-        ephemeral_cands = self._ephemeral_action_candidates(state)
+        if routine_only:
+            # 背景 NPC：只看日程（含日程里的「和周围的人聊聊」），不管物品动作、不随性格找事做
+            routine_cands = [c for c in routine_cands if (c or {}).get("source") in ("routine", "social_interrupt", "shop")]
+        ephemeral_cands = [] if routine_only else self._ephemeral_action_candidates(state)
         has_routine = self._has_routine(state)
-        if self.force_mock:
+        if routine_only:
+            candidates = list(routine_cands)
+            state.decision_mode = "routine"
+            state.decision_process = {
+                "planner": "routine",
+                "note": "Background NPC: follows the daily routine only (no LLM decisions)",
+                "routine": routine_cands[0] if routine_cands else None,
+            }
+        elif self.force_mock:
             from profile_planner import profile_aware_pick_goal
 
             # 有日程的人：日程满足后就待在原地，不随机找事做
@@ -2032,7 +2391,7 @@ class GameLoop:
                 break
 
         picked = None
-        if not self.force_mock:
+        if not self._rule_based(state):
             # LLM 自己的选择优先；与当前目标相同则继续原计划
             for c in candidates:
                 if (c or {}).get("source") != "llm":
@@ -2108,7 +2467,7 @@ class GameLoop:
                 exclude_goals=exclude,
             )
 
-        if picked is None and not has_routine:
+        if picked is None and not has_routine and not routine_only:
             # profile 兜底
             try:
                 from profile_planner import profile_aware_pick_goal
@@ -2142,6 +2501,18 @@ class GameLoop:
                     picked = None
             except Exception:
                 picked = None
+
+        # 想做的事做成了没有：卡住就挂委托 / 请大模型（只看最想做的那一件）
+        wanted = None
+        if routine_only:
+            wanted = routine_cands[0] if routine_cands else None
+        elif llm_goal and llm_goal.get("goal"):
+            wanted = llm_goal
+        try:
+            self._note_progress(state, wanted, picked)
+        except Exception as e:  # noqa: BLE001
+            if self.verbose:
+                print(f"[WARN] progress {agent.name}: {e}")
 
         if picked is None:
             # wait + backoff
@@ -2334,7 +2705,7 @@ class GameLoop:
             try:
                 import item_interact as _ii
 
-                _ii.FORCE_MOCK = bool(self.force_mock)
+                _ii.FORCE_MOCK = self._rule_based_name(agent)
             except Exception:
                 pass
         ok, reason = registry.execute(self.world, action_name, **kwargs)
@@ -2352,7 +2723,8 @@ class GameLoop:
                     args[1],
                     args[2],
                     memory=self.memory,
-                    force_mock=self.force_mock,
+                    # 背景 NPC 去找人说话（日程里的寒暄）不调用大模型：不写台词
+                    force_mock=self._rule_based_name(agent),
                     # 跟玩家说话：只说自己这句，不替玩家回答
                     listener_speaks=not to_player,
                 )

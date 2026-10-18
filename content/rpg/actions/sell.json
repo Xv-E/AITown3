@@ -1,0 +1,122 @@
+{
+  "name": "sell",
+  "category": "trade",
+  "description": "Sell a held item to a trader for half its market price",
+  "duration": 1.0,
+  "params": [
+    {
+      "name": "c",
+      "type": "Person",
+      "source": "self"
+    },
+    {
+      "name": "i",
+      "type": "Item",
+      "source": "held"
+    },
+    {
+      "name": "buyer",
+      "type": "Person",
+      "source": "people_here"
+    },
+    {
+      "name": "l",
+      "type": "Location",
+      "source": "here"
+    }
+  ],
+  "requires": [
+    {
+      "op": "neq",
+      "a": "@c",
+      "b": "@buyer",
+      "message": "You can't sell to yourself"
+    },
+    {
+      "op": "person_at",
+      "person": "@c",
+      "location": "@l"
+    },
+    {
+      "op": "person_at",
+      "person": "@buyer",
+      "location": "@l",
+      "message": "@buyer is not here"
+    },
+    {
+      "op": "has_item",
+      "person": "@c",
+      "item": "@i"
+    },
+    {
+      "op": "prop_eq",
+      "entity": "@buyer",
+      "label": "Person",
+      "prop": "trader",
+      "value": true,
+      "message": "@buyer doesn't trade"
+    },
+    {
+      "op": "prop_gte",
+      "entity": "@i",
+      "prop": "price",
+      "value": 1,
+      "message": "@i is worthless right now"
+    },
+    {
+      "op": "prop_gte",
+      "entity": "@buyer",
+      "label": "Person",
+      "prop": "coins",
+      "value": "@i.price",
+      "message": "@buyer can't afford @i right now"
+    },
+    {
+      "op": "not_hostile",
+      "a": "@c",
+      "b": "@buyer",
+      "message": "@buyer won't trade with someone from a hostile alliance"
+    }
+  ],
+  "effects": [
+    {
+      "op": "add_prop",
+      "entity": "@c",
+      "label": "Person",
+      "prop": "coins",
+      "delta": "@i.price",
+      "scale": 0.5
+    },
+    {
+      "op": "add_prop",
+      "entity": "@buyer",
+      "label": "Person",
+      "prop": "coins",
+      "delta": "@i.price",
+      "scale": -0.5
+    },
+    {
+      "op": "unlink",
+      "a": "@c",
+      "a_label": "Person",
+      "b": "@i",
+      "b_label": "Item",
+      "rel": "HAS_ITEM"
+    },
+    {
+      "op": "link",
+      "a": "@buyer",
+      "a_label": "Person",
+      "b": "@i",
+      "b_label": "Item",
+      "rel": "HAS_ITEM"
+    },
+    {
+      "op": "set_prop",
+      "entity": "@i",
+      "prop": "for_sale",
+      "value": true
+    }
+  ],
+  "narrative": "@c sells @i to @buyer."
+}

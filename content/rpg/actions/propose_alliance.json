@@ -1,0 +1,71 @@
+{
+  "name": "propose_alliance",
+  "category": "social",
+  "description": "Ask someone here to become allies (they agree if they like you enough)",
+  "duration": 1.0,
+  "params": [
+    {
+      "name": "c",
+      "type": "Person",
+      "source": "self"
+    },
+    {
+      "name": "other",
+      "type": "Person",
+      "source": "people_here"
+    },
+    {
+      "name": "l",
+      "type": "Location",
+      "source": "here"
+    }
+  ],
+  "requires": [
+    {
+      "op": "neq",
+      "a": "@c",
+      "b": "@other",
+      "message": "You can't ally with yourself"
+    },
+    {
+      "op": "person_at",
+      "person": "@c",
+      "location": "@l"
+    },
+    {
+      "op": "person_at",
+      "person": "@other",
+      "location": "@l",
+      "message": "@other is not here"
+    },
+    {
+      "op": "not_has_rel",
+      "a": "@c",
+      "b": "@other",
+      "rel": "ALLY",
+      "a_label": "Person",
+      "b_label": "Person",
+      "directed": true,
+      "message": "You are already allies"
+    },
+    {
+      "op": "feels_gte",
+      "a": "@other",
+      "b": "@c",
+      "value": 4,
+      "message": "@other doesn't trust you enough to be allies yet"
+    }
+  ],
+  "effects": [
+    {
+      "op": "link",
+      "a": "@c",
+      "a_label": "Person",
+      "b": "@other",
+      "b_label": "Person",
+      "rel": "ALLY",
+      "bidirectional": true
+    }
+  ],
+  "narrative": "@c and @other shake hands: they are allies now."
+}

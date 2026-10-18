@@ -1,0 +1,12 @@
+{
+  "id": "pick_berries",
+  "label": "Pick berries",
+  "node": "bush",
+  "stock": "stock",
+  "yield": {
+    "archetype": "berry"
+  },
+  "duration": 2,
+  "narrative": "@c picks a handful of berries from @node.",
+  "empty_message": "@node is picked clean; berries take a few hours to ripen"
+}

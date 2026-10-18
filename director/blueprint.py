@@ -35,6 +35,9 @@ class LocationSpec:
     grid: Optional[List[int]] = None
     # 无缝世界里的范围 [x, y, w, h]（世界格子）；没写就按连接关系自动排
     area: Optional[List[int]] = None
+    # 室内地点（有墙的房间，嵌在 parent 那块室外地里）；tags 里写 indoor 也算
+    indoor: bool = False
+    parent: str = ""
 
     def normalized(self) -> "LocationSpec":
         area = self.area
@@ -51,6 +54,8 @@ class LocationSpec:
             map=_num_pair(self.map, float),
             grid=[area[2], area[3]] if area else _num_pair(self.grid, int),
             area=area,
+            indoor=bool(self.indoor),
+            parent=_clean_name(self.parent, "") if self.parent else "",
         )
 
 
@@ -103,6 +108,16 @@ class PersonSpec:
     routine: List[Dict[str, Any]] = field(default_factory=list)
     # 开局知识：{"all": true} 全知；{"places": [...], "items": [...]} 额外知道的地点 / 物品
     knows: Dict[str, Any] = field(default_factory=dict)
+    # llm（用大模型做决策）| routine（背景 NPC，只照日程）
+    brain: str = "llm"
+    # 钱（数值）；trader = 会买卖东西的商人
+    coins: int = 0
+    trader: bool = False
+    # 商店：卖哪几类东西、每类备几件（缺了他会自己去采集 / 制造 / 收购）
+    sells: List[str] = field(default_factory=list)
+    shop_stock: int = 1
+    # 只有他自己知道的事（进他的决策 / 对话 prompt；玩家在 Profile 页看得到）
+    secret: str = ""
 
     def normalized(self) -> "PersonSpec":
         routine_out: List[Dict[str, Any]] = []
@@ -153,6 +168,12 @@ class PersonSpec:
             accepts_from=[_clean_name(str(x)) for x in (self.accepts_from or []) if x],
             routine=routine_out,
             knows=dict(self.knows or {}),
+            brain="routine" if str(self.brain or "").strip().lower() in ("routine", "npc") else "llm",
+            coins=max(0, int(self.coins or 0)),
+            trader=bool(self.trader),
+            sells=[str(k).strip().lower() for k in (self.sells or []) if str(k).strip()],
+            shop_stock=max(1, int(self.shop_stock or 1)),
+            secret=(self.secret or "").strip(),
         )
 
 
@@ -549,6 +570,7 @@ def ensure_story_consistency(bp: "EventBlueprint") -> "EventBlueprint":
         rumors=rumors,
         social=list(bp.social),
         source=bp.source,
+        terrain=getattr(bp, "terrain", None),
     )
 
 
@@ -584,10 +606,15 @@ class EventBlueprint:
     rumors: List[RumorSpec] = field(default_factory=list)
     social: List[SocialLink] = field(default_factory=list)
     source: str = "mock"  # mock | llm | world | api
+    # 手画地形（可选）：{"rows": [...], "legend": {"V": "Village", ...}}，见 terrain_gen.from_ascii
+    terrain: Optional[Dict[str, Any]] = None
 
     def normalized(self) -> "EventBlueprint":
         locs = [x.normalized() for x in self.locations]
         loc_names = {x.name for x in locs}
+        for loc in locs:
+            if loc.parent not in loc_names or loc.parent == loc.name:
+                loc.parent = ""
         persons = [x.normalized() for x in self.persons]
         # 确保 located_at / works_at 存在
         if not loc_names and persons:
@@ -626,6 +653,12 @@ class EventBlueprint:
                     accepts_from=list(p.accepts_from or []),
                     routine=routine_fixed,
                     knows=dict(p.knows or {}),
+                    brain=getattr(p, "brain", "llm"),
+                    coins=getattr(p, "coins", 0),
+                    trader=getattr(p, "trader", False),
+                    sells=list(getattr(p, "sells", []) or []),
+                    shop_stock=getattr(p, "shop_stock", 1),
+                    secret=getattr(p, "secret", ""),
                 )
             )
         person_names = {p.name for p in fixed_persons}
@@ -722,6 +755,7 @@ class EventBlueprint:
             rumors=rumors,
             social=social,
             source=self.source,
+            terrain=self.terrain,
         )
         # 故事一致性：悬空 involves / 文案中的剧情物件等
         return ensure_story_consistency(bp)
@@ -748,6 +782,7 @@ class EventBlueprint:
             "facts": [asdict(x) for x in bp.facts],
             "rumors": [asdict(x) for x in bp.rumors],
             "social": [{"a": a, "rel": r, "b": b} for a, r, b in bp.social],
+            **({"terrain": bp.terrain} if bp.terrain else {}),
             "counts": {
                 "locations": len(bp.locations),
                 "persons": len(bp.persons),
@@ -768,6 +803,8 @@ class EventBlueprint:
                 map=x.get("map"),
                 grid=x.get("grid"),
                 area=x.get("area"),
+                indoor=bool(x.get("indoor", False)),
+                parent=str(x.get("parent", "") or ""),
             )
             for x in (data.get("locations") or [])
             if isinstance(x, dict)
@@ -792,6 +829,12 @@ class EventBlueprint:
                 accepts_from=list(x.get("accepts_from") or []),
                 routine=[dict(s) for s in (x.get("routine") or []) if isinstance(s, dict)],
                 knows=dict(x.get("knows") or {}) if isinstance(x.get("knows"), dict) else {},
+                brain=str(x.get("brain") or "llm"),
+                coins=int(x.get("coins", 0) or 0),
+                trader=bool(x.get("trader", False)),
+                sells=list(x.get("sells") or []),
+                shop_stock=int(x.get("shop_stock", 1) or 1),
+                secret=str(x.get("secret") or ""),
             )
             for x in (data.get("persons") or [])
             if isinstance(x, dict)
@@ -895,4 +938,5 @@ class EventBlueprint:
             rumors=rumors,
             social=social,
             source=str(data.get("source") or source),
+            terrain=data.get("terrain") if isinstance(data.get("terrain"), dict) else None,
         ).normalized()

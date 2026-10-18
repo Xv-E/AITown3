@@ -1,0 +1,11 @@
+{
+  "id": "pick_vegetables",
+  "label": "Pick vegetables",
+  "node": "vegetable_patch",
+  "stock": "stock",
+  "yield": {
+    "archetype": "vegetable"
+  },
+  "duration": 2,
+  "narrative": "@c pulls fresh vegetables from @node."
+}

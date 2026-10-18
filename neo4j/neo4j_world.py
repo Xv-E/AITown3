@@ -24,6 +24,39 @@ logger = logging.getLogger(__name__)
 # 可能改图的 Cypher（保守：CALL 一律当写）；命中则不缓存并让读缓存失效
 _WRITE_RE = re.compile(r"\b(CREATE|MERGE|SET|DELETE|REMOVE|DROP|FOREACH|CALL)\b", re.IGNORECASE)
 
+# 读缓存按「标签 / 关系类型」失效：写 Item 不清 Person 的读。
+# 模式里有不带标签的具名节点 (x)、不带类型的关系、DETACH DELETE（顺带删掉各种关系），
+# 或用到 Entity（会和别的标签叠在同一节点上）的查询算「全局」（匿名的 () 没法 SET / DELETE，不算）：
+# 全局的写清空整个缓存，全局的读被任何写清掉。宁可多清，不读到旧值。
+_TOKEN_RE = re.compile(r"[:|]\s*`?([A-Za-z_][A-Za-z0-9_]*)`?")
+_UNLABELED_NODE_RE = re.compile(r"(?<![\w.`])\(\s*[A-Za-z_]\w*\s*(\{[^}]*\})?\s*\)")
+_UNTYPED_REL_RE = re.compile(r"--|-\[\s*\w*\s*(\*[^\]]*)?\]-")
+_GLOBAL_TOKENS = frozenset({"Entity"})
+_scope_memo: Dict[str, Any] = {}
+
+
+def _query_scope(cypher: str):
+    """(标签和关系类型集合, 是否全局)。"""
+    hit = _scope_memo.get(cypher)
+    if hit is None:
+        tokens = frozenset(_TOKEN_RE.findall(cypher))
+        is_global = (
+            not tokens
+            or bool(tokens & _GLOBAL_TOKENS)
+            or bool(_UNLABELED_NODE_RE.search(cypher))
+            or bool(_UNTYPED_REL_RE.search(cypher))
+            or bool(re.search(r"\bCALL\b|\bDETACH\b", cypher, re.IGNORECASE))
+        )
+        hit = (tokens, is_global)
+        if len(_scope_memo) < 4096:
+            _scope_memo[cypher] = hit
+    return hit
+
+
+def entity_query(label: str) -> str:
+    """get_entity_by_name 用的查询（tick 预加载按同一字符串填缓存）。"""
+    return f"MATCH (n:{label} {{name: $name}}) RETURN n"
+
 
 class Neo4jWorld:
     """
@@ -95,6 +128,11 @@ class Neo4jWorld:
         self._cache_depth = 0
         self._cache_gen = 0
         self._cache: Dict[Any, List[Dict[str, Any]]] = {}
+        # key -> 这条读查询的 (标签/关系类型, 是否全局)，写的时候按它挑要清的
+        self._cache_scope: Dict[Any, Any] = {}
+        # 按标签 / 关系类型记的写版本号：读的过程中只有「相关的」写才让结果作废
+        self._tok_gen: Dict[str, int] = {}
+        self._global_gen = 0
 
         # 保存单例实例
         Neo4jWorld._instance = self
@@ -141,10 +179,10 @@ class Neo4jWorld:
 
     @contextmanager
     def read_cache(self) -> Iterator[None]:
-        """作用域内相同的只读查询只打一次库；任何写查询都会清空缓存。
+        """作用域内相同的只读查询只打一次库；写查询清掉和它标签 / 关系类型相交的缓存（见 _query_scope）。
 
         一次模拟 tick 里各角色反复读同样的属性（是否死亡、物品脚本……），
-        缓存后结果与不缓存一致：只复用「上次写之后」读到的结果。可嵌套、可跨线程。
+        缓存后结果与不缓存一致：只复用「上次相关的写之后」读到的结果。可嵌套、可跨线程。
         """
         with self._cache_lock:
             self._cache_depth += 1
@@ -155,12 +193,56 @@ class Neo4jWorld:
                 self._cache_depth -= 1
                 if self._cache_depth == 0:
                     self._cache.clear()
+                    self._cache_scope.clear()
                     self._cache_gen += 1
 
-    def invalidate_cache(self) -> None:
+    def invalidate_cache(self, cypher: Optional[str] = None) -> None:
+        """cypher 为空：全清；否则只清和这条写查询标签 / 关系类型相交的读（全局的写仍全清）。"""
         with self._cache_lock:
-            self._cache.clear()
             self._cache_gen += 1
+            tokens, is_global = _query_scope(cypher) if cypher is not None else (frozenset(), True)
+            if is_global:
+                self._global_gen += 1
+            else:
+                for t in tokens:
+                    self._tok_gen[t] = self._tok_gen.get(t, 0) + 1
+            if not self._cache:
+                return
+            if is_global:
+                self._cache.clear()
+                self._cache_scope.clear()
+                return
+            stale = [
+                k for k, (rtokens, rglobal) in self._cache_scope.items()
+                if rglobal or rtokens & tokens
+            ]
+            for k in stale:
+                self._cache.pop(k, None)
+                self._cache_scope.pop(k, None)
+
+    def seed_cache(self, cypher: str, rows: List[Dict[str, Any]], *, version: Any, **params) -> bool:
+        """把批量查出来的结果预先填成某条单条查询的缓存（必须和那条查询的结果完全一致）。
+
+        version 是批量查询开始前的 cache_version(cypher)；之后有过相关的写就不填（结果可能已过期）。
+        """
+        key = (cypher, repr(sorted(params.items())))
+        with self._cache_lock:
+            if not self._cache_depth or self._version_locked(cypher) != version:
+                return False
+            self._cache[key] = copy.deepcopy(rows)
+            self._cache_scope[key] = _query_scope(cypher)
+            return True
+
+    def cache_version(self, cypher: str) -> Any:
+        """和这条读查询相关的写版本：变了就说明期间有会影响它的写。"""
+        with self._cache_lock:
+            return self._version_locked(cypher)
+
+    def _version_locked(self, cypher: str) -> Any:
+        tokens, is_global = _query_scope(cypher)
+        if is_global:
+            return ("all", self._cache_gen)
+        return (self._global_gen, tuple(self._tok_gen.get(t, 0) for t in sorted(tokens)))
 
     def _run(self, cypher: str, params: Dict[str, Any]) -> List[Dict[str, Any]]:
         with self.driver.session() as session:
@@ -182,21 +264,22 @@ class Neo4jWorld:
             try:
                 return self._run(cypher, params)
             finally:
-                self.invalidate_cache()
+                self.invalidate_cache(cypher)
         if not self._cache_depth:
             return self._run(cypher, params)
 
         key = (cypher, repr(sorted(params.items())))
         with self._cache_lock:
             hit = self._cache.get(key)
-            gen = self._cache_gen
+            version = self._version_locked(cypher)
         if hit is not None:
             return copy.deepcopy(hit)
         rows = self._run(cypher, params)
         with self._cache_lock:
-            # 读的过程中若有写发生，结果可能已过期，不入缓存
-            if self._cache_depth and self._cache_gen == gen:
+            # 读的过程中若有相关的写发生，结果可能已过期，不入缓存
+            if self._cache_depth and self._version_locked(cypher) == version:
                 self._cache[key] = rows
+                self._cache_scope[key] = _query_scope(cypher)
         return copy.deepcopy(rows)
 
     def get_entity_by_name(self, name: str, label: str = "Entity") -> Optional[Dict[str, Any]]:
@@ -210,8 +293,7 @@ class Neo4jWorld:
         Returns:
             Optional[Dict]: 节点数据，如果不存在则返回None
         """
-        query = f"MATCH (n:{label} {{name: $name}}) RETURN n"
-        result = self.run_query(query, name=name)
+        result = self.run_query(entity_query(label), name=name)
         if result:
             return result[0].get("n")
         return None

@@ -898,6 +898,25 @@ def _plan_for_goal_impl(
             return PlanResult(success=False, error="Defeat enemy requires target_entity")
         return _finalize(_plan_defeat_enemy(world, character, target))
 
+    if goal_term == "Fulfil request":
+        from job_board import open_requests
+
+        reqs = [r for r in open_requests(world, exclude=character) if not target or r["poster"] == target]
+        if not reqs:
+            return PlanResult(success=False, error=f"{target or 'Nobody'} has no open request")
+        req = reqs[0]
+        # 弄一件他要的那类东西，交到他手上（采集 / 制造 / 购买都行，交给规划器）
+        want = [{"op": "has_item", "person": req["poster"], "item": f"kind:{req['kind']}"}]
+        return _finalize(_plan_compiled(world, character, want, buf))
+
+    if goal_term == "Form alliance":
+        if not target:
+            return PlanResult(success=False, error="Form alliance requires a person as target_entity")
+        # 走过去、提出结盟（propose_alliance）；对方答不答应要到当面才知道
+        want = [{"op": "has_rel", "a": "@self", "b": str(target), "rel": "ALLY",
+                 "a_label": "Person", "b_label": "Person", "directed": True}]
+        return _finalize(_plan_compiled(world, character, want, buf))
+
     if goal_term == "Achieve":
         conditions = goal_data.get("conditions") or []
         if not conditions:

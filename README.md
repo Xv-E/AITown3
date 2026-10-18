@@ -123,21 +123,26 @@ Some tests skip if Neo4j or `llama_cpp` is unavailable.
 
 ## Seamless world
 
-The world is one continuous grid. Each location is a named **region** on it with no walls in between; you walk from the Forest into the Clearing.
+The world is one continuous terrain map (`actions/terrain_gen.py`, stored as a `:Terrain` node). Locations divide it the way places divide a real map:
+
+- **Outdoor places** grow out from their centres with noisy borders, so they interlock (the Village wraps around the Forest) instead of being a row of rectangles.
+- **Indoor places** (`"indoor": true`, `"parent": "TownSquare"`) are walled rooms in a building that stands inside the parent place. Linked rooms share a building and have doors between them; a room linked to another outdoor place gets a back door onto it.
+- **Walls (`#`), hedges/fences (`%`) and water (`~`) are obstacles** and belong to no place. Places are only walkable into each other where the graph says they are adjacent: an open border, a doorway (`+`), or a gate in a fence. Touching places that aren't adjacent get a hedge between them. A locked door item sits in its doorway and blocks it until opened.
 
 ```json
-{"name": "Forest", "tags": "work,wood", "area": [0, 10, 20, 20]}
+{"name": "Forest", "tags": "work,wood", "area": [0, 10, 20, 20]},
+{"name": "Tavern", "tags": "food,social", "indoor": true, "parent": "TownSquare", "grid": [16, 12]}
 ```
 
-`area` is `[x, y, w, h]` in world cells. Worlds without `area` are laid out automatically, with neighbouring regions placed side by side.
+`area` / `map` place a location's centre (optional); `grid` sets its rough size. The same world always gets the same map. A world can also hand-draw its map: `"terrain": {"rows": [...], "legend": {"V": "Village", "t": "Tavern"}}` with `#`, `%`, `~`, `+` and spaces as above. Places a questline adds later grow into the wilderness next to their neighbour; existing ground isn't touched.
 
 - **AI reasons in regions** (PDDL, routines, knowledge, the Storyteller): "go to the Forest", "chop the OakTree".
 - **The world runs in cells** (`actions/spatial.py`): people have world coordinates; `move` and "walk up to the target first" become A* paths whose length sets the action's duration (`WALK_CELLS_PER_SEC`). The path goes to the client so NPCs walk it in time.
-- **Who is around** is distance-based (`VIEW_RADIUS`), not same-region.
+- **Who is around** is distance-based (`VIEW_RADIUS`), not same-region, but walls hide people: someone indoors can't see someone outside, and the other way round.
 - **The player walks freely**: the client reports the player's cell (`POST /api/player/position`); crossing into another region changes their region on the server.
 - The play state's `world` block carries every region, item and person in world cells.
 
-Coordinates: `Person.x/y` are world cells; `Item.x/y` stay local to the item's region (add the region's `area_x/area_y`).
+Coordinates: `Person.x/y` are world cells; `Item.x/y` stay local to the item's region (add the region's `area_x/area_y`, which is the bounding box of its ground on the map). Items are only placed on the location's own ground, never in walls, doorways or a nested building.
 
 ## Object actions
 

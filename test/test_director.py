@@ -158,10 +158,10 @@ class TestDirectorBlueprint(unittest.TestCase):
 
 
 class TestWorldTemplates(unittest.TestCase):
-    def test_the_camp_is_the_main_world_and_listed_first(self):
-        self.assertEqual(default_world_id(), "town_daily_life")
+    def test_the_adventurer_town_is_the_main_world_and_listed_first(self):
+        self.assertEqual(default_world_id(), "adventurer_town")
         worlds = list_worlds()
-        self.assertEqual(worlds[0]["id"], "town_daily_life")
+        self.assertEqual(worlds[0]["id"], "adventurer_town")
         self.assertTrue(worlds[0]["default"])
         self.assertEqual(sum(1 for w in worlds if w["default"]), 1)
 

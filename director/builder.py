@@ -65,6 +65,10 @@ def build_from_blueprint(
             props["map_x"], props["map_y"] = loc.map
         if loc.grid:
             props["grid_w"], props["grid_h"] = loc.grid
+        if loc.indoor:
+            props["indoor"] = True
+        if loc.parent:
+            props["parent"] = loc.parent
         if loc.area:
             props["area_x"], props["area_y"] = loc.area[0], loc.area[1]
         world.add_entity(loc.name, entity_type="Location", **props)
@@ -98,7 +102,14 @@ def build_from_blueprint(
             "speech_style": person.speech_style or "",
             "secret_policy": person.secret_policy or "share_gossip",
             "trust_toward_player": int(person.trust_toward_player or 0),
+            "brain": getattr(person, "brain", "llm") or "llm",
+            "coins": int(getattr(person, "coins", 0) or 0),
+            "trader": bool(getattr(person, "trader", False)),
+            "sells": list(getattr(person, "sells", []) or []),
+            "shop_stock": int(getattr(person, "shop_stock", 1) or 1),
         }
+        if getattr(person, "secret", ""):
+            props["secret"] = person.secret
         if person.accepts_from:
             props["accepts_from"] = json.dumps(list(person.accepts_from), ensure_ascii=False)
         if getattr(person, "routine", None):
@@ -234,9 +245,11 @@ def build_from_blueprint(
         actions_path = str(Path(__file__).resolve().parent.parent / "actions")
         if actions_path not in sys.path:
             sys.path.insert(0, actions_path)
-        from spatial import layout_regions, place_people, place_unplaced
+        from spatial import layout_regions, place_people, place_unplaced, save_authored_terrain
 
-        # 先把区域拼到同一张世界格子上，再摆物品、给人落脚点
+        # 先把地点落到同一张地形上（手画的地图直接用，否则按连接关系生成），再摆物品、给人落脚点
+        if bp.terrain:
+            save_authored_terrain(world, bp.terrain)
         layout_regions(world)
         place_unplaced(world)
         place_people(world)

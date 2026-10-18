@@ -1,0 +1,11 @@
+{
+  "id": "harvest_wheat",
+  "label": "Harvest wheat",
+  "node": "wheat_field",
+  "stock": "stock",
+  "yield": {
+    "archetype": "wheat"
+  },
+  "duration": 3,
+  "narrative": "@c cuts a sheaf of wheat at @node."
+}

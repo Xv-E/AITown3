@@ -7,7 +7,7 @@ use std::{
 };
 
 use crate::adapter::thought_line;
-use crate::net::{trim_line, Blueprint, MindData, SaveInfo, DirectorData, DraftSummary, History, HistoryEntry, NetBridge, WorldSnapshot};
+use crate::net::{trim_line, Blueprint, MindData, RecipeView, RequestView, SaveInfo, TradeView, DirectorData, DraftSummary, History, HistoryEntry, NetBridge, WorldSnapshot};
 use crate::scene::{cell_at, cell_center, Interactive, PlayerAvatar, TargetKind, WalkGrid, ZoneGrid, TILE};
 
 const TOAST_DURATION: Duration = Duration::from_secs(4);
@@ -52,6 +52,10 @@ pub struct UiState {
     pub pointer_on_ui: bool,
     /// Screen position the open menu pops up at (None = default spot).
     pub menu_anchor: Option<Vec2>,
+    /// The trader whose shop menu is open (refreshed after each buy / sell).
+    pub trading_with: Option<String>,
+    /// The Craft panel is open (refreshed after each craft).
+    pub crafting_open: bool,
 }
 
 impl Default for UiState {
@@ -74,6 +78,8 @@ impl Default for UiState {
             cursor_world: None,
             pointer_on_ui: false,
             menu_anchor: None,
+            trading_with: None,
+            crafting_open: false,
         }
     }
 }
@@ -185,6 +191,88 @@ impl UiState {
     fn open_menu(&mut self, menu: Menu, anchor: Option<Vec2>) {
         self.menu = Some(menu);
         self.menu_anchor = anchor;
+        self.trading_with = None;
+        self.crafting_open = false;
+    }
+
+    /// Craft panel: what you can make now, and what each recipe still needs.
+    pub fn open_craft_menu(&mut self, recipes: Vec<RecipeView>) {
+        let ready = recipes.iter().filter(|r| r.ready).count();
+        let mut menu = Menu::new("Craft", format!("{ready} of {} recipes ready", recipes.len()));
+        for r in recipes {
+            let parts: Vec<String> = r
+                .inputs
+                .iter()
+                .map(|i| format!("{} {}/{}", i.kind, i.have, i.need))
+                .chain((!r.station.is_empty()).then(|| {
+                    format!("at a {}{}", r.station, if r.at_station { "" } else { " (not here)" })
+                }))
+                .collect();
+            let label = format!("{}{}  -  {}", if r.ready { "" } else { "(missing) " }, r.label, parts.join(", "));
+            let command = if r.ready {
+                Command::Do { action: r.action.clone(), target: String::new(), other: String::new() }
+            } else {
+                Command::Examine { title: r.label.clone(), text: format!("{}\n\nNeeds: {}", r.description, parts.join(", ")) }
+            };
+            menu.add(label, command);
+        }
+        if menu.options.is_empty() {
+            menu.add("(no recipes)", Command::Close);
+        }
+        menu.add("Close", Command::Close);
+        self.open_menu(menu, None);
+        self.crafting_open = true;
+    }
+
+    /// Requests people posted when they got stuck: deliver what they need and get paid.
+    pub fn open_requests_menu(&mut self, list: Vec<RequestView>) {
+        let open = list.iter().filter(|r| r.status == "open").count();
+        let mut menu = Menu::new("Requests", format!("{open} open  ·  bring the thing to whoever asked"));
+        for r in list.iter().filter(|r| r.status == "open") {
+            if r.you_have.is_empty() {
+                let why = if r.reason.is_empty() { String::new() } else { format!("\n\nWhy: {}", r.reason) };
+                menu.add(
+                    format!("{}  (you have none)", r.line),
+                    Command::Examine { title: r.line.clone(), text: format!("Get some {} and bring it to {}.{why}", r.kind, r.poster) },
+                );
+            } else {
+                menu.add(format!("Deliver: {}  (you have {})", r.line, r.you_have.join(", ")), Command::Deliver { id: r.id.clone() });
+            }
+        }
+        for r in list.iter().filter(|r| r.status != "open").take(5) {
+            let who = if r.taker.is_empty() { r.note.clone() } else { format!("by {}", r.taker) };
+            menu.add(format!("({}) {}  {who}", r.status, r.line), Command::Close);
+        }
+        if list.is_empty() {
+            menu.add("(nobody needs anything right now)", Command::Close);
+        }
+        menu.add("Close", Command::Close);
+        self.open_menu(menu, None);
+    }
+
+    /// A trader's shop: buy their goods, sell yours for half their worth.
+    pub fn open_trade_menu(&mut self, view: TradeView) {
+        let npc = view.npc.clone();
+        let mut menu = Menu::new(
+            format!("Trade with {npc}"),
+            format!("You have {} coins  ·  {npc} has {}", view.my_coins, view.npc_coins),
+        );
+        if !view.trader {
+            menu.add(format!("{npc} doesn't trade."), Command::Close);
+        }
+        for g in &view.sells {
+            let label = format!("Buy {}  -  {} coins{}", g.label, g.price, if g.affordable { "" } else { " (can't afford)" });
+            menu.add(label, Command::Do { action: "buy".into(), target: g.name.clone(), other: npc.clone() });
+        }
+        if view.trader {
+            for g in &view.buys {
+                let label = format!("Sell {}  -  {} coins{}", g.label, g.price, if g.affordable { "" } else { " (they can't pay)" });
+                menu.add(label, Command::Do { action: "sell".into(), target: g.name.clone(), other: npc.clone() });
+            }
+        }
+        menu.add("Close", Command::Close);
+        self.open_menu(menu, None);
+        self.trading_with = Some(npc);
     }
 
     /// Save into one of the slots, or load any save (autosave included) after a confirmation.
@@ -310,6 +398,26 @@ enum Command {
         person: String,
     },
     StartBuild(BuildPlacement),
+    /// Gather / craft / buy / sell through the server (it picks the materials).
+    Do {
+        action: String,
+        target: String,
+        other: String,
+    },
+    /// Open a trader's shop.
+    Trade {
+        person: String,
+    },
+    Party {
+        person: String,
+        join: bool,
+    },
+    Ally {
+        person: String,
+    },
+    Deliver {
+        id: String,
+    },
     SaveGame(String),
     LoadGame(String),
     Submenu(Box<Menu>),
@@ -352,15 +460,37 @@ fn target_menu(world: &WorldSnapshot, target: &Interactive) -> Menu {
         TargetKind::Person { name } => {
             let actor = world.person_here(name).or_else(|| world.character(name));
             let alive = actor.is_none_or(|a| a.alive);
-            let subtitle = match actor {
+            let mut subtitle = match actor {
                 Some(a) if !a.alive => format!("{} (down)", a.role),
                 Some(a) if a.mood.is_empty() => format!("{}  HP {}", a.role, a.hp),
                 Some(a) => format!("{}  HP {}  mood: {}", a.role, a.hp, a.mood),
                 None => String::new(),
             };
+            if let Some(a) = actor {
+                if a.allies.iter().any(|x| x == me) {
+                    subtitle.push_str("  ·  your ally");
+                }
+                if a.follows == me {
+                    subtitle.push_str("  ·  in your party");
+                }
+                if a.trader {
+                    subtitle.push_str("  ·  trader");
+                }
+            }
             let mut menu = Menu::new(name.clone(), subtitle);
             if alive {
                 menu.add("Talk", Command::Talk { person: name.clone() });
+                if actor.is_some_and(|a| a.trader) {
+                    menu.add("Trade", Command::Trade { person: name.clone() });
+                }
+                if actor.is_some_and(|a| a.follows == me) {
+                    menu.add("Ask them to go their own way", Command::Party { person: name.clone(), join: false });
+                } else {
+                    menu.add("Invite to travel with you", Command::Party { person: name.clone(), join: true });
+                }
+                if !actor.is_some_and(|a| a.allies.iter().any(|x| x == me)) {
+                    menu.add("Propose an alliance", Command::Ally { person: name.clone() });
+                }
                 for item in &held {
                     menu.add(
                         format!("Give {item}"),
@@ -410,10 +540,16 @@ fn target_menu(world: &WorldSnapshot, target: &Interactive) -> Menu {
             // The object's own actions: what you can do now, and why the rest can't be done.
             for action in &thing.actions {
                 if action.available {
-                    menu.add(
-                        action.label.clone(),
-                        act("interact", &[("c", me), ("target", name), ("option", &action.id)]),
-                    );
+                    // "do:<action>" = a gathering action (the server picks the tool); else an authored one
+                    let command = match action.id.strip_prefix("do:") {
+                        Some(content_action) => Command::Do {
+                            action: content_action.to_string(),
+                            target: name.to_string(),
+                            other: String::new(),
+                        },
+                        None => act("interact", &[("c", me), ("target", name), ("option", &action.id)]),
+                    };
+                    menu.add(action.label.clone(), command);
                 } else {
                     menu.add(
                         format!("({}: not now)", action.label),
@@ -927,6 +1063,35 @@ fn choose_menu_option(index: usize, world: &WorldSnapshot, ui: &mut UiState, net
     let command = menu.options[selected].command.clone();
     match command {
         Command::Close => ui.menu = None,
+        Command::Do { action, target, other } => {
+            // Shops and the craft panel stay open and refresh after the deal.
+            if ensure_online(world, ui) {
+                net.do_action(&action, &target, &other);
+            }
+        }
+        Command::Trade { person } => {
+            if ensure_online(world, ui) {
+                net.fetch_trade(&person);
+            }
+        }
+        Command::Party { person, join } => {
+            ui.menu = None;
+            if ensure_online(world, ui) {
+                net.party(&person, join);
+            }
+        }
+        Command::Deliver { id } => {
+            ui.menu = None;
+            if ensure_online(world, ui) {
+                net.deliver(&id);
+            }
+        }
+        Command::Ally { person } => {
+            ui.menu = None;
+            if ensure_online(world, ui) {
+                net.propose_alliance(&person);
+            }
+        }
         Command::SaveGame(slot) => {
             ui.menu = None;
             if ensure_online(world, ui) {
@@ -1301,10 +1466,12 @@ pub fn update_status(
         trim_line(&net.last_message, 140)
     } else {
         format!(
-            "{}  ·  {}  ·  HP {}   ·   NPCs {}",
+            "{}  ·  {}  ·  HP {}  ·  {} coins{}   ·   NPCs {}",
             world.player.name,
             world.current_location.name,
             world.player.hp,
+            world.player.coins,
+            party_text(&world),
             if ui.sim_running { "running" } else { "paused" },
         )
     };
@@ -1327,23 +1494,16 @@ pub fn update_clock(
     }
     let total_minutes = (clock.hour.rem_euclid(24.0) * 60.0).floor() as u32;
     let state = if ui.sim_running { "" } else { "  (paused)" };
-    let arc = &world.simulation.story.arc;
-    // Quests stay in the Director tab; the HUD only shows the time and where the story is going.
-    let story = if arc.is_empty() {
-        String::new()
-    } else {
-        format!("\nStory: {}", trim_line(arc, 90))
-    };
+    // Story and quests live in the Director tab; the HUD only shows the time.
     set_text(
         &mut text,
         format!(
-            "Day {}  {:02}:{:02}\n{}{}{}",
+            "Day {}  {:02}:{:02}\n{}{}",
             clock.day.max(1),
             total_minutes / 60,
             total_minutes % 60,
             clock.phase_label,
             state,
-            story,
         ),
     );
 }
@@ -1540,6 +1700,8 @@ const SAID: Color = Color::srgb(0.98, 0.86, 0.55);
 pub enum UiAction {
     MenuOption(usize),
     Bag,
+    Craft,
+    Requests,
     SaveMenu,
     Build,
     Map,
@@ -1556,6 +1718,8 @@ pub enum UiAction {
     TabDirector,
     /// NPC tab pages and the memory filter / search box.
     NpcPage(NpcPage),
+    /// Switch the open character between "llm" and "routine".
+    SetBrain(String),
     MemoryKind(String),
     MemorySearch,
     ClearMemorySearch,
@@ -1632,6 +1796,19 @@ fn run_ui_action(action: UiAction, world: &WorldSnapshot, nearby: &NearbyInterac
                 ui.open_menu(menu, None);
             }
         }
+        UiAction::Requests => {
+            if ensure_online(world, ui) {
+                net.fetch_requests();
+            }
+        }
+        UiAction::Craft => {
+            if ui.crafting_open && ui.menu.is_some() {
+                ui.menu = None;
+                ui.crafting_open = false;
+            } else if ensure_online(world, ui) {
+                net.fetch_crafting();
+            }
+        }
         UiAction::SaveMenu => {
             if ensure_online(world, ui) {
                 net.fetch_saves();
@@ -1704,6 +1881,15 @@ fn run_ui_action(action: UiAction, world: &WorldSnapshot, nearby: &NearbyInterac
                 view.searching = false;
                 view.mind_fetch = None;
                 view.scroll = 0;
+            }
+        }
+        UiAction::SetBrain(brain) => {
+            if let Some(view) = ui.history.as_mut() {
+                net.set_brain(&view.name, &brain);
+                if let Some(mind) = view.mind.as_mut() {
+                    mind.profile.brain = brain; // show it right away; the next fetch confirms
+                }
+                view.mind_fetch = None;
             }
         }
         UiAction::MemoryKind(kind) => {
@@ -1809,6 +1995,8 @@ pub fn update_toolbar(
             return;
         }
         button(p, format!("Bag ({bag})"), UiAction::Bag, 15.0, false, false);
+        button(p, "Craft", UiAction::Craft, 15.0, false, false);
+        button(p, "Requests", UiAction::Requests, 15.0, false, false);
         button(p, "Build", UiAction::Build, 15.0, false, false);
         button(p, "Map", UiAction::Map, 15.0, false, false);
         button(p, "People", UiAction::History, 15.0, false, false);
@@ -2383,7 +2571,10 @@ fn director_signature(view: &DirectorView) -> String {
         .map(|q| format!("{}{}{}", q.title, q.state, q.stages.iter().map(|s| s.state.as_str()).collect::<String>()))
         .collect();
     format!(
-        "{}|{}|{}|{}|{:?}|{}|{}|{}|{}|{}|{}|{}|{}|{:?}|{}|{}",
+        "{}|{}|{}|{}|{}|{:?}|{}|{}|{}|{}|{}|{}|{}|{}|{:?}|{}|{}",
+        d.market.iter().map(|m| format!("{}{}{}", m.kind, m.price, m.supply)).collect::<String>()
+            + &d.requests.iter().map(|r| r.line.clone()).collect::<String>()
+            + &d.alliances.iter().map(|a| format!("{}{}{:?}", a.name, a.members.join(","), a.stances.iter().map(|s| s.value).collect::<Vec<_>>())).collect::<String>(),
         d.mode,
         d.thinking,
         d.arc,
@@ -2552,6 +2743,50 @@ fn director_body(p: &mut ChildSpawnerCommands, view: &DirectorView) {
         }
     }
 
+    section(p, "Alliances");
+    if d.alliances.is_empty() {
+        line(p, "  (none yet - people who grow close band together)".into(), MUTED, 14.0);
+    }
+    for a in &d.alliances {
+        line(p, format!("  {}: {}", a.name, a.members.join(", ")), SAID, 15.0);
+        for s in &a.stances {
+            let color = match s.word.as_str() {
+                "hostile" => Color::srgb(0.95, 0.5, 0.45),
+                "rivals" => Color::srgb(0.95, 0.75, 0.45),
+                "friendly" => Color::srgb(0.6, 0.9, 0.6),
+                _ => MUTED,
+            };
+            line(p, format!("    with {}: {} ({})", s.other, s.word, s.value), color, 13.0);
+        }
+    }
+
+    section(p, "Requests");
+    if d.requests.is_empty() {
+        line(p, "  (nobody has asked for help)".into(), MUTED, 14.0);
+    }
+    for r in &d.requests {
+        line(p, format!("  {}", r.line), TEXT, 13.0);
+    }
+
+    section(p, "Economy");
+    if d.market.is_empty() {
+        line(p, "  (no prices yet - they are set every game hour while NPCs run)".into(), MUTED, 14.0);
+    }
+    for m in &d.market {
+        let trend = match m.trend.as_str() {
+            "up" => "  rising",
+            "down" => "  falling",
+            _ => "",
+        };
+        let color = if m.factor > 1.3 { SAID } else if m.factor < 0.8 { MUTED } else { TEXT };
+        line(
+            p,
+            format!("  {:<14} {:>3} coins  (x{:.1})  {} around  demand {:.1}{trend}", m.kind, m.price, m.factor, m.supply, m.demand),
+            color,
+            13.0,
+        );
+    }
+
     section(p, "Recent moves");
     if d.beats.is_empty() {
         line(p, "  (nothing yet)".into(), MUTED, 14.0);
@@ -2680,7 +2915,14 @@ fn mind_signature(view: &HistoryView) -> String {
     let data = view.mind.as_ref().map(|d| {
         let mems: Vec<String> = d.memories.iter().map(|m| format!("{}{}", m.time, m.text)).collect();
         let k = &d.knows;
-        let profile: Vec<String> = d.profile.fields.iter().map(|f| f.value.clone()).chain(d.profile.status.clone()).collect();
+        let profile: Vec<String> = d
+            .profile
+            .fields
+            .iter()
+            .map(|f| f.value.clone())
+            .chain(d.profile.status.clone())
+            .chain([d.profile.brain.clone()])
+            .collect();
         let routine: Vec<String> = d.routine.slots.iter().map(|s| format!("{}{}{}{}", s.hours, s.what, s.now, s.done)).collect();
         format!(
             "{}|{}|{}|{}|{:?}|{}|{}|{}|{}|{}|{:?}",
@@ -2690,7 +2932,7 @@ fn mind_signature(view: &HistoryView) -> String {
             d.total,
             d.types,
             mems.join(";"),
-            k.facts.iter().map(|f| f.text.as_str()).collect::<Vec<_>>().join(";"),
+            format!("{}{}", k.relations.join(";"), k.facts.iter().map(|f| f.text.as_str()).collect::<Vec<_>>().join(";")),
             k.places.join(","),
             k.seen.join(";"),
             k.grudges.join(";"),
@@ -2775,6 +3017,13 @@ fn knows_page(p: &mut ChildSpawnerCommands, view: &HistoryView) {
         };
         line(p, format!("  {} {feel} (trust {trust})", if k.player.is_empty() { "The player:" } else { k.player.as_str() }), TEXT, 15.0);
     }
+    section(p, "People");
+    if k.relations.is_empty() {
+        line(p, "  (no strong feelings about anyone yet)".into(), MUTED, 14.0);
+    }
+    for r in &k.relations {
+        line(p, format!("  {r}"), TEXT, 14.0);
+    }
     section(p, "Facts and rumours");
     if k.facts.is_empty() {
         line(p, "  (none yet - they learn facts when someone tells them)".into(), MUTED, 14.0);
@@ -2820,6 +3069,18 @@ fn profile_page(p: &mut ChildSpawnerCommands, view: &HistoryView) {
     if !now.is_empty() {
         line(p, now, SAID, 15.0);
     }
+    if !data.profile.brain.is_empty() {
+        let (what, other, label) = if data.profile.brain == "routine" {
+            ("Background NPC: follows the daily routine only, never asks the LLM what to do.", "llm", "Let them think (LLM)")
+        } else {
+            ("LLM character: decides with the language model when something happens.", "routine", "Routine only")
+        };
+        p.spawn(Node { flex_direction: FlexDirection::Row, align_items: AlignItems::Center, column_gap: px(8), margin: UiRect::top(px(4)), ..default() })
+            .with_children(|row| {
+                row.spawn((Text::new(what.to_string()), TextFont { font_size: 14.0, ..default() }, TextColor(TEXT)));
+                button(row, label, UiAction::SetBrain(other.to_string()), 13.0, false, false);
+            });
+    }
     section(p, "Character");
     if data.profile.fields.is_empty() {
         line(p, "  (nothing written about them)".into(), MUTED, 14.0);
@@ -2843,4 +3104,21 @@ fn profile_page(p: &mut ChildSpawnerCommands, view: &HistoryView) {
         line(p, format!(" {mark} {}   {} - {}{notes}{done}", s.hours, s.r#where, s.what), color, 14.0);
     }
     line(p, "The routine is a default: news, requests and emergencies can make them do something else.".into(), MUTED, 12.0);
+}
+
+/// "  ·  party: Sage, Reed" (people travelling with the player).
+fn party_text(world: &WorldSnapshot) -> String {
+    let me = &world.player.name;
+    let mut party: Vec<&str> = world
+        .characters
+        .iter()
+        .filter(|c| c.follows == *me && c.name != *me)
+        .map(|c| c.name.as_str())
+        .collect();
+    party.sort();
+    if party.is_empty() {
+        String::new()
+    } else {
+        format!("  ·  party: {}", party.join(", "))
+    }
 }

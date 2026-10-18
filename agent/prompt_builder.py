@@ -51,6 +51,19 @@ class PromptBuilder:
         feeling = self._get_player_feeling_text(agent)
         if feeling:
             parts += ["=== How You Feel About the Player ===", feeling, ""]
+        secret = self._get_secret_text(agent)
+        if secret:
+            parts += ["=== Your Secret ===", secret,
+                      "Nobody else knows this. It shapes what you do; don't give it away lightly.", ""]
+        people = self._get_relations_text(agent)
+        if people:
+            parts += ["=== People You Know ===", people, ""]
+        trade = self._get_trade_text(agent)
+        if trade:
+            parts += ["=== Money and Trade ===", trade, ""]
+        asks = self._get_requests_text(agent)
+        if asks:
+            parts += ["=== Requests From Others ===", asks, ""]
         tensions = self._get_tensions_text(agent)
         if tensions:
             parts += [
@@ -141,6 +154,77 @@ Respond with a JSON object:
 """
         return prompt
 
+    def _get_trade_text(self, agent: "AgentProfile") -> str:
+        """你有多少钱；谁在卖什么（可以用 Collect item 去买，规划器会走 buy）。"""
+        if self.world is None:
+            return ""
+        try:
+            me = self.world.run_query(
+                "MATCH (p:Person {name: $n}) RETURN coalesce(p.coins, 0) AS c, coalesce(p.trader, false) AS t",
+                n=agent.name,
+            ) or []
+            shops = self.world.run_query(
+                """
+                MATCH (t:Person)-[:HAS_ITEM]->(i:Item)
+                WHERE coalesce(t.trader, false) AND coalesce(i.for_sale, false) AND t.name <> $n
+                RETURN t.name AS trader, collect(i.name + ' (' + toString(coalesce(i.price, i.value, 0)) + ' coins)') AS goods
+                """,
+                n=agent.name,
+            ) or []
+        except Exception:
+            return ""
+        if not me:
+            return ""
+        lines = [f"You have {int(float(me[0].get('c') or 0))} coins."]
+        if me[0].get("t"):
+            lines.append("You are a trader: people buy your goods and sell you theirs for half their worth.")
+            try:
+                from economy import shop_shortages
+
+                missing = shop_shortages(self.world, agent.name)
+            except Exception:
+                missing = []
+            if missing:
+                lines.append(f"Your shop is out of: {', '.join(missing)}. Gather, make or buy them "
+                             "(Collect item kind:<kind>) - what you hold goes on sale by itself.")
+        shops = [s for s in shops if s.get("trader") and s.get("goods")]
+        for shop in shops:
+            lines.append(f"{shop['trader']} sells: {', '.join(shop['goods'][:8])}")
+        if shops:
+            lines.append("To buy something, choose Collect item with that item; traders also buy what you make.")
+        return "\n".join(lines)
+
+    def _get_secret_text(self, agent: "AgentProfile") -> str:
+        if self.world is None:
+            return ""
+        try:
+            rows = self.world.run_query(
+                "MATCH (p:Person {name: $n}) RETURN coalesce(p.secret, '') AS s", n=agent.name
+            ) or []
+        except Exception:
+            return ""
+        return str(rows[0].get("s") or "").strip() if rows else ""
+
+    def _get_requests_text(self, agent: "AgentProfile") -> str:
+        if self.world is None:
+            return ""
+        try:
+            from job_board import prompt_text
+
+            return prompt_text(self.world, agent.name)
+        except Exception:
+            return ""
+
+    def _get_relations_text(self, agent: "AgentProfile") -> str:
+        if self.world is None:
+            return ""
+        try:
+            from relations import describe
+
+            return describe(self.world, agent.name)
+        except Exception:
+            return ""
+
     def _get_player_feeling_text(self, agent: "AgentProfile") -> str:
         """NPC 对玩家的信任（对话里攒下来的），让它也影响「要不要帮玩家」。"""
         if self.world is None:
@@ -218,11 +302,15 @@ Respond with a JSON object:
             desc_rows = self.world.run_query(
                 """
                 MATCH (l:Location {name: $loc})
-                RETURN coalesce(l.description, '') AS d
+                RETURN coalesce(l.description, '') AS d,
+                       coalesce(l.indoor, false) AS indoor, coalesce(l.parent, '') AS parent
                 LIMIT 1
                 """,
                 loc=loc,
             )
+            if desc_rows and desc_rows[0].get("indoor"):
+                parent = desc_rows[0].get("parent")
+                lines.append(f"Indoors (a building in {parent})" if parent else "Indoors")
             if desc_rows and desc_rows[0].get("d"):
                 lines.append(f"Place: {desc_rows[0]['d']}")
         except Exception:

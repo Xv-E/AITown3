@@ -1,0 +1,15 @@
+{
+  "id": "fishing_rod",
+  "label": "Fishing rod",
+  "inputs": [
+    {
+      "kind": "wood",
+      "count": 2
+    }
+  ],
+  "output": {
+    "archetype": "fishing_rod"
+  },
+  "duration": 2,
+  "description": "Two straight sticks and some twine."
+}

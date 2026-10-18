@@ -40,6 +40,8 @@ def goal_phrase(goal: Optional[Dict[str, Any]], world: Any = None) -> str:
         "Defeat enemy": f"fight {target}",
         "Perform action": target.lower(),
         "Achieve": "make something happen",
+        "Form alliance": f"become allies with {target}",
+        "Fulfil request": f"help {target} with their request",
     }
     if term == "Interact with":
         label = _action_label(world, goal.get("target_entity"), action) if action else ""

@@ -22,6 +22,8 @@ class GoalTerm(Enum):
     USE_ITEM = "Use item"
     INTERACT_WITH = "Interact with"
     PERFORM_ACTION = "Perform action"
+    FORM_ALLIANCE = "Form alliance"
+    FULFIL_REQUEST = "Fulfil request"
 
 
 @dataclass
@@ -124,6 +126,18 @@ GOAL_DEFINITIONS: Dict[GoalTerm, GoalDefinition] = {
         description="执行一个只需自己参与的内容动作（target_entity=动作名，如 sleep；可选 at_location 先走过去）",
         pddl_predicates=[],
         example="Perform action sleep at Cottages",
+    ),
+    GoalTerm.FORM_ALLIANCE: GoalDefinition(
+        term=GoalTerm.FORM_ALLIANCE,
+        description="与某人结盟（target_entity=人；对方对你的好感够高才会答应），结盟的人会聚成一个联盟",
+        pddl_predicates=[],
+        example="Form alliance with Sage",
+    ),
+    GoalTerm.FULFIL_REQUEST: GoalDefinition(
+        term=GoalTerm.FULFIL_REQUEST,
+        description="帮别人完成委托：把他要的那类东西弄来交给他（target_entity=发委托的人），他会付酬劳",
+        pddl_predicates=[],
+        example="Fulfil request of Reed",
     ),
 }
 

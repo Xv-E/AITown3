@@ -1,0 +1,13 @@
+{
+  "id": "fish",
+  "label": "Fish (rod)",
+  "node": "fishing_spot",
+  "tool": "rod",
+  "stock": "stock",
+  "yield": {
+    "archetype": "fish"
+  },
+  "duration": 4,
+  "narrative": "@c casts the line into @node and pulls out a fish.",
+  "empty_message": "Nothing is biting at @node right now"
+}

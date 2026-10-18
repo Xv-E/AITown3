@@ -335,6 +335,8 @@ CONDITION_OPS = {
     "not_held": ("item",),
     "has_rel": ("a", "b", "rel"),
     "not_has_rel": ("a", "b", "rel"),
+    "feels_gte": ("a", "b", "value"),
+    "not_hostile": ("a", "b"),
     "any": ("of",),
 }
 PLACEHOLDERS = ("actor", "target", "here")

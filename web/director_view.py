@@ -65,6 +65,9 @@ def build_director_view(loop: Any, world: Any) -> Dict[str, Any]:
         "tensions": [],
         "chronicle": [],
         "questlines": [],
+        "market": [],
+        "alliances": [],
+        "requests": [],
     }
     st = getattr(loop, "storyteller", None) if loop is not None else None
     if st is not None:
@@ -98,6 +101,19 @@ def build_director_view(loop: Any, world: Any) -> Dict[str, Any]:
                 }
                 for t in all_tensions(world, 8)
             ]
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            from economy import market_view
+            from relations import alliances_view
+
+            out["market"] = market_view(world)
+            out["alliances"] = alliances_view(world)
+            from job_board import requests_view
+
+            out["requests"] = [{"clock": "", "line": f"[{r['status']}] {r['line']}"
+                                + (f" (by {r['taker']})" if r.get("taker") else "")
+                                + (f" ({r['note']})" if r.get("note") else "")} for r in requests_view(world)]
         except Exception:  # noqa: BLE001
             pass
         try:

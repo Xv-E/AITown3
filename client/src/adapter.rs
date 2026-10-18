@@ -18,6 +18,10 @@ const SERVER_WALK_SPEED: f32 = 10.0;
 /// Fallback glide speed when correcting to the server position (pixels per second).
 const GLIDE_SPEED: f32 = 6.0 * TILE;
 const MIN_WALK_SECS: f32 = 0.2;
+/// An NPC behind schedule walks at most this many times faster to catch up (never teleports).
+const CATCH_UP: f32 = 2.0;
+/// Further than this from where they should be (cells) is a jump, not a walk (e.g. world reload).
+const TELEPORT_TILES: f32 = 25.0;
 
 #[derive(Component)]
 pub struct NpcAvatar {
@@ -75,11 +79,14 @@ fn walk_plan(here: Vec2, path: &[[i32; 2]], activity: &crate::net::NpcActivity, 
     let walked = ((cells.len() - 1) as f32 * elapsed / total.max(1e-3)).floor() as usize;
     let walked = walked.min(cells.len() - 1);
     let expected = cells[walked];
-    // Close to where they should be: keep walking from here. Far behind: jump there.
-    let start = if here.distance(expected) <= TILE * 3.0 { here } else { expected };
+    // Behind: hurry along from where they are (up to CATCH_UP x walking speed) instead of
+    // jumping. Only something absurd (a world reload) is worth a jump.
+    let start = if here.distance(expected) <= TILE * TELEPORT_TILES { here } else { expected };
     let mut points = vec![start];
     points.extend(cells[walked + 1..].iter().copied());
-    (points, total - elapsed)
+    let length: f32 = points.windows(2).map(|w| w[0].distance(w[1])).sum::<f32>() / TILE;
+    let hurried = length / (SERVER_WALK_SPEED * CATCH_UP);
+    (points, (total - elapsed).max(hurried))
 }
 
 #[derive(Component)]
@@ -98,12 +105,16 @@ pub struct NpcDirector {
     revision: Option<u64>,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn sync_npcs(
     mut commands: Commands,
     world: Res<WorldSnapshot>,
     clock: Res<SimClock>,
     mut director: ResMut<NpcDirector>,
     mut avatars: Query<(Entity, &mut NpcAvatar, &Transform)>,
+    mut sprites: Query<&mut Sprite, With<NpcAvatar>>,
+    mut looks: ResMut<crate::icons::PersonIcons>,
+    mut images: ResMut<Assets<Image>>,
 ) {
     if director.revision == Some(world.revision) {
         return;
@@ -127,10 +138,18 @@ pub fn sync_npcs(
     for person in people {
         let server_cell = person.cell().unwrap();
         let existing = avatars.iter_mut().find(|(_, a, _)| a.name == person.name);
+        let trader = world.character(&person.name).is_some_and(|c| c.trader);
         let Some((entity, mut avatar, transform)) = existing else {
-            spawn_npc(&mut commands, &person.name, person.alive, person.hp, cell_center(server_cell));
+            let look = looks.get(&person.name, trader, false, &mut images);
+            spawn_npc(&mut commands, &person.name, person.alive, person.hp, cell_center(server_cell), look);
             continue;
         };
+        if let Ok(mut sprite) = sprites.get_mut(entity) {
+            let tint = crate::icons::person_tint(person.alive);
+            if sprite.color != tint {
+                sprite.color = tint;
+            }
+        }
         commands.entity(entity).insert(Interactive {
             kind: TargetKind::Person { name: person.name.clone() },
             prompt: format!("{}  (HP {})", person.name, person.hp),
@@ -199,17 +218,13 @@ fn action_text(activity: &NpcActivity) -> String {
     }
 }
 
-fn spawn_npc(commands: &mut Commands, name: &str, alive: bool, hp: i32, at: Vec2) {
-    let color = if alive {
-        Color::srgb(0.78, 0.32, 0.43)
-    } else {
-        Color::srgb(0.28, 0.29, 0.31)
-    };
+fn spawn_npc(commands: &mut Commands, name: &str, alive: bool, hp: i32, at: Vec2, look: Handle<Image>) {
     let npc = commands
         .spawn((
             Sprite {
-                color,
-                custom_size: Some(Vec2::splat(TILE * 0.85)),
+                image: look,
+                color: crate::icons::person_tint(alive),
+                custom_size: Some(Vec2::splat(TILE * 1.0)),
                 ..default()
             },
             Transform::from_xyz(at.x, at.y, 5.0),
@@ -325,6 +340,19 @@ pub fn update_npc_bubbles(
 
 /// "goal -> target" for the line under an NPC's name.
 pub fn thought_line(activity: &NpcActivity) -> String {
+    // A posted request shows first: "! needs stone (3c)".
+    if !activity.request.is_empty() {
+        return trim_line(&format!("! {}", activity.request), 34);
+    }
+    if activity.thinking_hard {
+        return "(thinking it over...)".to_string();
+    }
+    // The server keeps the last goal after the plan is done; only show it while they're working on it.
+    let working = !activity.pending_action.is_empty()
+        || matches!(activity.status.as_str(), "acting" | "ready");
+    if !working {
+        return String::new();
+    }
     let goal = match (activity.goal.as_str(), activity.target.as_str()) {
         ("", _) => return String::new(),
         (goal, "") => goal.to_string(),
@@ -338,7 +366,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_walk_heard_about_late_is_picked_up_mid_route_not_rushed() {
+    fn the_goal_line_clears_once_they_are_done() {
+        let mut a = crate::net::NpcActivity {
+            goal: "Go to location".into(),
+            target: "Tavern".into(),
+            status: "completed".into(),
+            ..Default::default()
+        };
+        assert_eq!(thought_line(&a), "", "arrived: nothing to show");
+        a.status = "acting".into();
+        assert_eq!(thought_line(&a), "Go to location -> Tavern");
+        a.status = "waiting".into();
+        a.pending_action = "move".into();
+        assert_eq!(thought_line(&a), "Go to location -> Tavern", "still on the way");
+    }
+
+    #[test]
+    fn a_late_walk_hurries_along_instead_of_teleporting() {
         let path: Vec<[i32; 2]> = (0..21).map(|x| [x, 0]).collect(); // 20 cells = 2 sim s
         let activity = crate::net::NpcActivity {
             pending_started_at: Some(10.0),
@@ -349,8 +393,12 @@ mod tests {
         let (points, secs) = walk_plan(start, &path, &activity, 10.0);
         assert_eq!((points.len(), secs), (21, 2.0), "on time: the whole route, full time");
         let (points, secs) = walk_plan(start, &path, &activity, 11.0);
-        assert_eq!(points[0], cell_center(IVec2::new(10, 0)), "late: jump to where they should be");
-        assert_eq!((points.len(), secs), (11, 1.0), "...and walk the rest at the same speed");
+        assert_eq!(points[0], start, "late: no jump, they hurry from where they are");
+        assert_eq!(points.len(), 11, "...along the rest of the route");
+        assert!((secs - 1.0).abs() < 1e-3, "20 cells at double speed = the 1 s that is left: {secs}");
+        let far = cell_center(IVec2::new(0, 40));
+        let (points, _) = walk_plan(far, &path, &activity, 11.0);
+        assert_eq!(points[0], cell_center(IVec2::new(10, 0)), "absurdly far off (a reload): jump");
     }
     use std::time::Duration;
 

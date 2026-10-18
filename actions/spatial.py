@@ -1,11 +1,15 @@
 """
-格子空间 — 无缝世界：所有区域（Location）拼在同一张世界格子上（area_x / area_y + grid_w × grid_h），
-区域之间没有墙；人有世界坐标，走路沿格子寻路、耗时按距离（见文件后半「无缝世界」）。
+格子空间 — 无缝世界：所有地点（Location）都在同一张世界格子地图（地形，Terrain）上。
 
-前半是区域内的摆放：每个 Location 自己的 grid_w × grid_h 局部格子。
+地形（见 terrain_gen.py）像真实的地图那样划分地点：
+  · 室外地点是彼此咬合、边界弯曲的一片片地；
+  · 室内地点是有墙的房子里的房间，嵌在所属的室外地点里（Location.indoor / Location.parent）；
+  · 墙、篱笆、水是挡路的格子，不属于任何地点；相邻的地点之间才有路（门洞 / 敞开的边界）。
+人有世界坐标，走路沿格子寻路、耗时按距离（见文件后半「无缝世界」）。
 
-只管几何：哪些格子被固定物占着、某个占地能不能放、离某点最近的空位在哪。
-物品的格子坐标存在 Item.x / Item.y（左上角），占地存在 footprint_w / footprint_h。
+前半是地点内的摆放：每个 Location 的局部格子以它在地图上的外接矩形（area_x / area_y +
+grid_w × grid_h）为准，物品的格子坐标存在 Item.x / Item.y（左上角，相对外接矩形），
+占地存在 footprint_w / footprint_h；能放东西的只有这个地点自己的地（不是墙、不是嵌在里面的房子）。
 可携带物品有坐标但不占格子。
 """
 
@@ -15,11 +19,13 @@ import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Set, Tuple
 
+from terrain_gen import DOOR, Place, Terrain, extend, from_ascii, generate, links_present
+
 if TYPE_CHECKING:
     from neo4j_world import Neo4jWorld
 
 DEFAULT_GRID = (20, 12)
-# 四周留一圈给出口
+# 没有地形时（老格子）四周留一圈
 EDGE_MARGIN = 1
 
 Cell = Tuple[int, int]
@@ -96,6 +102,25 @@ def occupied(
     return out
 
 
+def local_ground(world: "Neo4jWorld", location: str) -> Optional[Tuple[Set[Cell], Set[Cell]]]:
+    """这个地点自己的地（局部坐标）：(能放东西的格子, 所有能走的格子)。
+
+    能放东西的格子避开门洞和门洞旁边一圈，免得把门堵死。没有地形的老世界返回 None。
+    """
+    t = terrain_of(world)
+    area = region_areas(world).get(location)
+    if t is None or area is None or location not in t.names:
+        return None
+    ax, ay = area[0], area[1]
+    keep_clear: Set[Cell] = set()
+    for d in t.doorways:
+        keep_clear.update((d.cell[0] + dx, d.cell[1] + dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1))
+    ground = t.cells_of(location)
+    walk = {(x - ax, y - ay) for x, y in ground}
+    place = {(x - ax, y - ay) for x, y in ground if (x, y) not in keep_clear and t.kind_at((x, y)) != DOOR}
+    return place, walk
+
+
 def can_place(
     world: "Neo4jWorld",
     location: str,
@@ -106,10 +131,14 @@ def can_place(
     *,
     exclude: Optional[str] = None,
 ) -> Tuple[bool, str]:
-    gw, gh = zone_grid(world, location)
-    m = EDGE_MARGIN
-    if x < m or y < m or x + w > gw - m or y + h > gh - m:
-        return False, f"Out of bounds ({gw}x{gh} grid)"
+    ground = local_ground(world, location)
+    if ground is None:
+        gw, gh = zone_grid(world, location)
+        m = EDGE_MARGIN
+        if x < m or y < m or x + w > gw - m or y + h > gh - m:
+            return False, f"Out of bounds ({gw}x{gh} grid)"
+    elif any(c not in ground[0] for c in cells(x, y, w, h)):
+        return False, f"Not open ground in {location} (walls, doorways and other places are off limits)"
     taken = occupied(world, location, exclude=exclude)
     if any(c in taken for c in cells(x, y, w, h)):
         return False, "Something is already built there"
@@ -126,27 +155,40 @@ def find_spot(
     blocking: bool = True,
     walkway: bool = True,
 ) -> Optional[Cell]:
-    """离 near（默认区域中心）最近、能放下 w×h 的左上角格子。
+    """离 near（默认地点中间）最近、能放下 w×h 的左上角格子。
 
-    blocking=True（固定物）：避开其它固定物，尽量四周留一格走道；
+    blocking=True（固定物）：避开其它固定物，尽量四周留一格能走的地当走道；
     blocking=False（可携带物）：格子上不能已有任何东西（也不叠在别的掉落物上）。
     """
-    gw, gh = zone_grid(world, location)
     taken = occupied(world, location, include_portable=not blocking)
-    m = EDGE_MARGIN
-    cx, cy = near if near else (gw // 2 - w // 2, gh // 2 - h // 2)
+    ground = local_ground(world, location)
+    if ground is None:
+        gw, gh = zone_grid(world, location)
+        m = EDGE_MARGIN
+        place = {(x, y) for x in range(m, gw - m) for y in range(m, gh - m)}
+        walk = place
+        default = (gw // 2 - w // 2, gh // 2 - h // 2)
+    else:
+        place, walk = ground
+        t = terrain_of(world)
+        area = region_areas(world)[location]
+        mid = t.anchor(location) if t else None
+        default = (mid[0] - area[0] - w // 2, mid[1] - area[1] - h // 2) if mid else (0, 0)
+    cx, cy = near if near else default
     best: Optional[Tuple[float, Cell]] = None
-    for x in range(m, gw - m - w + 1):
-        for y in range(m, gh - m - h + 1):
-            if any(c in taken for c in cells(x, y, w, h)):
-                continue
-            if blocking and walkway and any(
-                (x + dx, y + dy) in taken for dx in range(-1, w + 1) for dy in range(-1, h + 1)
-            ):
-                continue
-            d = math.hypot(x - cx, y - cy)
-            if best is None or d < best[0]:
-                best = (d, (x, y))
+    for x, y in place:
+        foot = list(cells(x, y, w, h))
+        if any(c not in place or c in taken for c in foot):
+            continue
+        if blocking and walkway and any(
+            (x + dx, y + dy) not in walk or (x + dx, y + dy) in taken
+            for dx in range(-1, w + 1) for dy in range(-1, h + 1)
+            if not (0 <= dx < w and 0 <= dy < h)
+        ):
+            continue
+        d = math.hypot(x - cx, y - cy)
+        if best is None or (d, (x, y)) < best:
+            best = (d, (x, y))
     if best is None and blocking and walkway:
         return find_spot(world, location, w, h, near=near, blocking=True, walkway=False)
     return best[1] if best else None
@@ -191,6 +233,8 @@ def place_item(
         return _int(props["x"]), _int(props["y"])
     portable = props.get("portable", True) is not False
     w, h = (1, 1) if portable else footprint_of(props)
+    if force:  # 先腾出自己原来的位置
+        world.run_query("MATCH (i:Item {name: $n}) REMOVE i.x, i.y", n=name)
     spot = find_spot(world, loc, w, h, near=near, blocking=not portable)
     if spot is None:
         return None
@@ -240,21 +284,94 @@ def map_distance(world: "Neo4jWorld", a: str, b: str) -> Optional[float]:
 
 
 # =====================================================================
-# 无缝世界：所有区域拼在同一张世界格子上
+# 无缝世界：所有地点在同一张地形上
 #
-#   Location.area_x / area_y   区域左上角的世界格子坐标（grid_w × grid_h 是它的大小）
-#   Item.x / Item.y            仍是区域内的局部格子（上面的摆放函数不变）
-#   Person.x / Person.y        世界格子坐标（人会跨区域走动）
+#   (:Terrain)                 整张地形（几串字符串，见 terrain_gen.Terrain.to_props）
+#   Location.area_x / area_y   地点在地形上的外接矩形左上角（grid_w × grid_h 是它的大小）
+#   Location.indoor / parent   室内地点、它所在的室外地点
+#   Item.x / Item.y            相对外接矩形的局部格子（上面的摆放函数）
+#   Person.x / Person.y        世界格子坐标（人会跨地点走动）
 #
-# AI 仍按区域推理（PDDL / 日程 / 认知），世界负责「走过去要多久、站在哪」。
+# AI 仍按地点推理（PDDL / 日程 / 认知），地形负责「走过去要多久、站在哪、隔不隔墙」。
 # =====================================================================
 
-# 走路速度：世界格子 / 模拟秒（一天 = 300 模拟秒；横穿一个 20 格的区域约 2 秒 ≈ 10 游戏分钟）
+# 走路速度：世界格子 / 模拟秒（一天 = 300 模拟秒；横穿一个 20 格的地点约 2 秒 ≈ 10 游戏分钟）
 WALK_CELLS_PER_SEC = 10.0
 # 与目标距离不超过这么多格就算「在旁边」，不用再走
 REACH = 1.5
 
 Area = Tuple[int, int, int, int]  # x, y, w, h（世界格子）
+
+INDOOR_TAGS = {"indoor", "interior", "inside"}
+
+_TERRAIN_CACHE: Dict[str, Terrain] = {}
+
+
+def terrain_of(world: "Neo4jWorld", *, build: bool = True) -> Optional[Terrain]:
+    """这个世界的地形；还没有（老存档、手搭的世界）就现场生成一次。"""
+    rows = world.run_query("MATCH (t:Terrain) RETURN t.version AS v LIMIT 1") or []
+    if not rows or not rows[0].get("v"):
+        if build and world.run_query("MATCH (l:Location) RETURN l.name AS n LIMIT 1"):
+            layout_regions(world)
+            return terrain_of(world, build=False)
+        return None
+    version = str(rows[0]["v"])
+    hit = _TERRAIN_CACHE.get(version)
+    if hit is not None:
+        return hit
+    got = world.run_query("MATCH (t:Terrain) RETURN properties(t) AS p LIMIT 1") or []
+    if not got:
+        return None
+    terrain = Terrain.from_props(dict(got[0].get("p") or {}))
+    if len(_TERRAIN_CACHE) > 8:
+        _TERRAIN_CACHE.clear()
+    _TERRAIN_CACHE[version] = terrain
+    return terrain
+
+
+def save_terrain(world: "Neo4jWorld", terrain: Terrain) -> None:
+    """存地形，并把每个地点的外接矩形 / 室内 / 所属地写回 Location。"""
+    import uuid
+
+    props = terrain.to_props()
+    props["name"] = "world"
+    props["version"] = uuid.uuid4().hex
+    world.run_query("MERGE (t:Terrain {name: 'world'}) SET t = $p", p=props)
+    for name in terrain.names:
+        box = terrain.bbox(name)
+        if box is None:
+            continue
+        x, y, w, h = box
+        world.run_query(
+            """
+            MATCH (l:Location {name: $n})
+            SET l.area_x = $x, l.area_y = $y, l.grid_w = $w, l.grid_h = $h,
+                l.indoor = $indoor, l.parent = $parent
+            """,
+            n=name, x=x, y=y, w=w, h=h,
+            indoor=name in terrain.indoor, parent=terrain.parents.get(name, ""),
+        )
+
+
+def save_authored_terrain(world: "Neo4jWorld", raw: Dict[str, Any]) -> Optional[Terrain]:
+    """world JSON 里手画的地形（"terrain": {"rows": [...], "legend": {...}}）。"""
+    rows = [str(r) for r in raw.get("rows") or []]
+    legend = {str(k): str(v) for k, v in (raw.get("legend") or {}).items() if len(str(k)) == 1}
+    if not rows or not legend:
+        return None
+    info = world.run_query(
+        "MATCH (l:Location) RETURN l.name AS n, coalesce(l.indoor, false) AS indoor, "
+        "coalesce(l.parent, '') AS parent, coalesce(l.tags, '') AS tags"
+    ) or []
+    indoor = {r["n"] for r in info if r.get("indoor") or _tag_set(r.get("tags")) & INDOOR_TAGS}
+    parents = {r["n"]: r["parent"] for r in info if r.get("parent")}
+    terrain = from_ascii(rows, legend, indoor, parents)
+    save_terrain(world, terrain)
+    return terrain
+
+
+def _tag_set(tags: Any) -> Set[str]:
+    return {t.strip().lower() for t in str(tags or "").replace(";", ",").split(",") if t.strip()}
 
 
 def region_areas(world: "Neo4jWorld") -> Dict[str, Area]:
@@ -271,190 +388,236 @@ def region_areas(world: "Neo4jWorld") -> Dict[str, Area]:
     return {r["name"]: (_int(r["x"]), _int(r["y"]), _int(r["w"]), _int(r["h"])) for r in rows}
 
 
-def layout_regions(world: "Neo4jWorld") -> Dict[str, Area]:
-    """没有手写 area 的区域自动排到世界格子上：从连接最多的区域起，邻居贴着它的四边放。"""
+def graph_links(world: "Neo4jWorld") -> Tuple[Dict[Any, str], Dict[Any, str]]:
+    """图上谁和谁相通：{一对地点: "open" / "door"}，以及门（门洞）算在哪一边。"""
+    links: Dict[Any, str] = {}
+    side: Dict[Any, str] = {}
+    for r in world.run_query(
+        "MATCH (a:Location)-[:ADJACENT_TO]-(b:Location) WHERE a.name < b.name RETURN a.name AS a, b.name AS b"
+    ) or []:
+        links[frozenset((r["a"], r["b"]))] = "open"
+    for r in world.run_query(
+        "MATCH (a:Location)-[:LOCKED_ADJACENT_TO]-(b:Location) WHERE a.name < b.name RETURN a.name AS a, b.name AS b"
+    ) or []:
+        links[frozenset((r["a"], r["b"]))] = "door"
+    for d in door_pairs(world).values():
+        p = frozenset((d["here"], d["other"]))
+        links[p] = "door"
+        side[p] = d["here"]
+    return {k: v for k, v in links.items() if len(k) == 2}, side
+
+
+def _places(world: "Neo4jWorld") -> List[Place]:
     rows = world.run_query(
         """
         MATCH (l:Location)
-        OPTIONAL MATCH (l)-[:ADJACENT_TO|LOCKED_ADJACENT_TO]-(m:Location)
-        RETURN l.name AS name, l.area_x AS x, l.area_y AS y,
-               coalesce(l.grid_w, $dw) AS w, coalesce(l.grid_h, $dh) AS h,
-               collect(DISTINCT m.name) AS adj
-        """,
-        dw=DEFAULT_GRID[0],
-        dh=DEFAULT_GRID[1],
+        RETURN l.name AS name, l.area_x AS ax, l.area_y AS ay,
+               coalesce(l.size_w, l.grid_w) AS w, coalesce(l.size_h, l.grid_h) AS h,
+               l.map_x AS mx, l.map_y AS my, coalesce(l.indoor, false) AS indoor,
+               coalesce(l.parent, '') AS parent, coalesce(l.tags, '') AS tags
+        ORDER BY name
+        """
     ) or []
-    size = {r["name"]: (max(4, _int(r["w"])), max(4, _int(r["h"]))) for r in rows}
-    adj = {r["name"]: sorted(a for a in r["adj"] or [] if a) for r in rows}
-    placed: Dict[str, Area] = {
-        r["name"]: (_int(r["x"]), _int(r["y"]), *size[r["name"]])
-        for r in rows
-        if r.get("x") is not None and r.get("y") is not None
-    }
-    todo = [n for n in sorted(size, key=lambda n: (-len(adj[n]), n)) if n not in placed]
-    if todo and not placed:
-        first = todo.pop(0)
-        placed[first] = (0, 0, *size[first])
-
-    def free(a: Area) -> bool:
-        x, y, w, h = a
-        return all(
-            x + w <= ox or ox + ow <= x or y + h <= oy or oy + oh <= y
-            for ox, oy, ow, oh in placed.values()
-        )
-
-    def around(anchor: Area, w: int, h: int) -> List[Area]:
-        ax, ay, aw, ah = anchor
-        cx, cy = ax + (aw - w) // 2, ay + (ah - h) // 2
-        return [
-            (ax + aw, cy, w, h), (ax - w, cy, w, h), (cx, ay + ah, w, h), (cx, ay - h, w, h),
-            (ax + aw, ay + ah, w, h), (ax - w, ay - h, w, h), (ax + aw, ay - h, w, h), (ax - w, ay + ah, w, h),
-        ]
-
-    while todo:
-        # 先放已有邻居落位的；整张图不连通时随便贴一个已放的
-        todo.sort(key=lambda n: (not any(a in placed for a in adj[n]), n))
-        name = todo.pop(0)
-        w, h = size[name]
-        anchors = [placed[a] for a in adj[name] if a in placed] or list(placed.values())
-        spot = next((c for anchor in anchors for c in around(anchor, w, h) if free(c)), None)
-        if spot is None:  # 实在挤不下：放到最右边
-            right = max(x + aw for x, _, aw, _ in placed.values())
-            spot = (right + 1, 0, w, h)
-        placed[name] = spot
-
-    # 平移到非负坐标，写回
-    min_x = min((a[0] for a in placed.values()), default=0)
-    min_y = min((a[1] for a in placed.values()), default=0)
-    out: Dict[str, Area] = {}
-    for name, (x, y, w, h) in placed.items():
-        out[name] = (x - min_x, y - min_y, w, h)
-        world.run_query(
-            "MATCH (l:Location {name: $n}) SET l.area_x = $x, l.area_y = $y, l.grid_w = $w, l.grid_h = $h",
-            n=name, x=x - min_x, y=y - min_y, w=w, h=h,
-        )
+    out = []
+    for r in rows:
+        w = max(4, _int(r.get("w"), DEFAULT_GRID[0]) or DEFAULT_GRID[0])
+        h = max(4, _int(r.get("h"), DEFAULT_GRID[1]) or DEFAULT_GRID[1])
+        seed = None
+        if r.get("ax") is not None and r.get("ay") is not None:
+            seed = (_int(r["ax"]) + w / 2.0, _int(r["ay"]) + h / 2.0)
+        mapped = None
+        if r.get("mx") is not None and r.get("my") is not None:
+            mapped = (float(r["mx"]), float(r["my"]))
+        out.append(Place(
+            name=r["name"], size=(w, h),
+            indoor=bool(r.get("indoor")) or bool(_tag_set(r.get("tags")) & INDOOR_TAGS),
+            parent=str(r.get("parent") or ""), seed=seed, map=mapped,
+        ))
     return out
 
 
-def region_at(areas: Dict[str, Area], cell: Cell) -> Optional[str]:
-    x, y = cell
-    for name, (ax, ay, aw, ah) in sorted(areas.items()):
-        if ax <= x < ax + aw and ay <= y < ay + ah:
-            return name
-    return None
+def layout_regions(world: "Neo4jWorld") -> Dict[str, Area]:
+    """把所有地点落到地形上。
+
+    还没有地形：按地点和连接关系生成整张图（手摆过 area / map 的按原位置）；
+    已有地形、多了新地点（任务线新开的区域）：新地点长在荒野里，已有的一格不动。
+    """
+    import logging
+
+    log = logging.getLogger(__name__)
+    # 第一次落图前记下作者给的大小（之后 grid_w / grid_h 会改成地图上的外接矩形）
+    world.run_query(
+        """
+        MATCH (l:Location) WHERE l.size_w IS NULL
+        SET l.size_w = coalesce(l.grid_w, $dw), l.size_h = coalesce(l.grid_h, $dh)
+        """,
+        dw=DEFAULT_GRID[0], dh=DEFAULT_GRID[1],
+    )
+    places = _places(world)
+    if not places:
+        return {}
+    links, side = graph_links(world)
+    existing = terrain_of(world, build=False)
+    names = {p.name for p in places}
+    # 作者给的格子大小：重新生成地图时，原来的摆放按比例搬到新的外接矩形里
+    authored_sizes = {p.name: (0, 0, p.size[0], p.size[1]) for p in places}
+    if existing is not None and names <= set(existing.names):
+        terrain, rebuilt = existing, False
+        save_terrain(world, terrain)  # 外接矩形、室内标记写回（地点可能被手改过）
+    elif existing is not None and any(existing.cells_of(n) for n in existing.names):
+        terrain, (dx, dy) = extend(existing, places, links, side)
+        rebuilt = False
+        save_terrain(world, terrain)
+        if dx or dy:
+            world.run_query(
+                "MATCH (p:Person) WHERE p.x IS NOT NULL AND p.y IS NOT NULL SET p.x = p.x + $dx, p.y = p.y + $dy",
+                dx=dx, dy=dy,
+            )
+    else:
+        terrain = generate(places, links, side, salt=",".join(sorted(names)))
+        rebuilt = True
+        save_terrain(world, terrain)
+        world.run_query("MATCH (p:Person) REMOVE p.x, p.y")
+    missing = [tuple(sorted(p)) for p in links if p <= set(terrain.names) and p not in links_present(terrain)]
+    if missing:
+        log.info("地形上没有直接相通的相邻地点（经由别处仍走得到）：%s", missing)
+    areas = region_areas(world)
+    place_doors(world, areas)
+    _settle_items(world, terrain, areas, authored_sizes if rebuilt else {})
+    return areas
 
 
-def walkable_cells(world: "Neo4jWorld", areas: Optional[Dict[str, Area]] = None) -> Set[Cell]:
-    """所有区域形状里的格子，去掉固定物占的格子。区域之间没有墙（相接处有通道）。"""
+def _settle_items(world: "Neo4jWorld", terrain: Terrain, areas: Dict[str, Area],
+                  authored: Dict[str, Area]) -> None:
+    """地上的东西要落在自己那个地点的地上：不在的挪到附近的空地。
+
+    authored：重新生成地图前作者给的格子大小；原来的摆放按比例搬到新的外接矩形里（布局大体不变）。
+    """
+    rows = world.run_query(
+        """
+        MATCH (i:Item)-[:LOCATED_AT]->(l:Location)
+        WHERE i.x IS NOT NULL AND i.y IS NOT NULL AND NOT (:Person)-[:HAS_ITEM]->(i)
+          AND toLower(coalesce(i.item_kind, '')) <> 'door'
+        RETURN i.name AS name, l.name AS loc, i.x AS x, i.y AS y, coalesce(i.portable, true) AS portable,
+               coalesce(i.footprint_w, 1) AS w, coalesce(i.footprint_h, 1) AS h
+        """
+    ) or []
+    rows.sort(key=lambda r: (bool(r.get("portable")), -_int(r["w"], 1) * _int(r["h"], 1), r["name"]))
+    if authored:
+        # 先都清掉坐标，再按（缩放后的）原位置一个个放回去，免得互相挡
+        for r in rows:
+            world.run_query("MATCH (i:Item {name: $n}) REMOVE i.x, i.y", n=r["name"])
+    for r in rows:
+        loc = r["loc"]
+        x, y = _int(r["x"]), _int(r["y"])
+        old, new = authored.get(loc), areas.get(loc)
+        if old and new:
+            x = round(x * new[2] / max(1, old[2]))
+            y = round(y * new[3] / max(1, old[3]))
+        w, h = (1, 1) if r.get("portable") is not False else (_int(r["w"], 1), _int(r["h"], 1))
+        ground = local_ground(world, loc)
+        fits = ground is not None and all(c in ground[0] for c in cells(x, y, w, h))
+        if fits and authored:
+            taken = occupied(world, loc, include_portable=bool(r.get("portable")))
+            fits = not any(c in taken for c in cells(x, y, w, h))
+        if fits:
+            if authored:
+                world.run_query("MATCH (i:Item {name: $n}) SET i.x = $x, i.y = $y", n=r["name"], x=x, y=y)
+            continue
+        place_item(world, r["name"], near=(x, y), force=True)
+
+
+def door_pairs(world: "Neo4jWorld") -> Dict[str, Dict[str, Any]]:
+    """每扇门连着哪两块地：门的 connects_to；或者开门的钥匙效果里连的那两处；或者门所在地的「锁着的相邻」。"""
+    import json
+
+    rows = world.run_query(
+        """
+        MATCH (d:Item)-[:LOCATED_AT]->(l:Location) WHERE toLower(coalesce(d.item_kind, '')) = 'door'
+        OPTIONAL MATCH (l)-[:LOCKED_ADJACENT_TO]-(m:Location)
+        RETURN d.name AS door, l.name AS here, coalesce(d.connects_to, '') AS to,
+               coalesce(d.locked, false) AS locked, collect(DISTINCT m.name) AS locked_to
+        """
+    ) or []
+    if not rows:
+        return {}
+    links: Dict[str, Tuple[str, str]] = {}
+    for r in world.run_query("MATCH (i:Item) WHERE i.effects_on IS NOT NULL RETURN i.effects_on AS e") or []:
+        try:
+            effects = json.loads(r["e"]) if isinstance(r["e"], str) else (r["e"] or [])
+        except ValueError:
+            continue
+        for e in effects if isinstance(effects, list) else []:
+            for op in (e or {}).get("ops") or []:
+                if op.get("op") == "link" and op.get("rel") == "ADJACENT_TO" and e.get("target"):
+                    links[str(e["target"])] = (str(op.get("a")), str(op.get("b")))
+    out: Dict[str, Dict[str, Any]] = {}
+    for r in rows:
+        here, other = r["here"], ""
+        if r["to"]:
+            other = r["to"]
+        elif r["door"] in links:
+            a, b = links[r["door"]]
+            other = b if a == here else a if b == here else ""
+        elif r.get("locked_to"):
+            other = sorted(x for x in r["locked_to"] if x)[0] if any(r["locked_to"]) else ""
+        if other and other != here:
+            out[r["door"]] = {"here": here, "other": other, "locked": bool(r["locked"])}
+    return out
+
+
+def open_between(world: "Neo4jWorld", a: str, b: str) -> bool:
+    """a、b 之间现在走得通（相邻；隔着门的话门得开着）。"""
+    rows = world.run_query(
+        "MATCH (:Location {name: $a})-[:ADJACENT_TO]-(:Location {name: $b}) RETURN 1 AS ok LIMIT 1", a=a, b=b
+    ) or []
+    if not rows:
+        return False
+    for d in door_pairs(world).values():
+        if {d["here"], d["other"]} == {a, b} and d["locked"]:
+            return False
+    return True
+
+
+def place_doors(world: "Neo4jWorld", areas: Optional[Dict[str, Area]] = None) -> List[str]:
+    """把每扇门摆到它那两块地之间的门洞上（门所在那一侧）。返回挪过的门。"""
+    t = terrain_of(world, build=False)
+    if t is None:
+        return []
     areas = areas if areas is not None else region_areas(world)
-    item_cells, blocked = _item_cells(world, areas)
-    out: Set[Cell] = set()
-    for shape in region_shapes(world, areas, item_cells).values():
-        out |= shape
-    return out - blocked
+    moved = []
+    for door, d in door_pairs(world).items():
+        here = d["here"]
+        ways = t.doorways_between(here, d["other"])
+        if not ways or here not in areas:
+            continue
+        way = next((w for w in ways if w.owner == here), ways[0])
+        x, y = way.cell[0] - areas[here][0], way.cell[1] - areas[here][1]
+        rows = world.run_query("MATCH (i:Item {name: $n}) RETURN i.x AS x, i.y AS y", n=door) or []
+        if rows and (rows[0].get("x"), rows[0].get("y")) == (x, y):
+            continue
+        world.run_query(
+            "MATCH (i:Item {name: $n}) SET i.x = $x, i.y = $y, i.footprint_w = 1, i.footprint_h = 1", n=door, x=x, y=y
+        )
+        moved.append(door)
+    return moved
 
 
-# ---------------------------------------------------------------------
-# 区域形状：在矩形范围里长出一块圆润、边缘起伏的地（按名字固定，不随机变）。
-# 矩形之间相接的地方留通道，地上的东西也一定连得到中心，所以哪儿都走得到。
-# ---------------------------------------------------------------------
-
-SHAPE_POWER = 2.2        # 越大越接近方形，2 = 椭圆
-SHAPE_EDGE = 0.95        # 形状占矩形的比例
-SHAPE_WOBBLE = ((2, 0.08), (3, 0.07), (4, 0.05))  # (起伏频率, 幅度)
-SHAPE_SMOOTH = 2         # 平滑几遍：去掉孤零零的尖角、补上小坑
-LINK_HALF = 1            # 区域之间的通道：中线两侧各几格
-
-
-def _carve_line(out: Set[Cell], a: Cell, b: Cell, area: Area, radius: int = 1) -> None:
-    """a → b 的直线连同两侧 radius 格并入 out（只在矩形范围里）。"""
-    x0, y0, w, h = area
-    steps = max(abs(b[0] - a[0]), abs(b[1] - a[1]), 1)
-    for i in range(steps + 1):
-        cx = round(a[0] + (b[0] - a[0]) * i / steps)
-        cy = round(a[1] + (b[1] - a[1]) * i / steps)
-        for dx in range(-radius, radius + 1):
-            for dy in range(-radius, radius + 1):
-                x, y = cx + dx, cy + dy
-                if x0 <= x < x0 + w and y0 <= y < y0 + h:
-                    out.add((x, y))
-
-
-def _smooth(shape: Set[Cell], area: Area) -> Set[Cell]:
-    """多数表决：8 邻里 5 个以上是地就算地，2 个以下就不算。"""
-    x0, y0, w, h = area
-    out: Set[Cell] = set()
-    for x in range(x0, x0 + w):
-        for y in range(y0, y0 + h):
-            n = sum((x + dx, y + dy) in shape for dx in (-1, 0, 1) for dy in (-1, 0, 1) if dx or dy)
-            if n >= 5 or ((x, y) in shape and n >= 3):
-                out.add((x, y))
-    return out
-
-
-def region_shape(name: str, area: Area, anchors: Iterable[Cell] = ()) -> Set[Cell]:
-    """这块区域实际的地（世界格子）。anchors：必须连到中心的格子（通道口、物品）。"""
-    x0, y0, w, h = area
-    if w <= 0 or h <= 0:
-        return set()
-    seed = _stable_hash(name)
-    phases = [((seed >> (8 * i)) & 0xFF) / 255.0 * 2 * math.pi for i in range(len(SHAPE_WOBBLE))]
-    cx, cy = x0 + w / 2.0, y0 + h / 2.0
-    out: Set[Cell] = set()
-    for x in range(x0, x0 + w):
-        for y in range(y0, y0 + h):
-            u = (x + 0.5 - cx) / (w / 2.0)
-            v = (y + 0.5 - cy) / (h / 2.0)
-            r = (abs(u) ** SHAPE_POWER + abs(v) ** SHAPE_POWER) ** (1.0 / SHAPE_POWER)
-            angle = math.atan2(v, u)
-            limit = SHAPE_EDGE + sum(amp * math.sin(k * angle + ph) for (k, amp), ph in zip(SHAPE_WOBBLE, phases))
-            if r <= limit:
-                out.add((x, y))
-    for _ in range(SHAPE_SMOOTH):
-        out = _smooth(out, area)
-    center = (x0 + w // 2, y0 + h // 2)
-    for a in anchors:
-        _carve_line(out, a, center, area)
-    return out
-
-
-def region_links(areas: Dict[str, Area]) -> Dict[str, List[Cell]]:
-    """相接的两块矩形：各自在交界线中点留一个通道口（格子在自己那一侧）。"""
-    out: Dict[str, List[Cell]] = {n: [] for n in areas}
-    names = sorted(areas)
-    for i, a in enumerate(names):
-        ax, ay, aw, ah = areas[a]
-        for b in names[i + 1:]:
-            bx, by, bw, bh = areas[b]
-            if ax + aw == bx or bx + bw == ax:  # 左右相接
-                lo, hi = max(ay, by), min(ay + ah, by + bh)
-                if hi - lo >= 1:
-                    mid = (lo + hi) // 2
-                    a_x, b_x = (ax + aw - 1, bx) if ax + aw == bx else (ax, bx + bw - 1)
-                    for d in range(-LINK_HALF, LINK_HALF + 1):
-                        if lo <= mid + d < hi:
-                            out[a].append((a_x, mid + d))
-                            out[b].append((b_x, mid + d))
-            if ay + ah == by or by + bh == ay:  # 上下相接
-                lo, hi = max(ax, bx), min(ax + aw, bx + bw)
-                if hi - lo >= 1:
-                    mid = (lo + hi) // 2
-                    a_y, b_y = (ay + ah - 1, by) if ay + ah == by else (ay, by + bh - 1)
-                    for d in range(-LINK_HALF, LINK_HALF + 1):
-                        if lo <= mid + d < hi:
-                            out[a].append((mid + d, a_y))
-                            out[b].append((mid + d, b_y))
-    return out
+def region_at(world: "Neo4jWorld", cell: Cell) -> Optional[str]:
+    """这一格属于哪个地点（墙、篱笆、荒野不属于任何地点）。"""
+    t = terrain_of(world)
+    return t.owner_at(cell) if t else None
 
 
 def _item_cells(world: "Neo4jWorld", areas: Dict[str, Area]) -> Tuple[Dict[str, List[Cell]], Set[Cell]]:
-    """每个区域里物品占的世界格子；以及固定物（挡路）占的格子。"""
+    """每个地点里物品占的世界格子；以及固定物（挡路）占的格子。"""
     rows = world.run_query(
         """
         MATCH (i:Item)-[:LOCATED_AT]->(l:Location)
         WHERE i.x IS NOT NULL AND i.y IS NOT NULL
         RETURN l.name AS loc, i.x AS x, i.y AS y, coalesce(i.portable, true) AS portable,
-               coalesce(i.footprint_w, 1) AS w, coalesce(i.footprint_h, 1) AS h
+               coalesce(i.footprint_w, 1) AS w, coalesce(i.footprint_h, 1) AS h,
+               coalesce(i.item_kind, '') AS kind, coalesce(i.locked, false) AS locked
         """
     ) or []
     per: Dict[str, List[Cell]] = {n: [] for n in areas}
@@ -465,36 +628,41 @@ def _item_cells(world: "Neo4jWorld", areas: Dict[str, Area]) -> Tuple[Dict[str, 
             continue
         footprint = list(cells(area[0] + _int(r["x"]), area[1] + _int(r["y"]), _int(r["w"], 1), _int(r["h"], 1)))
         per[r["loc"]].extend(footprint)
-        if not r.get("portable", True):
+        if str(r.get("kind") or "").lower() == "door":
+            if r.get("locked"):
+                blocked.update(footprint)  # 锁着的门挡住门洞；开了就能走过去
+        elif not r.get("portable", True):
             blocked.update(footprint)
     return per, blocked
 
 
-_SHAPE_CACHE: Dict[Any, Dict[str, Set[Cell]]] = {}
+def walkable_cells(world: "Neo4jWorld", areas: Optional[Dict[str, Area]] = None) -> Set[Cell]:
+    """所有地点的地（含门洞），去掉固定物占的格子、锁着的门洞。墙和篱笆本来就不在里面。"""
+    t = terrain_of(world)
+    if t is None:
+        return set()
+    areas = areas if areas is not None else region_areas(world)
+    _, blocked = _item_cells(world, areas)
+    # 锁着的门：门洞那一格不能走（门还没摆到门洞上也一样）；只「锁着相邻」、还没打开的也一样
+    for d in door_pairs(world).values():
+        if d["locked"]:
+            blocked.update(w.cell for w in t.doorways_between(d["here"], d["other"]))
+    for r in world.run_query(
+        """
+        MATCH (a:Location)-[:LOCKED_ADJACENT_TO]-(b:Location)
+        WHERE a.name < b.name AND NOT (a)-[:ADJACENT_TO]-(b)
+        RETURN a.name AS a, b.name AS b
+        """
+    ) or []:
+        blocked.update(w.cell for w in t.doorways_between(r["a"], r["b"]))
+    return t.walkable() - blocked
 
 
 def region_shapes(world: "Neo4jWorld", areas: Optional[Dict[str, Area]] = None,
                   item_cells: Optional[Dict[str, List[Cell]]] = None) -> Dict[str, Set[Cell]]:
-    """所有区域的形状（同样的布局 + 物品位置只算一次）。"""
-    areas = areas if areas is not None else region_areas(world)
-    if item_cells is None:
-        item_cells, _ = _item_cells(world, areas)
-    key = (
-        tuple(sorted(areas.items())),
-        tuple(sorted((n, tuple(sorted(c))) for n, c in item_cells.items())),
-    )
-    hit = _SHAPE_CACHE.get(key)
-    if hit is not None:
-        return hit
-    links = region_links(areas)
-    shapes = {
-        name: region_shape(name, area, list(links.get(name, [])) + list(item_cells.get(name, [])))
-        for name, area in areas.items()
-    }
-    if len(_SHAPE_CACHE) > 64:
-        _SHAPE_CACHE.clear()
-    _SHAPE_CACHE[key] = shapes
-    return shapes
+    """每个地点在地形上的地（世界格子，含门洞，不含墙）。"""
+    t = terrain_of(world)
+    return dict(t.cells_by_region()) if t else {}
 
 
 def shape_rows(shape: Set[Cell], area: Area) -> List[str]:
@@ -563,18 +731,20 @@ def _stable_hash(text: str) -> int:
     return h
 
 
-def resting_spot(walkable: Set[Cell], area: Area, who: str) -> Optional[Cell]:
-    """区域里给某人的落脚点：中心附近，按名字错开，免得大家叠在一个格子上。"""
-    ax, ay, aw, ah = area
+def resting_spot(walkable: Set[Cell], terrain: Terrain, region: str, who: str) -> Optional[Cell]:
+    """地点里给某人的落脚点：中间附近，按名字错开，免得大家叠在一个格子上；不站在门洞里。"""
+    inside = [c for c in terrain.cells_of(region) if c in walkable and terrain.kind_at(c) != DOOR]
+    mid = terrain.anchor(region)
+    if not inside or mid is None:
+        return None
     jitter = _stable_hash(who)
-    cx = ax + aw // 2 + (jitter % 7) - 3
-    cy = ay + ah // 2 + (jitter // 7 % 5) - 2
-    inside = [c for c in walkable if ax <= c[0] < ax + aw and ay <= c[1] < ay + ah]
-    return min(inside, key=lambda c: (_octile(c, (cx, cy)), c)) if inside else None
+    cx = mid[0] + (jitter % 7) - 3
+    cy = mid[1] + (jitter // 7 % 5) - 2
+    return min(inside, key=lambda c: (_octile(c, (cx, cy)), c))
 
 
 def person_cell(world: "Neo4jWorld", name: str) -> Optional[Cell]:
-    """人的世界坐标；没有、或不在自己所在区域里（被脚本挪走过）时就地补一个并存下。"""
+    """人的世界坐标；没有、或不在自己所在地点的地上（被脚本挪走过）时就地补一个并存下。"""
     rows = world.run_query(
         """
         MATCH (p:Person {name: $n})
@@ -586,16 +756,16 @@ def person_cell(world: "Neo4jWorld", name: str) -> Optional[Cell]:
     if not rows:
         return None
     r = rows[0]
-    areas = region_areas(world)
-    area = areas.get(r.get("loc") or "")
-    if area is None:
+    t = terrain_of(world)
+    loc = r.get("loc") or ""
+    if t is None or not t.cells_of(loc):
         return None
-    walkable = walkable_cells(world, areas)
+    walkable = walkable_cells(world)
     if r.get("x") is not None and r.get("y") is not None:
         cell = (_int(r["x"]), _int(r["y"]))
-        if region_at({r["loc"]: area}, cell) and cell in walkable:
+        if t.owner_at(cell) == loc and cell in walkable:
             return cell
-    spot = resting_spot(walkable, area, name)
+    spot = resting_spot(walkable, t, loc, name)
     if spot:
         set_person_cell(world, name, spot)
     return spot
@@ -656,37 +826,37 @@ _APPROACH_BY_NAME = {"use_on": 2, "interact": 1}
 
 
 def plan_walk(world: "Neo4jWorld", actor: str, action_name: str, args: List[Any]) -> Optional[Walk]:
-    """执行这个动作之前要走的路；不用走（或这个世界没有布局）返回 None。"""
+    """执行这个动作之前要走的路；不用走（或这个世界没有地形）返回 None。"""
     from content import get_content
 
-    areas = region_areas(world)
-    if not areas:
+    t = terrain_of(world)
+    if t is None:
         return None
     start = person_cell(world, actor)
     if start is None:
         return None
-    walkable = walkable_cells(world, areas) | {start}
+    walkable = walkable_cells(world) | {start}
     capability = get_content().capability_of(action_name)
 
     if capability == "travel":
-        area = areas.get(str(args[2])) if len(args) > 2 else None
-        spot = resting_spot(walkable, area, actor) if area else None
+        target = str(args[2]) if len(args) > 2 else ""
+        spot = resting_spot(walkable, t, target, actor) if target in t.names else None
         goals = {spot} if spot else set()
     else:
         idx = _APPROACH_BY_NAME.get(action_name, _APPROACH_ARG.get(capability or ""))
         if idx is None or idx >= len(args) or str(args[idx]) == actor:
             return None
-        target = entity_world_cells(world, str(args[idx]))
-        if not target:
+        target_cells = entity_world_cells(world, str(args[idx]))
+        if not target_cells:
             return None
-        if any(_octile(start, t) <= REACH for t in target):
+        if any(_octile(start, c) <= REACH for c in target_cells):
             return None
         goals = {
             (tx + dx, ty + dy)
-            for tx, ty in target
+            for tx, ty in target_cells
             for dx in (-1, 0, 1)
             for dy in (-1, 0, 1)
-            if (tx + dx, ty + dy) not in target
+            if (tx + dx, ty + dy) not in target_cells
         }
     path = find_path(walkable, start, goals)
     if not path or len(path) < 2:
@@ -695,12 +865,13 @@ def plan_walk(world: "Neo4jWorld", actor: str, action_name: str, args: List[Any]
 
 
 def move_person_freely(world: "Neo4jWorld", name: str, cell: Cell) -> Dict[str, Any]:
-    """玩家在无缝世界里自由走动：写下坐标；走进别的区域就换所在区域（不要求走 move 动作）。"""
-    areas = region_areas(world)
-    if cell not in walkable_cells(world, areas):
+    """玩家在无缝世界里自由走动：写下坐标；走进别的地点就换所在地点（不要求走 move 动作）。"""
+    if cell not in walkable_cells(world):
         return {"ok": False, "error": "Can't stand there"}
-    region = region_at(areas, cell)
+    region = region_at(world, cell)
     before = person_region_name(world, name)
+    if region and before and region != before and not open_between(world, before, region):
+        return {"ok": False, "error": f"There is no open way from {before} into {region}"}
     set_person_cell(world, name, cell)
     if region and region != before:
         world.run_query(
@@ -732,10 +903,15 @@ VIEW_RADIUS = 8.0
 def people_near(
     world: "Neo4jWorld", name: str, *, radius: float = VIEW_RADIUS, hidden: Iterable[str] = ()
 ) -> Optional[List[str]]:
-    """离 name 不超过 radius 格的其他活人（不分区域）；这个世界没有布局时返回 None。"""
+    """离 name 不超过 radius 格、又没隔着墙的其他活人；这个世界没有地形时返回 None。
+
+    隔着墙 = 两人在不同的地点，其中一处在屋里（屋里的人看不见屋外，反过来也一样）。
+    """
     me = person_cell(world, name)
-    if me is None:
+    t = terrain_of(world)
+    if me is None or t is None:
         return None
+    mine = t.owner_at(me)
     rows = world.run_query(
         """
         MATCH (p:Person)
@@ -749,6 +925,10 @@ def people_near(
     out = []
     for r in rows:
         cell = person_cell(world, r["name"])
-        if cell is not None and _octile(me, cell) <= radius:
-            out.append(r["name"])
+        if cell is None or _octile(me, cell) > radius:
+            continue
+        theirs = t.owner_at(cell)
+        if theirs != mine and (mine in t.indoor or theirs in t.indoor):
+            continue
+        out.append(r["name"])
     return sorted(out)

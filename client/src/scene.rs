@@ -1,5 +1,6 @@
-//! The seamless world: one big grid of cells. Regions (Forest, Clearing, …) are named
-//! areas on it with no walls between them; the player walks anywhere that is open.
+//! The seamless world: one big grid of cells. Regions (Forest, Clearing, a tavern's taproom…)
+//! are patches of it that fit into each other; rooms sit inside walled buildings. Walls and
+//! fences block the way, doorways let you through; the player walks anywhere that is open.
 
 use bevy::{math::Isometry2d, prelude::*};
 use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
@@ -7,7 +8,7 @@ use std::cmp::Reverse;
 use std::time::{Duration, Instant};
 
 use crate::icons::{icon_for, IconAtlas};
-use crate::terrain::RegionImages;
+use crate::terrain::{RegionImages, StructureImage};
 use crate::net::{NetBridge, Thing, WorldSnapshot};
 use crate::ui::{NearbyInteract, UiState};
 
@@ -32,6 +33,8 @@ const REGION_COLORS: [(f32, f32, f32); 6] = [
     (0.12, 0.13, 0.17),
     (0.14, 0.16, 0.11),
 ];
+/// Floors of indoor rooms: warm wood, a little different per room.
+const FLOOR_COLORS: [(f32, f32, f32); 3] = [(0.30, 0.22, 0.15), (0.27, 0.20, 0.14), (0.32, 0.24, 0.17)];
 
 #[derive(Component)]
 pub struct PlayerAvatar;
@@ -163,7 +166,8 @@ pub fn rebuild_walk_grid(world: Res<WorldSnapshot>, mut grid: ResMut<WalkGrid>) 
     }
     for item in &world.world.items {
         let Some(cell) = item.cell() else { continue };
-        if item.portable {
+        // Things on the ground don't block; an open door is a doorway you walk through.
+        if item.portable || (item.is_door() && !item.locked) {
             continue;
         }
         let size = item.footprint();
@@ -273,7 +277,7 @@ pub fn setup_scene(mut commands: Commands) {
     commands.spawn((
         Sprite {
             color: Color::srgb(0.25, 0.72, 1.0),
-            custom_size: Some(Vec2::splat(TILE * 0.8)),
+            custom_size: Some(Vec2::splat(TILE * 1.0)),
             ..default()
         },
         Transform::from_xyz(0.0, 0.0, 10.0),
@@ -287,6 +291,7 @@ pub fn render_scene(
     mut scene: ResMut<SceneState>,
     icons: Res<IconAtlas>,
     ground: Res<RegionImages>,
+    structures: Res<StructureImage>,
     existing: Query<Entity, With<SceneEntity>>,
 ) {
     if scene.revision == Some(world.revision) {
@@ -303,7 +308,11 @@ pub fn render_scene(
     }
 
     for (i, region) in world.world.regions.iter().enumerate() {
-        let (r, g, b) = REGION_COLORS[i % REGION_COLORS.len()];
+        let (r, g, b) = if region.indoor {
+            FLOOR_COLORS[i % FLOOR_COLORS.len()]
+        } else {
+            REGION_COLORS[i % REGION_COLORS.len()]
+        };
         let size = Vec2::new(region.w as f32, region.h as f32) * TILE;
         let center = Vec2::new(region.x as f32 * TILE, -(region.y as f32) * TILE) + Vec2::new(size.x, -size.y) * 0.5;
         commands.spawn((
@@ -316,15 +325,30 @@ pub fn render_scene(
             Transform::from_xyz(center.x, center.y, -4.0),
             SceneEntity,
         ));
-        let corner = Vec2::new(region.x as f32 * TILE, -(region.y as f32) * TILE);
+        // Name in the middle of the place's own ground (a nested building's rooms have their own).
+        let label = cell_center(region.center());
         commands.spawn((
             Text2d::new(region.name.clone()),
             TextFont {
-                font_size: 18.0,
+                font_size: if region.indoor { 14.0 } else { 18.0 },
                 ..default()
             },
             TextColor(Color::srgba(0.85, 0.90, 0.85, 0.55)),
-            Transform::from_xyz(corner.x + size.x * 0.5, corner.y - 16.0, -3.0),
+            Transform::from_xyz(label.x, label.y + TILE * 0.5, -3.0),
+            SceneEntity,
+        ));
+    }
+
+    // Walls, fences, water and doorways over the ground.
+    if let Some(image) = structures.get() {
+        let size = Vec2::new(world.world.width as f32, world.world.height as f32) * TILE;
+        commands.spawn((
+            Sprite {
+                image,
+                custom_size: Some(size),
+                ..default()
+            },
+            Transform::from_xyz(size.x * 0.5, -size.y * 0.5, -3.5),
             SceneEntity,
         ));
     }
@@ -406,6 +430,12 @@ fn spawn_thing(commands: &mut Commands, icons: &IconAtlas, thing: &Thing, positi
 }
 
 fn item_label(thing: &Thing) -> String {
+    if !thing.needs.is_empty() {
+        return format!("{} (needs {})", thing.name, thing.needs);
+    }
+    if let Some(stock) = thing.stock {
+        return format!("{} ({stock} left)", thing.name);
+    }
     if thing.is_fixture() || thing.item_kind.is_empty() {
         thing.name.clone()
     } else if thing.locked {
@@ -677,4 +707,22 @@ mod tests {
         assert_eq!(path.last(), Some(&IVec2::new(2, 1)));
         assert!(!path.contains(&IVec2::new(1, 1)));
     }
+}
+
+/// The player's figure (blue outfit), once we know their name.
+pub fn player_look(
+    world: Res<WorldSnapshot>,
+    mut looks: ResMut<crate::icons::PersonIcons>,
+    mut images: ResMut<Assets<Image>>,
+    mut player: Query<&mut Sprite, With<PlayerAvatar>>,
+    mut drawn_as: Local<String>,
+) {
+    let name = &world.player.name;
+    if name.is_empty() || *drawn_as == *name {
+        return;
+    }
+    let Ok(mut sprite) = player.single_mut() else { return };
+    sprite.image = looks.get(name, false, true, &mut images);
+    sprite.color = Color::WHITE;
+    *drawn_as = name.clone();
 }

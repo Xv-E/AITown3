@@ -5,6 +5,7 @@ Web world simulator — bridges GameLoop with UI plan state (continuous clock).
 from __future__ import annotations
 
 import os
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -390,8 +391,26 @@ class WorldSimulator:
                 "state_label": _state_label(content, states.get(name)),
                 "trigger": trig.get("text") if isinstance(trig, dict) else None,
                 **self._plan_brief(name),
+                "request": self._request_brief(world, name),
+                "thinking_hard": self._thinking_hard(name),
             })
         return out
+
+    def _thinking_hard(self, name: str) -> bool:
+        """背景 NPC 此刻临时在用大模型想事情（急事 / 卡住）。"""
+        loop = self._game_loop
+        state = loop.get_agent_state(name) if loop else None
+        return bool(state is not None and loop.sim_time < state.escalated_until)
+
+    def _request_brief(self, world, name: str) -> str:
+        """头顶的「!」：他挂着的委托（"needs stone (3c)"）。"""
+        try:
+            from job_board import open_requests
+
+            mine = [r for r in open_requests(world) if r["poster"] == name]
+        except Exception:  # noqa: BLE001
+            return ""
+        return "; ".join(f"needs {r['kind']}" + (f" ({r['reward']}c)" if r.get("reward") else "") for r in mine)
 
     def _plan_brief(self, name: str) -> Dict[str, Any]:
         """头顶小字用：第几步 / 共几步、这一步写成人话、此刻在干什么。"""
@@ -573,6 +592,33 @@ class WorldSimulator:
         force_mock: bool = False,
         instant: bool = False,
         include_player: bool = False,
+    ) -> Dict[str, Any]:
+        # 整拍（同步角色、GameLoop.tick、汇总结果）共用一个读缓存作用域；开头批量预加载常用的单条读
+        read_cache = getattr(world, "read_cache", None)
+        with read_cache() if read_cache else nullcontext():
+            self._ensure_loop(world).preload_tick_reads()
+            return self._tick_cached(
+                world,
+                dt,
+                characters=characters,
+                auto_plan=auto_plan,
+                use_llm=use_llm,
+                force_mock=force_mock,
+                instant=instant,
+                include_player=include_player,
+            )
+
+    def _tick_cached(
+        self,
+        world,
+        dt: float,
+        *,
+        characters: Optional[List[str]],
+        auto_plan: bool,
+        use_llm: bool,
+        force_mock: bool,
+        instant: bool,
+        include_player: bool,
     ) -> Dict[str, Any]:
         use_mock = force_mock or not use_llm
         self.sync_agents(world, force_mock=use_mock)

@@ -6,17 +6,20 @@
     {
       "name": "Hall",
       "description": "A stone hall. A sealed vault door stands to the north.",
-      "tags": "hub"
+      "tags": "hub",
+      "indoor": true
     },
     {
       "name": "Storage",
       "description": "A dusty storeroom; something may be hidden on the shelves.",
-      "tags": "item"
+      "tags": "item",
+      "indoor": true
     },
     {
       "name": "Vault",
       "description": "The vault inner chamber. Enter only after the door is open.",
-      "tags": "secret,goal"
+      "tags": "secret,goal",
+      "indoor": true
     }
   ],
   "adjacencies": [

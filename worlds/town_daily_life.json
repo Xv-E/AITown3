@@ -6,7 +6,7 @@
     {
       "name": "CampfireClearing",
       "description": "The heart of the camp. The campfire burns day and night; meals, chatter, and night watch all happen here.",
-      "tags": "hub,fire,social,meal",
+      "tags": "hub,fire,social,meal,build",
       "area": [20, 13, 20, 14]
     },
     {
@@ -24,13 +24,15 @@
     {
       "name": "RiverBank",
       "description": "A shallow riverbank. A place to fetch water, rest, and whisper secrets.",
-      "tags": "social,water",
+      "tags": "social,water,build",
       "area": [20, 27, 20, 13]
     },
     {
       "name": "Shelter",
       "description": "A rough wooden lean-to. Everyone sleeps packed together here at night.",
       "tags": "home,rest",
+      "indoor": true,
+      "parent": "CampfireClearing",
       "area": [20, 0, 20, 13]
     }
   ],
@@ -57,6 +59,7 @@
       "name": "Observer",
       "located_at": "CampfireClearing",
       "role": "player",
+      "coins": 15,
       "personality": "curious, quiet, helpful",
       "background": "A newcomer watching how the camp survives: wood, berries, and the shared fire.",
       "goal": "Learn how the camp keeps the fire and feeds itself",
@@ -111,6 +114,8 @@
       "name": "Rowan",
       "located_at": "Forest",
       "role": "npc",
+      "brain": "routine",
+      "coins": 8,
       "personality": "blunt, tireless, loyal",
       "background": "Camp lumberjack. Chops wood all morning and afternoon, hauls logs to the fire, worries the forest is thinning.",
       "goal": "Cut enough wood to keep the campfire alive",
@@ -188,6 +193,8 @@
       "name": "Sage",
       "located_at": "BerryGrove",
       "role": "npc",
+      "brain": "llm",
+      "coins": 8,
       "personality": "gentle, observant, practical",
       "background": "Gatherer. Picks berries, knows which bushes are ripe, and believes food shared at the fire keeps the camp kind.",
       "goal": "Gather berries and roast them for the camp",
@@ -266,6 +273,8 @@
       "name": "Ash",
       "located_at": "CampfireClearing",
       "role": "npc",
+      "brain": "llm",
+      "coins": 8,
       "personality": "watchful, anxious, caring",
       "background": "Firekeeper and cook. Stays near the Campfire, begs others for wood, and panics when fuel runs low. Night watch is theirs.",
       "goal": "Never let the campfire die",
@@ -345,6 +354,9 @@
       "name": "Reed",
       "located_at": "RiverBank",
       "role": "npc",
+      "brain": "routine",
+      "coins": 40,
+      "trader": true, "sells": ["axe", "rod", "food"], "shop_stock": 1,
       "personality": "restless, friendly, discreet",
       "background": "Hauler and messenger between grove, forest, and fire. Carries gossip with the loads; knows Ash fears the dark more than they admit.",
       "goal": "Keep people and supplies moving between work sites",
@@ -417,6 +429,8 @@
     }
   ],
   "items": [
+    {"name": "RockFace", "archetype": "rock_outcrop", "located_at": "Forest", "description": "A mossy rock face at the forest edge. Loose stones lie around it."},
+    {"name": "DeepPool", "archetype": "fishing_spot", "located_at": "RiverBank", "description": "A slow, deep pool under the willows. Fish rest here."},
     {
       "name": "Campfire",
       "archetype": "campfire",
@@ -456,52 +470,8 @@
         ]
       }
     },
-    {
-      "name": "ForestGrowth",
-      "value": 0,
-      "located_at": "Forest",
-      "item_kind": "source",
-      "portable": false,
-      "description": "Unseen growth of the woods — keeps dry wood available when scarce.",
-      "script": {
-        "lore": "The forest slowly yields more dry logs when pickings are scarce. Rowan worries it is thinning farther out each week.",
-        "on_tick": [
-          {
-            "op": "ensure_kind",
-            "item_kind": "wood",
-            "min": 3,
-            "at": "Forest",
-            "prefix": "Wood",
-            "spawn": {
-              "archetype": "firewood"
-            }
-          }
-        ]
-      }
-    },
-    {
-      "name": "BerryGrowth",
-      "value": 0,
-      "located_at": "BerryGrove",
-      "item_kind": "source",
-      "portable": false,
-      "description": "The grove keeps sprouting berries when emptied.",
-      "script": {
-        "lore": "Berry bushes refill when the grove is picked clean. Sage knows a second patch past the river after rain, but may keep it quiet.",
-        "on_tick": [
-          {
-            "op": "ensure_kind",
-            "item_kind": "berry",
-            "min": 3,
-            "at": "BerryGrove",
-            "prefix": "Berry",
-            "spawn": {
-              "archetype": "berry"
-            }
-          }
-        ]
-      }
-    },
+    {"name": "ForestGrowth", "value": 0, "located_at": "Forest", "item_kind": "deadwood", "portable": false, "description": "Fallen branches under the trees. Dry sticks for the fire.", "script": {"lore": "Fallen branches. Gather dry sticks here; more fall with time.", "state_props": ["stock"], "initial_state": {"stock": 4}, "on_tick": [{"op": "add_prop", "prop": "stock", "delta_per_sec": 0.012, "max": 4}]}},
+    {"name": "BerryGrowth", "value": 0, "located_at": "BerryGrove", "item_kind": "bush", "portable": false, "description": "Thick berry bushes. Ripe berries can be picked; more ripen with time.", "script": {"lore": "Berry bushes. Pick berries here; they ripen again over a few hours.", "state_props": ["stock"], "initial_state": {"stock": 4}, "on_tick": [{"op": "add_prop", "prop": "stock", "delta_per_sec": 0.012, "max": 4}]}},
     {
       "name": "OakTree",
       "value": 0,
@@ -906,38 +876,32 @@
     {
       "name": "Wood1",
       "archetype": "firewood",
-      "located_at": "Forest",
-      "respawn_at": "Forest"
+      "located_at": "Forest"
     },
     {
       "name": "Wood2",
       "archetype": "firewood",
-      "located_at": "Forest",
-      "respawn_at": "Forest"
+      "located_at": "Forest"
     },
     {
       "name": "Wood3",
       "archetype": "firewood",
-      "located_at": "Forest",
-      "respawn_at": "Forest"
+      "located_at": "Forest"
     },
     {
       "name": "Berry1",
       "archetype": "berry",
-      "located_at": "BerryGrove",
-      "respawn_at": "BerryGrove"
+      "located_at": "BerryGrove"
     },
     {
       "name": "Berry2",
       "archetype": "berry",
-      "located_at": "BerryGrove",
-      "respawn_at": "BerryGrove"
+      "located_at": "BerryGrove"
     },
     {
       "name": "Berry3",
       "archetype": "berry",
-      "located_at": "BerryGrove",
-      "respawn_at": "BerryGrove"
+      "located_at": "BerryGrove"
     }
   ],
   "quests": [

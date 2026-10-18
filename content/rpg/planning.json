@@ -1,0 +1,9 @@
+{
+  "spawn_pool_by": {
+    "log": 2,
+    "stone": 2,
+    "wood": 2,
+    "fish": 2
+  },
+  "conservation": true
+}

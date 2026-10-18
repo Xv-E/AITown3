@@ -11,6 +11,10 @@ if TYPE_CHECKING:
 
 from goal_manager import GoalManager
 
+# tick 开头会按这两条字符串批量预填读缓存（GameLoop._preload_tick_reads）
+HP_QUERY = "MATCH (p:Person {name: $n}) RETURN coalesce(p.hp, 0) AS hp LIMIT 1"
+LOCATION_QUERY = "MATCH (p:Person {name: $n})-[:LOCATED_AT]->(l:Location) RETURN l.name AS loc LIMIT 1"
+
 
 def _parse_values(raw: Any) -> List[str]:
     if raw is None:
@@ -148,18 +152,12 @@ class AgentProfile:
 
     @property
     def location(self) -> Optional[str]:
-        rows = self.world.run_query(
-            "MATCH (p:Person {name: $n})-[:LOCATED_AT]->(l:Location) RETURN l.name AS loc LIMIT 1",
-            n=self.name,
-        )
+        rows = self.world.run_query(LOCATION_QUERY, n=self.name)
         return rows[0]["loc"] if rows else None
 
     @property
     def hp(self) -> int:
-        rows = self.world.run_query(
-            "MATCH (p:Person {name: $n}) RETURN coalesce(p.hp, 0) AS hp LIMIT 1",
-            n=self.name,
-        )
+        rows = self.world.run_query(HP_QUERY, n=self.name)
         return int(rows[0]["hp"]) if rows else 0
 
     @property

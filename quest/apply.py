@@ -25,7 +25,8 @@ def apply_questline(world, patch: QuestlinePatch) -> Dict[str, Any]:
             hp=100, power_level=10, role="npc", is_player=False,
             personality=p.personality, background=p.background, goal=p.goal, mood=p.mood,
             secret=p.secret, speech_style=p.speech_style,
-            secret_policy="share_gossip", trust_toward_player=0,
+            secret_policy="share_gossip", trust_toward_player=0, brain="llm",  # 故事里的人用大模型想事情
+            coins=5, trader=False,
             **({"routine": json.dumps(p.routine, ensure_ascii=False)} if p.routine else {}),
         )
         world.link_entities(p.name, "Person", p.located_at, "Location", "LOCATED_AT")

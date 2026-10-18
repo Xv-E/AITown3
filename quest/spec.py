@@ -255,6 +255,11 @@ def validate(patch: QuestlinePatch, known: KnownWorld) -> List[str]:
             if action is None:
                 errors.append(f"{where}: {err}")
 
+    from content import get_content
+
+    if get_content().conservation:
+        errors += conservation_problems(patch)
+
     for c in patch.clues:
         if c.kind not in ("fact", "rumor"):
             errors.append(f"clue {c.name}: kind is fact or rumor")
@@ -355,4 +360,30 @@ def completeness_problems(patch: QuestlinePatch) -> List[str]:
             out.append(f"person {p.name}: give a daily routine of 2-4 slots (start, end, location, activity)")
     if patch.stages and not patch.stages[0].giver:
         out.append("the first stage needs a giver (who asks the player for help)")
+    return out
+
+
+def conservation_problems(patch: QuestlinePatch) -> List[str]:
+    """守恒：奖励和物品动作不能凭空生成东西；给钱只能从别人的钱里转。"""
+    out: List[str] = []
+    groups = [(f"stage {st.id} reward", st.reward) for st in patch.stages] + [
+        (f"item {it.name} action {a.get('id')}", a.get("effects") or [])
+        for it in patch.items for a in it.actions if isinstance(a, dict)
+    ]
+    for where, ops in groups:
+        coins = 0.0
+        for op in ops or []:
+            if not isinstance(op, dict):
+                continue
+            if op.get("op") == "spawn_item":
+                out.append(f"{where}: nothing may appear from nowhere (no spawn_item). Put the item in the world "
+                           "(located_at a region or held_by someone) and hand it over with unlink/link, "
+                           "or let the player make it")
+            if op.get("op") == "add_prop" and op.get("prop") == "coins":
+                try:
+                    coins += float(op.get("delta") or 0) * float(op.get("scale", 1))
+                except (TypeError, ValueError):
+                    pass
+        if coins > 0:
+            out.append(f"{where}: coins can only move between people - take as many from the giver as the player gets")
     return out

@@ -29,7 +29,11 @@ def _person_state(world, name: str) -> Optional[Dict[str, Any]]:
                p.parent_goal AS parent_goal,
                coalesce(p.goal, '') AS goal,
                p.values AS values,
-               p.mood AS mood
+               p.mood AS mood,
+               coalesce(p.coins, 0) AS coins,
+               coalesce(p.trader, false) AS trader,
+               coalesce(p.follows, '') AS follows,
+               [(p)-[:ALLY]->(o:Person) | o.name] AS allies
         """,
         name=name,
     )
@@ -58,6 +62,10 @@ def _person_state(world, name: str) -> Optional[Dict[str, Any]]:
         "goal": r.get("goal") or "",
         "values": r.get("values") or "",
         "mood": r.get("mood") or "",
+        "coins": int(float(r.get("coins") or 0)),
+        "trader": bool(r.get("trader")),
+        "follows": r.get("follows") or "",
+        "allies": sorted(x for x in (r.get("allies") or []) if x),
     }
 
 
@@ -192,7 +200,9 @@ def _items_at_location(world, loc: str) -> List[Dict[str, Any]]:
                i.script AS script,
                i.x AS x, i.y AS y,
                coalesce(i.footprint_w, 1) AS w, coalesce(i.footprint_h, 1) AS h,
-               coalesce(i.archetype, '') AS archetype
+               coalesce(i.archetype, '') AS archetype,
+               [k IN keys(i) WHERE k STARTS WITH 'need_' AND i[k] > 0 | substring(k, 5) + ' ' + toString(i[k])] AS needs,
+               i.stock AS stock
         ORDER BY name
         """,
         loc=loc,
@@ -215,6 +225,8 @@ def _items_at_location(world, loc: str) -> List[Dict[str, Any]]:
         item = {
             "name": r["name"],
             "value": int(r.get("value") or 0),
+            "needs": list(r.get("needs") or []),
+            "stock": int(float(r["stock"])) if r.get("stock") is not None else None,
             "description": r.get("description") or "",
             "quest_flag": r.get("quest_flag") or "",
             "item_kind": r.get("item_kind") or "",
@@ -578,7 +590,9 @@ def get_location_info(world, loc: str) -> Optional[Dict[str, Any]]:
         MATCH (l:Location {name: $loc})
         RETURN l.name AS name,
                coalesce(l.description, '') AS description,
-               coalesce(l.tags, '') AS tags
+               coalesce(l.tags, '') AS tags,
+               coalesce(l.indoor, false) AS indoor,
+               coalesce(l.parent, '') AS parent
         """,
         loc=loc,
     )
@@ -594,6 +608,8 @@ def get_location_info(world, loc: str) -> Optional[Dict[str, Any]]:
         "tags": r.get("tags") or "",
         "grid_w": grid_w,
         "grid_h": grid_h,
+        "indoor": bool(r.get("indoor")),
+        "parent": r.get("parent") or "",
     }
 
 
@@ -706,37 +722,66 @@ def get_character_actions(world, person: str) -> Dict[str, Any]:
 
 
 def world_view(world, viewer: Optional[str]) -> Dict[str, Any]:
-    """无缝世界的全貌（世界格子坐标）：区域范围、地上的东西、所有人站在哪。"""
-    from spatial import person_cell, region_areas, region_shapes, shape_rows
+    """无缝世界的全貌（世界格子坐标）：地形、各地点的地、地上的东西、所有人站在哪。"""
+    from spatial import person_cell, region_areas, region_shapes, shape_rows, terrain_of
+    from rpg_content import gather_options, gather_node_kinds
 
+    terrain = terrain_of(world)
     areas = region_areas(world)
+    node_kinds = gather_node_kinds()
+    try:
+        from spatial import place_doors
+
+        place_doors(world, areas)  # 门要在门洞里（老存档 / 手摆的世界也对得上）
+    except Exception:  # noqa: BLE001
+        pass
     shapes = region_shapes(world, areas)
     regions = []
     items: List[Dict[str, Any]] = []
     for name, (ax, ay, aw, ah) in sorted(areas.items()):
         info = get_location_info(world, name) or {}
+        mid = terrain.anchor(name) if terrain else None
         regions.append({
             "name": name, "x": ax, "y": ay, "w": aw, "h": ah,
-            # 形状：每行一串 '#'（地）/ '.'（空），区域不再是方方正正的
+            # 这个地点自己的地：每行一串 '#'（地）/ '.'（不是：墙、别的地点、嵌在里面的房子）
             "rows": shape_rows(shapes.get(name, set()), (ax, ay, aw, ah)),
             "description": info.get("description") or "",
             "tags": info.get("tags") or "",
+            "indoor": bool(terrain and name in terrain.indoor),
+            "parent": (terrain.parents.get(name, "") if terrain else ""),
+            # 标签 / 走过去的落脚处：地点中间的一格
+            "cx": mid[0] if mid else None,
+            "cy": mid[1] if mid else None,
         })
         for it in _items_at_location(world, name):
             if it.get("x") is None or it.get("y") is None:
                 continue
             entry = {k: it.get(k) for k in ("name", "item_kind", "portable", "locked", "description", "w", "h")}
+            # 工地还缺什么（"3 log, 2 stone"）、采集点还剩多少
+            entry["needs"] = ", ".join(it.get("needs") or [])
+            if it.get("stock") is not None:
+                entry["stock"] = int(float(it.get("stock") or 0))
             entry.update(region=name, x=ax + int(it["x"]), y=ay + int(it["y"]))
             if _is_interactable_item(it) and viewer:
                 entry["actions"] = _with_item_actions(world, viewer, it)["actions"]
+            if viewer and str(it.get("item_kind") or "").lower() in node_kinds:
+                # 采集点：采集动作（砍、采、钓……）和作者写的动作并列
+                entry["actions"] = list(entry.get("actions") or []) + gather_options(world, viewer, it["name"])
             items.append(entry)
     persons = []
     for c in list_characters(world):
         cell = person_cell(world, c["name"])
         persons.append({**c, "x": cell[0] if cell else None, "y": cell[1] if cell else None})
-    width = max((x + w for x, _, w, _ in areas.values()), default=0)
-    height = max((y + h for _, y, _, h in areas.values()), default=0)
-    return {"width": width, "height": height, "regions": regions, "items": items, "persons": persons}
+    if terrain is not None:
+        width, height = terrain.width, terrain.height
+        # 整张地形的格子种类：'.' 室外地 ',' 室内地板 '+' 门洞 '#' 墙 '%' 篱笆 '~' 水 ' ' 荒野
+        tiles = terrain.kind_rows()
+    else:
+        width = max((x + w for x, _, w, _ in areas.values()), default=0)
+        height = max((y + h for _, y, _, h in areas.values()), default=0)
+        tiles = []
+    return {"width": width, "height": height, "regions": regions, "items": items, "persons": persons,
+            "tiles": tiles}
 
 
 def get_play_state(world) -> Dict[str, Any]:

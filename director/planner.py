@@ -69,6 +69,8 @@ Persons are PLACEHOLDERS only (name/role/located_at). Full NPC profiles come in 
 Rules:
 - Keep skeleton cast / macguffin / key / door / quest names EXACTLY.
 - 3-5 locations (include start_location and goal_location), connected adjacencies.
+- Rooms inside a building (tavern, shop, cellar, vault...) are their own locations with
+  indoor=true and parent=<the outdoor location the building stands in>; outdoor places omit both.
 - For key_door: do NOT put goal_location in open adjacencies; goal is reached via unlocking later.
 - persons: one stub per cast member; put them at fitting locations (player at start).
 - Items: place macguffin/key/door correctly. Doors: item_kind=door, locked=true, portable=false,
@@ -81,7 +83,7 @@ Rules:
 
 WORLD_SCHEMA = """
 Required JSON keys:
-locations[{name,description,tags}],
+locations[{name,description,tags,indoor,parent}],
 adjacencies[{a,b}],
 persons[{name,located_at,role}],
 items[{name,value,located_at,held_by,owned_by,quest_flag,description,item_kind,locked,portable,

@@ -9,6 +9,8 @@ content/<pack>/ 下的 JSON：
   content/<pack>/states/*.json      角色持续状态（如 asleep）
   content/<pack>/archetypes/*.json  物品原型（如 campfire / stove）
   content/<pack>/planning.json      PDDL 自动编译的手动剪枝（见 planner/compiler.py）
+  content/<pack>/gathering/*.json   采集点（展开成 gather_<id> 动作，见 rpg_content.py）
+  content/<pack>/recipes/*.json     配方（展开成 craft_<id> 动作）
 
 启用的包由环境变量 AITOWN_CONTENT_PACKS（逗号分隔）决定；未设置时加载 base
 以及 content/ 下其余所有带 pack.json 的包（按名字）。后加载的包覆盖同名定义。
@@ -114,6 +116,12 @@ class ContentRegistry:
     def archetype(self, name: str) -> Optional[Dict[str, Any]]:
         return self.archetypes.get((name or "").strip().lower())
 
+    @property
+    def conservation(self) -> bool:
+        """守恒：东西只能采集、制造出来（planning.json "conservation": true）。
+        关掉自动补货、禁止任务 / 剧情凭空生成东西或给钱。"""
+        return bool(self.planning.get("conservation"))
+
 
 _lock = threading.Lock()
 _content: Optional[ContentRegistry] = None
@@ -166,6 +174,16 @@ def load_packs(packs: List[str], *, root: Path = CONTENT_ROOT) -> ContentRegistr
                     reg.errors.append(f"{path.name}: {err}")
                     continue
                 reg.actions[spec["name"]] = spec
+        from rpg_content import expand_gather, expand_recipe
+
+        for folder, expand in (("gathering", expand_gather), ("recipes", expand_recipe)):
+            for path in _json_files(base / folder):
+                for spec in _read_specs(path, reg):
+                    action, err = expand(spec)
+                    if action is None:
+                        reg.errors.append(f"{folder}/{path.name}: {err}")
+                        continue
+                    reg.actions[action["name"]] = action
         for path in _json_files(base / "states"):
             for spec in _read_specs(path, reg):
                 if not spec.get("name"):

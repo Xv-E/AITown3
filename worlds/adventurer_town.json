@@ -1,0 +1,699 @@
+{
+  "id": "adventurer_town",
+  "title": "Adventurer's Rest",
+  "premise": "A frontier town that lives off adventurers. The guild hands out work, the smith forges their gear from quarry stone and forest logs, the inn feeds them, and the market trades whatever they bring back. Beneath the Guild Hall lies a crypt the guildmaster sealed years ago, after his own party died there.",
+  "locations": [
+    {
+      "name": "TownSquare",
+      "description": "Cobbled square with a well. Everyone passes through here.",
+      "tags": "hub,social,build",
+      "area": [22, 14, 22, 14]
+    },
+    {
+      "name": "GuildHall",
+      "description": "The adventurers' guild: a long hall of maps and trophies. An iron gate at the back leads down to the old crypt.",
+      "tags": "guild,social",
+      "indoor": true,
+      "parent": "TownSquare",
+      "area": [24, 2, 18, 12]
+    },
+    {
+      "name": "Crypt",
+      "description": "Cold stone vaults under the Guild Hall, sealed for years. Something old is still down here.",
+      "tags": "dungeon,danger",
+      "indoor": true,
+      "parent": "TownSquare",
+      "area": [6, 2, 18, 12]
+    },
+    {
+      "name": "Tavern",
+      "description": "The Rusty Tankard: smoke, stew and stories. Rooms upstairs for whoever can pay.",
+      "tags": "food,social,rest,meal",
+      "indoor": true,
+      "parent": "TownSquare",
+      "area": [4, 14, 18, 14]
+    },
+    {
+      "name": "Smithy",
+      "description": "Mira's forge. Hammers ring from dawn; tools and weapons hang on the walls.",
+      "tags": "work,craft",
+      "indoor": true,
+      "parent": "TownSquare",
+      "area": [44, 14, 16, 14]
+    },
+    {
+      "name": "Market",
+      "description": "Stalls and carts. Raw goods change hands here every day.",
+      "tags": "trade,build",
+      "area": [23, 28, 20, 12]
+    },
+    {
+      "name": "Forest",
+      "description": "Old woods south-west of town: fallen branches, a great oak, berry thickets.",
+      "tags": "work,wood,food",
+      "area": [0, 28, 23, 18]
+    },
+    {
+      "name": "Quarry",
+      "description": "A cut rock face north-east of the smithy. Good stone for the forge.",
+      "tags": "work,stone",
+      "area": [44, 2, 16, 12]
+    },
+    {
+      "name": "RiverDocks",
+      "description": "Wooden piers on a slow river. Fish rise in the evening.",
+      "tags": "work,water,social",
+      "area": [43, 28, 18, 14]
+    }
+  ],
+  "adjacencies": [
+    {
+      "a": "TownSquare",
+      "b": "GuildHall"
+    },
+    {
+      "a": "TownSquare",
+      "b": "Tavern"
+    },
+    {
+      "a": "TownSquare",
+      "b": "Smithy"
+    },
+    {
+      "a": "TownSquare",
+      "b": "Market"
+    },
+    {
+      "a": "Market",
+      "b": "Forest"
+    },
+    {
+      "a": "Tavern",
+      "b": "Forest"
+    },
+    {
+      "a": "Market",
+      "b": "RiverDocks"
+    },
+    {
+      "a": "Smithy",
+      "b": "Quarry"
+    }
+  ],
+  "persons": [
+    {
+      "name": "Rookie",
+      "located_at": "TownSquare",
+      "role": "player",
+      "coins": 20,
+      "personality": "eager, curious",
+      "background": "A new adventurer who just arrived in town with a few coins.",
+      "goal": "Make a name in Adventurer's Rest",
+      "mood": "hopeful",
+      "hp": 100,
+      "power_level": 10
+    },
+    {
+      "name": "Brannoc",
+      "located_at": "GuildHall",
+      "role": "npc",
+      "brain": "llm",
+      "coins": 60,
+      "personality": "gruff, protective, haunted",
+      "values": "duty,caution,loyalty",
+      "background": "Guildmaster. Years ago he led a party into the crypt; only he came back. He sealed the gate and keeps the key.",
+      "goal": "Keep the town's adventurers alive and the crypt shut",
+      "secret": "He left his friends behind in the crypt to save himself.",
+      "speech_style": "short, heavy sentences",
+      "mood": "watchful",
+      "hp": 120,
+      "power_level": 18,
+      "routine": [
+        {
+          "start": 7,
+          "end": 20,
+          "location": "GuildHall",
+          "activity": "run the guild"
+        },
+        {
+          "start": 20,
+          "end": 23,
+          "location": "Tavern",
+          "activity": "one drink, alone",
+          "social": true
+        },
+        {
+          "start": 23,
+          "end": 7,
+          "location": "GuildHall",
+          "activity": "sleep",
+          "action": "sleep"
+        }
+      ]
+    },
+    {
+      "name": "Garrick",
+      "located_at": "Tavern",
+      "role": "npc",
+      "brain": "llm",
+      "coins": 15,
+      "personality": "bold, greedy, charming",
+      "values": "glory,wealth,freedom",
+      "background": "A sellsword down on his luck. He has heard the crypt holds a relic worth a fortune and wants in.",
+      "goal": "Get into the crypt and take the relic",
+      "mood": "restless",
+      "hp": 110,
+      "power_level": 16,
+      "speech_style": "loud and boastful",
+      "routine": [
+        {
+          "start": 9,
+          "end": 13,
+          "location": "TownSquare",
+          "activity": "look for work",
+          "social": true
+        },
+        {
+          "start": 13,
+          "end": 22,
+          "location": "Tavern",
+          "activity": "drink and boast",
+          "social": true
+        },
+        {
+          "start": 22,
+          "end": 9,
+          "location": "Tavern",
+          "activity": "sleep",
+          "action": "sleep"
+        }
+      ]
+    },
+    {
+      "name": "Lysa",
+      "located_at": "Forest",
+      "role": "npc",
+      "brain": "llm",
+      "coins": 12,
+      "personality": "quiet, sharp-eyed, kind",
+      "values": "nature,honesty,independence",
+      "background": "Ranger who knows every path in the woods. Brought half the town's firewood in last winter.",
+      "goal": "Keep the forest healthy and the town supplied",
+      "mood": "calm",
+      "hp": 100,
+      "power_level": 14,
+      "speech_style": "few words, precise",
+      "routine": [
+        {
+          "start": 6,
+          "end": 12,
+          "location": "Forest",
+          "activity": "walk the woods, gather sticks and berries",
+          "goal": "Collect item",
+          "target_entity": "kind:wood"
+        },
+        {
+          "start": 12,
+          "end": 14,
+          "location": "Tavern",
+          "activity": "lunch",
+          "social": true
+        },
+        {
+          "start": 14,
+          "end": 19,
+          "location": "Forest",
+          "activity": "tend the paths"
+        },
+        {
+          "start": 19,
+          "end": 6,
+          "location": "Forest",
+          "activity": "sleep",
+          "action": "sleep"
+        }
+      ]
+    },
+    {
+      "name": "Mira",
+      "located_at": "Smithy",
+      "role": "npc",
+      "brain": "routine",
+      "coins": 50,
+      "trader": true,
+      "sells": ["axe", "spear", "rod"],
+      "shop_stock": 1,
+      "personality": "proud, practical, blunt",
+      "values": "craft,honesty",
+      "background": "Blacksmith. Everything she sells she made herself, from quarry stone and forest wood.",
+      "goal": "Keep the racks full of good tools",
+      "mood": "busy",
+      "hp": 110,
+      "power_level": 13,
+      "speech_style": "clipped, no nonsense",
+      "routine": [
+        {
+          "start": 6,
+          "end": 12,
+          "location": "Smithy",
+          "activity": "work the forge"
+        },
+        {
+          "start": 12,
+          "end": 13,
+          "location": "Tavern",
+          "activity": "lunch",
+          "social": true
+        },
+        {
+          "start": 13,
+          "end": 19,
+          "location": "Smithy",
+          "activity": "work the forge"
+        },
+        {
+          "start": 19,
+          "end": 22,
+          "location": "Tavern",
+          "activity": "an ale",
+          "social": true
+        },
+        {
+          "start": 22,
+          "end": 6,
+          "location": "Smithy",
+          "activity": "sleep",
+          "action": "sleep"
+        }
+      ]
+    },
+    {
+      "name": "Tom",
+      "located_at": "Tavern",
+      "role": "npc",
+      "brain": "routine",
+      "coins": 40,
+      "trader": true,
+      "sells": ["food"],
+      "shop_stock": 2,
+      "personality": "warm, gossipy, tired",
+      "values": "hospitality,community",
+      "background": "Innkeeper of the Rusty Tankard. Cooks whatever fish and berries he can get on the hearth.",
+      "goal": "Keep the pot full and the hearth burning",
+      "mood": "cheerful",
+      "hp": 95,
+      "power_level": 8,
+      "speech_style": "chatty, calls everyone 'friend'",
+      "routine": [
+        {
+          "start": 5,
+          "end": 22,
+          "location": "Tavern",
+          "activity": "run the inn",
+          "social": true
+        },
+        {
+          "start": 22,
+          "end": 5,
+          "location": "Tavern",
+          "activity": "sleep",
+          "action": "sleep"
+        }
+      ]
+    },
+    {
+      "name": "Wren",
+      "located_at": "Market",
+      "role": "npc",
+      "brain": "routine",
+      "coins": 35,
+      "trader": true,
+      "sells": ["wood", "stone", "fish"],
+      "shop_stock": 2,
+      "personality": "shrewd, quick, friendly",
+      "values": "profit,fairness",
+      "background": "Market trader. Buys and sells raw goods; gathers them herself when nobody brings any.",
+      "goal": "Always have something to sell",
+      "mood": "alert",
+      "hp": 95,
+      "power_level": 9,
+      "speech_style": "fast, haggling",
+      "routine": [
+        {
+          "start": 7,
+          "end": 18,
+          "location": "Market",
+          "activity": "mind the stall"
+        },
+        {
+          "start": 18,
+          "end": 21,
+          "location": "Tavern",
+          "activity": "supper and news",
+          "social": true
+        },
+        {
+          "start": 21,
+          "end": 7,
+          "location": "Market",
+          "activity": "sleep",
+          "action": "sleep"
+        }
+      ]
+    },
+    {
+      "name": "Pip",
+      "located_at": "RiverDocks",
+      "role": "npc",
+      "brain": "routine",
+      "coins": 5,
+      "personality": "cheerful, chatty, small",
+      "values": "fun,friendship",
+      "background": "A boy who fishes off the docks and dreams of becoming an adventurer.",
+      "goal": "Catch fish and hear adventurers' stories",
+      "mood": "cheerful",
+      "hp": 80,
+      "power_level": 5,
+      "speech_style": "excited, lots of questions",
+      "routine": [
+        {
+          "start": 6,
+          "end": 12,
+          "location": "RiverDocks",
+          "activity": "fish off the pier",
+          "goal": "Collect item",
+          "target_entity": "kind:fish"
+        },
+        {
+          "start": 12,
+          "end": 13,
+          "location": "Tavern",
+          "activity": "lunch",
+          "social": true
+        },
+        {
+          "start": 13,
+          "end": 18,
+          "location": "RiverDocks",
+          "activity": "fish off the pier",
+          "goal": "Collect item",
+          "target_entity": "kind:fish"
+        },
+        {
+          "start": 18,
+          "end": 21,
+          "location": "TownSquare",
+          "activity": "listen to adventurers",
+          "social": true
+        },
+        {
+          "start": 21,
+          "end": 6,
+          "location": "Tavern",
+          "activity": "sleep",
+          "action": "sleep"
+        }
+      ]
+    }
+  ],
+  "items": [
+    {
+      "name": "CryptGate",
+      "located_at": "GuildHall",
+      "item_kind": "door",
+      "locked": true,
+      "portable": false,
+      "connects_to": "Crypt",
+      "accepts_from": ["CryptKey"],
+      "value": 0,
+      "description": "A rusted iron gate at the back of the hall. Beyond it, steps down into the crypt."
+    },
+    {
+      "name": "CryptKey",
+      "held_by": "Brannoc",
+      "item_kind": "key",
+      "portable": true,
+      "value": 30,
+      "description": "A heavy iron key. Opens the crypt gate in the Guild Hall.",
+      "effects_on": [
+        {
+          "target": "CryptGate",
+          "consume": false,
+          "preconditions": [
+            {
+              "op": "prop_eq",
+              "entity": "CryptGate",
+              "label": "Item",
+              "prop": "locked",
+              "value": true
+            }
+          ],
+          "ops": [
+            {
+              "op": "set_prop",
+              "entity": "CryptGate",
+              "label": "Item",
+              "prop": "locked",
+              "value": false
+            },
+            {
+              "op": "link",
+              "a": "GuildHall",
+              "a_label": "Location",
+              "b": "Crypt",
+              "b_label": "Location",
+              "rel": "ADJACENT_TO",
+              "bidirectional": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "AncientRelic",
+      "located_at": "Crypt",
+      "item_kind": "relic",
+      "portable": true,
+      "value": 45,
+      "description": "A tarnished silver circlet set with a dark stone. Old, and worth a fortune."
+    },
+    {
+      "name": "Forge",
+      "archetype": "workbench",
+      "located_at": "Smithy",
+      "description": "Mira's forge and anvil. Logs and stone become spears here."
+    },
+    {
+      "name": "Hearth",
+      "archetype": "campfire",
+      "located_at": "Tavern",
+      "description": "The tavern hearth. Fish and berries are cooked here; it needs wood to keep burning."
+    },
+    {
+      "name": "Stalls",
+      "located_at": "Market",
+      "item_kind": "stall",
+      "portable": false,
+      "value": 0,
+      "description": "Wooden stalls under striped awnings."
+    },
+    {
+      "name": "OldOak",
+      "located_at": "Forest",
+      "item_kind": "tree",
+      "portable": false,
+      "value": 0,
+      "description": "A huge old oak. Branches can be snapped off; with an axe, whole logs.",
+      "script": {
+        "interactive": true,
+        "lore": "Snap dry branches by hand, or fell logs with an axe. It recovers over a few hours.",
+        "state_props": ["logs"],
+        "initial_state": {
+          "logs": 4
+        },
+        "on_tick": [
+          {
+            "op": "add_prop",
+            "prop": "logs",
+            "delta_per_sec": 0.02,
+            "max": 4
+          }
+        ],
+        "actions": [
+          {
+            "id": "chop",
+            "label": "Snap off dry branches",
+            "requires": [
+              {
+                "op": "prop_gte",
+                "entity": "@target",
+                "prop": "logs",
+                "value": 1,
+                "message": "@target has nothing left to spare; give it a few hours"
+              }
+            ],
+            "effects": [
+              {
+                "op": "spawn_item",
+                "archetype": "firewood",
+                "held_by": "@actor"
+              },
+              {
+                "op": "add_prop",
+                "entity": "@target",
+                "prop": "logs",
+                "delta": -1,
+                "min": 0
+              }
+            ],
+            "narrative": "@actor snaps dry branches off @target."
+          }
+        ]
+      }
+    },
+    {
+      "name": "Deadfall",
+      "located_at": "Forest",
+      "item_kind": "deadwood",
+      "portable": false,
+      "value": 0,
+      "description": "Fallen branches under the trees. Dry sticks for fires and handles.",
+      "script": {
+        "lore": "Gather dry sticks here; more fall with time.",
+        "state_props": ["stock"],
+        "initial_state": {
+          "stock": 5
+        },
+        "on_tick": [
+          {
+            "op": "add_prop",
+            "prop": "stock",
+            "delta_per_sec": 0.015,
+            "max": 5
+          }
+        ]
+      }
+    },
+    {
+      "name": "BerryThicket",
+      "located_at": "Forest",
+      "item_kind": "bush",
+      "portable": false,
+      "value": 0,
+      "description": "Thorny bushes heavy with berries.",
+      "script": {
+        "lore": "Pick berries here; they ripen again over a few hours.",
+        "state_props": ["stock"],
+        "initial_state": {
+          "stock": 4
+        },
+        "on_tick": [
+          {
+            "op": "add_prop",
+            "prop": "stock",
+            "delta_per_sec": 0.012,
+            "max": 4
+          }
+        ]
+      }
+    },
+    {
+      "name": "QuarryFace",
+      "archetype": "rock_outcrop",
+      "located_at": "Quarry",
+      "description": "A pale rock face scarred by picks. Loose stone everywhere."
+    },
+    {
+      "name": "FishingPier",
+      "archetype": "fishing_spot",
+      "located_at": "RiverDocks",
+      "description": "The end of the long pier, where the river runs deep."
+    }
+  ],
+  "quests": [
+    {
+      "name": "AdventurersRest",
+      "description": "Make your way in a town that runs on adventurers.",
+      "stage": "arrival",
+      "state": "active",
+      "objective": "Find work, earn coins, gear up - and find out what is behind the crypt gate.",
+      "involves": ["Brannoc", "Garrick", "Mira", "CryptGate"]
+    }
+  ],
+  "facts": [
+    {
+      "name": "CryptSealed",
+      "secret_level": 1,
+      "known_by": ["Brannoc", "Tom"],
+      "text": "The crypt under the Guild Hall was sealed after Brannoc's party died there. Only Brannoc holds the key."
+    },
+    {
+      "name": "MiraMakesEverything",
+      "secret_level": 0,
+      "known_by": ["Mira", "Wren", "Tom", "Lysa"],
+      "text": "Mira forges axes and spears from quarry stone and forest logs; spears need her forge."
+    },
+    {
+      "name": "TomCooksFish",
+      "secret_level": 0,
+      "known_by": ["Tom", "Pip", "Wren"],
+      "text": "Tom cooks fish on the tavern hearth and sells it; he buys fish when he runs short."
+    }
+  ],
+  "rumors": [
+    {
+      "name": "RelicInTheCrypt",
+      "secret_level": 1,
+      "believed_by": ["Garrick", "Pip", "Tom"],
+      "text": "They say an ancient relic lies in the crypt, worth more than the whole market."
+    },
+    {
+      "name": "BrannocsShame",
+      "secret_level": 2,
+      "believed_by": ["Garrick"],
+      "text": "Some whisper Brannoc ran from the crypt and left his friends to die."
+    }
+  ],
+  "social": [
+    {
+      "a": "Brannoc",
+      "rel": "KNOWS",
+      "b": "Tom"
+    },
+    {
+      "a": "Brannoc",
+      "rel": "KNOWS",
+      "b": "Mira"
+    },
+    {
+      "a": "Brannoc",
+      "rel": "KNOWS",
+      "b": "Lysa"
+    },
+    {
+      "a": "Garrick",
+      "rel": "KNOWS",
+      "b": "Tom"
+    },
+    {
+      "a": "Mira",
+      "rel": "KNOWS",
+      "b": "Wren"
+    },
+    {
+      "a": "Pip",
+      "rel": "KNOWS",
+      "b": "Tom"
+    },
+    {
+      "a": "Wren",
+      "rel": "KNOWS",
+      "b": "Tom"
+    },
+    {
+      "a": "Lysa",
+      "rel": "KNOWS",
+      "b": "Wren"
+    }
+  ]
+}

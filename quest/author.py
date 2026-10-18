@@ -156,9 +156,22 @@ COMPLETE = """This questline must bring its own cast and setting (a complete pac
 - tie it to the existing world: someone already here is involved, or it grows from a grudge/shortage."""
 
 
+CONSERVATION = """World law: nothing appears from nowhere. Everything is gathered, made or already exists.
+- Never use spawn_item. Items the story needs are listed in "items" with where they start.
+- A reward hands over something the giver really has: {"op": "unlink", "a": "<giver>", "a_label": "Person",
+  "b": "<item>", "b_label": "Item", "rel": "HAS_ITEM"}, {"op": "link", "a": "@player", "a_label": "Person",
+  "b": "<item>", "b_label": "Item", "rel": "HAS_ITEM"}
+- Or pays from the giver's purse: {"op": "add_prop", "entity": "<giver>", "label": "Person", "prop": "coins",
+  "delta": -5}, {"op": "add_prop", "entity": "@player", "label": "Person", "prop": "coins", "delta": 5}"""
+
+
 def build_prompt(digest: WorldDigest, theme: str, feedback: str = "", *, complete: bool = False) -> str:
+    from content import get_content
+
     ask = f"Theme from the designer: {theme}" if theme.strip() else "Pick a theme that fits this world."
     package = f"\n\n{COMPLETE}" if complete else ""
+    if get_content().conservation:
+        package += f"\n\n{CONSERVATION}"
     return f"""{feedback}{render_digest(digest)}
 
 {ask}{package}

@@ -25,6 +25,8 @@ fn main() {
         .insert_resource(WorldSnapshot::offline())
         .insert_resource(SceneState::default())
         .insert_resource(terrain::RegionImages::default())
+        .insert_resource(terrain::StructureImage::default())
+        .insert_resource(icons::PersonIcons::default())
         .insert_resource(ClearColor(terrain::WILDERNESS))
         .insert_resource(WalkGrid::default())
         .insert_resource(PlayerSync::default())
@@ -50,6 +52,7 @@ fn main() {
                 net::receive_network_messages,
                 speech::update_speech,
                 terrain::sync_region_images,
+                terrain::sync_structure_image,
                 ui::ui_buttons,
                 ui::chat_typing,
                 ui::npc_chat_requests,
@@ -97,6 +100,7 @@ fn main() {
                 ui::poll_director,
                 ui::director_wheel,
                 ui::poll_mind,
+                scene::player_look,
                 ui::mind_search_typing,
             )
                 .after(ui::interaction_input),

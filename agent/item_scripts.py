@@ -279,7 +279,8 @@ def _run_tick_op(
         if float(new_v).is_integer():
             new_v = int(new_v)
         else:
-            new_v = round(new_v, 2)
+            # 每拍的增量很小（0.015/秒 × 0.25 秒 ≈ 0.004）：保留 2 位小数会把它舍成 0，永远长不回来
+            new_v = round(new_v, 6)
         set_property(world, item, "Item", prop, new_v)
         return events, spawned
 
@@ -337,6 +338,10 @@ def _run_tick_op(
         return events, spawned
 
     if op == "ensure_kind":
+        from content import get_content
+
+        if get_content().conservation:
+            return events, spawned  # 守恒：不自动补货，东西得有人采集 / 制造
         kind = (rule.get("item_kind") or "").strip().lower()
         minimum = int(rule.get("min") or 0)
         at = (rule.get("at") or "").strip()

@@ -17,11 +17,13 @@ solve_pddl() 返回结构化结果：
 from __future__ import annotations
 
 import os
+import copy
+import hashlib
 import re
 import tempfile
 import threading
 import time
-from collections import deque
+from collections import OrderedDict, deque
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -153,7 +155,35 @@ def _record_solve_trace(
         pass
 
 
+# 同一份 domain+problem 的求解结果（规划器是确定性的）。一次决策里可行性检查常把
+# 同一个问题解好几遍，每遍都要起一个 ENHSP/JVM 子进程（1–3 秒）
+_UP_CACHE: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
+_UP_CACHE_MAX = 256
+_up_cache_lock = threading.Lock()
+
+
 def _solve_with_unified_planning_timeout(
+    domain_str: str,
+    problem_str: str,
+    *,
+    timeout_sec: float = _UP_TIMEOUT_SEC,
+) -> Dict[str, Any]:
+    key = hashlib.sha1(f"{domain_str}\0{problem_str}".encode("utf-8")).hexdigest()
+    with _up_cache_lock:
+        hit = _UP_CACHE.get(key)
+        if hit is not None:
+            _UP_CACHE.move_to_end(key)
+            return copy.deepcopy(hit)
+    result = _solve_with_unified_planning_timeout_uncached(domain_str, problem_str, timeout_sec=timeout_sec)
+    if "超时" not in str(result.get("error") or ""):
+        with _up_cache_lock:
+            _UP_CACHE[key] = copy.deepcopy(result)
+            while len(_UP_CACHE) > _UP_CACHE_MAX:
+                _UP_CACHE.popitem(last=False)
+    return result
+
+
+def _solve_with_unified_planning_timeout_uncached(
     domain_str: str,
     problem_str: str,
     *,

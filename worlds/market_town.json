@@ -16,12 +16,16 @@
     {
       "name": "Tavern",
       "description": "A warm tavern with a kitchen stove and an order counter.",
-      "tags": "work,food,social"
+      "tags": "work,food,social",
+      "indoor": true,
+      "parent": "TownSquare"
     },
     {
       "name": "Warehouse",
       "description": "A dusty warehouse where crates of goods are delivered.",
-      "tags": "work,storage"
+      "tags": "work,storage",
+      "indoor": true,
+      "parent": "TownSquare"
     },
     {
       "name": "Farm",
@@ -134,36 +138,8 @@
       "located_at": "Market",
       "description": "Mira's general goods stall. Pay a coin to get bread."
     },
-    {
-      "name": "WarehouseSupply",
-      "value": 0,
-      "located_at": "Warehouse",
-      "item_kind": "source",
-      "portable": false,
-      "description": "Deliveries keep a few crates in the warehouse.",
-      "script": {
-        "lore": "Carts drop off new crates whenever the warehouse runs low.",
-        "on_tick": [
-          { "op": "ensure_kind", "item_kind": "crate", "min": 2, "at": "Warehouse", "prefix": "Crate",
-            "spawn": { "archetype": "crate" } }
-        ]
-      }
-    },
-    {
-      "name": "FarmField",
-      "value": 0,
-      "located_at": "Farm",
-      "item_kind": "source",
-      "portable": false,
-      "description": "Rows of vegetables ready to be picked.",
-      "script": {
-        "lore": "Fresh vegetables keep growing; anyone can pick them for the kitchen.",
-        "on_tick": [
-          { "op": "ensure_kind", "item_kind": "ingredient", "min": 3, "at": "Farm", "prefix": "Vegetable",
-            "spawn": { "archetype": "vegetable" } }
-        ]
-      }
-    },
+    {"name": "WarehouseSupply", "value": 0, "located_at": "Warehouse", "item_kind": "source", "portable": false, "description": "The warehouse. Crates of goods are packed from produce and stored here.", "script": {"lore": "Crates are packed from vegetables (two per crate); nothing arrives by itself.", "on_tick": []}},
+    {"name": "FarmField", "value": 0, "located_at": "Farm", "item_kind": "vegetable_patch", "portable": false, "description": "Rows of vegetables ready to be picked.", "script": {"lore": "Pick vegetables here; they grow back over a day.", "state_props": ["stock"], "initial_state": {"stock": 4}, "on_tick": [{"op": "add_prop", "prop": "stock", "delta_per_sec": 0.012, "max": 4}]}},
     {
       "name": "Stove",
       "archetype": "stove",

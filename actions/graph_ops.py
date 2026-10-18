@@ -133,7 +133,8 @@ def _check_condition(world, cond: Dict[str, Any], ctx: Dict[str, str]) -> Tuple[
             entity = resolve_token(cond["entity"], ctx)
             label = cond.get("label") or "Item"
             prop = cond["prop"]
-            want = float(cond.get("value") or 0)
+            # value 可以是另一个实体的属性：{"value": "@i.value"}（钱够不够付这件东西的价）
+            want = float(resolve_token(cond.get("value") or 0, ctx) or 0)
             got = get_property(world, entity, label, prop)
             try:
                 got_n = float(got if got is not None else 0)
@@ -217,7 +218,7 @@ def _check_condition(world, cond: Dict[str, Any], ctx: Dict[str, str]) -> Tuple[
             entity = resolve_token(cond["entity"], ctx)
             label = cond.get("label") or "Item"
             prop = cond["prop"]
-            want = float(cond.get("value") or 0)
+            want = float(resolve_token(cond.get("value") or 0, ctx) or 0)
             got = get_property(world, entity, label, prop)
             try:
                 got_n = float(got if got is not None else 0)
@@ -225,6 +226,26 @@ def _check_condition(world, cond: Dict[str, Any], ctx: Dict[str, str]) -> Tuple[
                 return False, f"{entity}.{prop} is not numeric: {got}"
             if got_n > want:
                 return False, cond.get("message") or f"{entity}.{prop}={got_n} > {want}"
+            return True, "ok"
+
+        if op == "feels_gte":
+            # a 对 b 的好感 ≥ value（relations.py）；规划时当作成立，执行时才真正检查
+            from relations import feeling
+
+            a_name, b_name = resolve_token(cond["a"], ctx), resolve_token(cond["b"], ctx)
+            want = float(resolve_token(cond.get("value") or 0, ctx) or 0)
+            got = feeling(world, a_name, b_name)
+            if got < want:
+                return False, f"{a_name} doesn't feel close enough to {b_name} ({got} < {want:g})"
+            return True, "ok"
+
+        if op == "not_hostile":
+            # a、b 不属于互相敌对的联盟
+            from relations import hostile
+
+            a_name, b_name = resolve_token(cond["a"], ctx), resolve_token(cond["b"], ctx)
+            if hostile(world, a_name, b_name):
+                return False, f"{a_name} and {b_name} belong to hostile alliances"
             return True, "ok"
 
         if op == "count":

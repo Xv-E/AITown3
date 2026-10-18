@@ -1,0 +1,14 @@
+{
+  "id": "fell_log",
+  "label": "Fell a log (axe)",
+  "node": "tree",
+  "tool": "axe",
+  "stock": "logs",
+  "yield": {
+    "archetype": "log"
+  },
+  "duration": 3,
+  "description": "Cut a whole log from a tree with an axe. Builders and workbenches need logs.",
+  "narrative": "@c swings the axe and a log comes free from @node.",
+  "empty_message": "@node has no good wood left; give it a few hours"
+}

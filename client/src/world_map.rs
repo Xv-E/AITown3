@@ -5,7 +5,7 @@ use bevy::{math::Isometry2d, prelude::*};
 use std::collections::HashSet;
 
 use crate::net::{RegionView, WorldSnapshot};
-use crate::terrain::RegionImages;
+use crate::terrain::{RegionImages, StructureImage};
 use crate::scene::WalkGrid;
 use crate::ui::UiState;
 
@@ -41,6 +41,12 @@ impl MapFrame {
 
     fn point(&self, x: f32, y: f32) -> Vec2 {
         self.origin + Vec2::new(x, -y) * self.scale
+    }
+
+    /// Overlay point → world cell.
+    fn cell(&self, overlay: Vec2) -> IVec2 {
+        let rel = (overlay - self.origin) / self.scale;
+        IVec2::new(rel.x.floor() as i32, (-rel.y).floor() as i32)
     }
 
     fn region_rect(&self, r: &RegionView) -> (Vec2, Vec2) {
@@ -98,14 +104,17 @@ pub fn map_input(
     }
 }
 
-/// The region under an overlay point (cursor position relative to the camera).
+/// The region under an overlay point (cursor position relative to the camera). Regions nest
+/// (a tavern inside the town), so this looks at the cell, not the bounding rectangle; a click
+/// on a wall or doorway counts as the room behind it.
 pub fn region_at(world: &WorldSnapshot, overlay: Vec2) -> Option<String> {
-    let frame = MapFrame::of(world);
-    world.world.regions.iter().find_map(|r| {
-        let (center, size) = frame.region_rect(r);
-        let d = (overlay - center).abs();
-        (d.x <= size.x * 0.5 && d.y <= size.y * 0.5).then(|| r.name.clone())
-    })
+    let cell = MapFrame::of(world).cell(overlay);
+    if let Some(r) = world.world.region_at(cell) {
+        return Some(r.name.clone());
+    }
+    let around = [IVec2::X, IVec2::NEG_X, IVec2::Y, IVec2::NEG_Y];
+    let near: Vec<_> = around.iter().filter_map(|d| world.world.region_at(cell + *d)).collect();
+    near.iter().find(|r| r.indoor).or(near.first()).map(|r| r.name.clone())
 }
 
 /// Close the map and walk to the middle of a region.
@@ -142,6 +151,7 @@ pub fn render_world_map(
     existing: Query<Entity, With<WorldMapEntity>>,
     camera: Query<Entity, With<Camera2d>>,
     ground: Res<RegionImages>,
+    structures: Res<StructureImage>,
 ) {
     let key = ui.world_map.as_ref().map(|v| (world.revision, v.selected.clone()));
     if key == state.key {
@@ -188,8 +198,25 @@ pub fn render_world_map(
                 Transform::from_xyz(center.x, center.y, MAP_Z + 1.0),
                 WorldMapEntity,
             ));
+        }
+        if let Some(image) = structures.get() {
+            let size = Vec2::new(world.world.width as f32, world.world.height as f32) * frame.scale;
+            let center = frame.point(0.0, 0.0) + Vec2::new(size.x, -size.y) * 0.5;
+            parent.spawn((
+                Sprite {
+                    image,
+                    custom_size: Some(size),
+                    ..default()
+                },
+                Transform::from_xyz(center.x, center.y, MAP_Z + 1.5),
+                WorldMapEntity,
+            ));
+        }
+        for region in &world.world.regions {
+            let mid = region.center();
+            let pos = frame.point(mid.x as f32 + 0.5, mid.y as f32 + 0.5);
             let marker = if region.name == here { "\n(you are here)" } else { "" };
-            label(parent, center, &format!("{}{marker}", region.name), 14.0);
+            label(parent, pos, &format!("{}{marker}", region.name), if region.indoor { 11.0 } else { 14.0 });
         }
         for person in &world.world.persons {
             let Some(cell) = person.cell() else { continue };
@@ -212,7 +239,12 @@ pub fn render_world_map(
         }
         if let Some(region) = world.region(&view.selected) {
             let desc = if region.description.is_empty() { "" } else { region.description.as_str() };
-            label(parent, Vec2::new(0.0, -300.0), &format!("{}\n{}", region.name, desc), 15.0);
+            let inside = match (region.indoor, region.parent.is_empty()) {
+                (true, false) => format!("  (indoors, in {})", region.parent),
+                (true, true) => "  (indoors)".to_string(),
+                _ => String::new(),
+            };
+            label(parent, Vec2::new(0.0, -300.0), &format!("{}{inside}\n{}", region.name, desc), 15.0);
         }
     });
 }

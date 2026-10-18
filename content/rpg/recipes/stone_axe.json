@@ -1,0 +1,17 @@
+{
+  "id": "stone_axe",
+  "label": "Stone axe",
+  "inputs": [
+    {
+      "kind": "stone"
+    },
+    {
+      "kind": "wood"
+    }
+  ],
+  "output": {
+    "archetype": "axe"
+  },
+  "duration": 3,
+  "description": "Lash a sharp stone to a stick. Lets you fell logs."
+}

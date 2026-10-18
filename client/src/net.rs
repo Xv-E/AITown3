@@ -139,6 +139,42 @@ impl NetBridge {
         let _ = self.position_tx.send(cell);
     }
 
+    /// Make `name` an LLM character ("llm") or a background NPC that only follows its routine ("routine").
+    pub fn set_brain(&self, name: &str, brain: &str) {
+        self.send(NetRequestKind::SetBrain { name: name.to_string(), brain: brain.to_string() });
+    }
+
+    /// Invite `npc` to travel with you (join = true) or ask them to go (false).
+    pub fn party(&self, npc: &str, join: bool) {
+        self.send(NetRequestKind::Social { path: format!("/api/party/{}?join={join}", url_encode(npc)) });
+    }
+
+    pub fn propose_alliance(&self, npc: &str) {
+        self.send(NetRequestKind::Social { path: format!("/api/ally/{}", url_encode(npc)) });
+    }
+
+    pub fn fetch_requests(&self) {
+        self.send(NetRequestKind::FetchRequests);
+    }
+
+    /// Hand the thing a request asks for to whoever posted it.
+    pub fn deliver(&self, request_id: &str) {
+        self.send(NetRequestKind::Social { path: format!("/api/requests/{}/deliver", url_encode(request_id)) });
+    }
+
+    pub fn fetch_crafting(&self) {
+        self.send(NetRequestKind::FetchCrafting);
+    }
+
+    pub fn fetch_trade(&self, npc: &str) {
+        self.send(NetRequestKind::FetchTrade { npc: npc.to_string() });
+    }
+
+    /// Gather / craft / buy / sell: the server picks which materials, tool or coins to use.
+    pub fn do_action(&self, action: &str, target: &str, other: &str) {
+        self.send(NetRequestKind::Do { action: action.to_string(), target: target.to_string(), other: other.to_string() });
+    }
+
     pub fn fetch_saves(&self) {
         self.send(NetRequestKind::FetchSaves);
     }
@@ -221,6 +257,23 @@ enum NetRequestKind {
         kind: String,
     },
     FetchSaves,
+    FetchCrafting,
+    FetchRequests,
+    Social {
+        path: String,
+    },
+    FetchTrade {
+        npc: String,
+    },
+    Do {
+        action: String,
+        target: String,
+        other: String,
+    },
+    SetBrain {
+        name: String,
+        brain: String,
+    },
     SaveGame {
         slot: String,
     },
@@ -262,6 +315,10 @@ enum NetResponse {
     Director(Result<DirectorData, String>),
     Saves(Result<Vec<SaveInfo>, String>),
     Mind(String, Result<MindData, String>),
+    Crafting(Result<Vec<RecipeView>, String>),
+    Requests(Result<Vec<RequestView>, String>),
+    Trade(Result<TradeView, String>),
+    Did(String, Result<(bool, String), String>),
     Saved(Result<String, String>),
     Loaded(Result<String, String>),
     Draft(Result<DraftSummary, String>),
@@ -333,6 +390,50 @@ fn handle_request(request: NetRequest) -> NetResponse {
             let result = http_json(server, "GET", &path, None)
                 .and_then(|v| serde_json::from_value::<MindData>(v).map_err(|err| format!("Bad memory JSON: {err}")));
             NetResponse::Mind(name, result)
+        }
+        NetRequestKind::SetBrain { name, brain } => NetResponse::Saved(
+            http_json(
+                server,
+                "POST",
+                &format!("/api/characters/{}/brain", url_encode(&name)),
+                Some(json!({ "brain": brain }).to_string()),
+            )
+            .map(|v| v.get("message").and_then(Value::as_str).unwrap_or("Changed.").to_string()),
+        ),
+        NetRequestKind::FetchRequests => NetResponse::Requests(
+            http_json(server, "GET", "/api/requests", None).and_then(|v| {
+                serde_json::from_value::<Vec<RequestView>>(v.get("requests").cloned().unwrap_or(Value::Array(Vec::new())))
+                    .map_err(|err| format!("Bad requests JSON: {err}"))
+            }),
+        ),
+        NetRequestKind::Social { path } => NetResponse::Did(
+            "social".into(),
+            http_json(server, "POST", &path, Some("{}".to_string())).map(|v| {
+                (
+                    v.get("success").and_then(Value::as_bool).unwrap_or(false),
+                    v.get("message").and_then(Value::as_str).unwrap_or("").to_string(),
+                )
+            }),
+        ),
+        NetRequestKind::FetchCrafting => NetResponse::Crafting(
+            http_json(server, "GET", "/api/crafting", None).and_then(|v| {
+                serde_json::from_value::<Vec<RecipeView>>(v.get("recipes").cloned().unwrap_or(Value::Array(Vec::new())))
+                    .map_err(|err| format!("Bad crafting JSON: {err}"))
+            }),
+        ),
+        NetRequestKind::FetchTrade { npc } => NetResponse::Trade(
+            http_json(server, "GET", &format!("/api/trade/{}", url_encode(&npc)), None)
+                .and_then(|v| serde_json::from_value::<TradeView>(v).map_err(|err| format!("Bad trade JSON: {err}"))),
+        ),
+        NetRequestKind::Do { action, target, other } => {
+            let body = json!({ "action": action, "target": target, "other": other });
+            let result = http_json(server, "POST", "/api/do", Some(body.to_string())).map(|v| {
+                (
+                    v.get("success").and_then(Value::as_bool).unwrap_or(false),
+                    v.get("message").and_then(Value::as_str).unwrap_or("").to_string(),
+                )
+            });
+            NetResponse::Did(action, result)
         }
         NetRequestKind::FetchSaves => NetResponse::Saves(
             http_json(server, "GET", "/api/saves", None).and_then(|v| {
@@ -643,6 +744,30 @@ pub fn receive_network_messages(
             }
             NetResponse::Blueprints(Ok(list)) => ui.open_build_menu(list),
             NetResponse::Saves(Ok(list)) => ui.open_save_menu(list),
+            NetResponse::Crafting(Ok(list)) => ui.open_craft_menu(list),
+            NetResponse::Requests(Ok(list)) => ui.open_requests_menu(list),
+            NetResponse::Requests(Err(err)) => ui.toast(format!("Can't load requests: {err}")),
+            NetResponse::Crafting(Err(err)) => ui.toast(format!("Can't load recipes: {err}")),
+            NetResponse::Trade(Ok(view)) => ui.open_trade_menu(view),
+            NetResponse::Trade(Err(err)) => ui.toast(format!("Can't trade: {err}")),
+            NetResponse::Did(action, result) => {
+                net.refresh_now();
+                match result {
+                    Ok((true, msg)) => {
+                        ui.toast(msg);
+                        // Keep the shop / workshop open with fresh numbers.
+                        if (action == "buy" || action == "sell") && ui.menu.is_some() {
+                            if let Some(npc) = ui.trading_with.clone() {
+                                net.fetch_trade(&npc);
+                            }
+                        } else if action.starts_with("craft_") && ui.crafting_open && ui.menu.is_some() {
+                            net.fetch_crafting();
+                        }
+                    }
+                    Ok((false, msg)) => ui.toast(format!("Can't do that: {msg}")),
+                    Err(err) => ui.toast(format!("Failed: {err}")),
+                }
+            }
             NetResponse::Mind(name, result) => {
                 if let Some(view) = ui.history.as_mut().filter(|v| v.name == name) {
                     view.mind_in_flight = false;
@@ -658,7 +783,7 @@ pub fn receive_network_messages(
             NetResponse::Saves(Err(err)) => ui.toast(format!("Can't list saves: {err}")),
             NetResponse::Saved(result) => ui.toast(match result {
                 Ok(msg) => msg,
-                Err(err) => format!("Save failed: {err}"),
+                Err(err) => format!("Failed: {err}"),
             }),
             NetResponse::Loaded(result) => {
                 net.refresh_now();
@@ -965,6 +1090,17 @@ pub struct WorldView {
     pub items: Vec<Thing>,
     #[serde(default)]
     pub persons: Vec<Actor>,
+    /// The whole terrain, one string per row of world cells: '.' outdoor ground, ',' indoor
+    /// floor, '+' doorway, '#' wall, '%' fence / hedge, '~' water, ' ' wilderness.
+    #[serde(default)]
+    pub tiles: Vec<String>,
+}
+
+impl WorldView {
+    /// The place a world cell belongs to (walls, fences and wilderness belong to none).
+    pub fn region_at(&self, cell: IVec2) -> Option<&RegionView> {
+        self.regions.iter().find(|r| r.contains(cell))
+    }
 }
 
 #[derive(Deserialize, Clone, Default)]
@@ -979,11 +1115,23 @@ pub struct RegionView {
     pub w: i32,
     #[serde(default)]
     pub h: i32,
-    /// Shape inside the area: one string per row, '#' = ground (empty = the whole rectangle).
+    /// This place's own ground inside the bounding area: one string per row, '#' = ground
+    /// (empty = the whole rectangle). Walls and buildings nested inside are not part of it.
     #[serde(default)]
     pub rows: Vec<String>,
     #[serde(default, deserialize_with = "lenient_string")]
     pub description: String,
+    /// A room inside a building (walls around it, entered through a doorway).
+    #[serde(default)]
+    pub indoor: bool,
+    /// The outdoor place an indoor room's building stands in.
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub parent: String,
+    /// A cell in the middle of this place's ground (label / where to walk to).
+    #[serde(default)]
+    pub cx: Option<i32>,
+    #[serde(default)]
+    pub cy: Option<i32>,
 }
 
 impl RegionView {
@@ -1000,7 +1148,10 @@ impl RegionView {
     }
 
     pub fn center(&self) -> IVec2 {
-        IVec2::new(self.x + self.w / 2, self.y + self.h / 2)
+        match (self.cx, self.cy) {
+            (Some(x), Some(y)) => IVec2::new(x, y),
+            _ => IVec2::new(self.x + self.w / 2, self.y + self.h / 2),
+        }
     }
 }
 
@@ -1022,6 +1173,16 @@ pub struct Actor {
     pub personality: String,
     #[serde(default, deserialize_with = "lenient_vec")]
     pub held_items: Vec<String>,
+    #[serde(default, deserialize_with = "lenient_i32")]
+    pub coins: i32,
+    /// Buys and sells things (Trade in their menu).
+    #[serde(default)]
+    pub trader: bool,
+    /// Travelling with this person (party leader), "" = on their own.
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub follows: String,
+    #[serde(default, deserialize_with = "lenient_vec")]
+    pub allies: Vec<String>,
     /// World cell (seamless world).
     #[serde(default)]
     pub x: Option<i32>,
@@ -1059,6 +1220,12 @@ pub struct Thing {
     /// Fixed actions this object offers (server tells whether each is doable right now).
     #[serde(default)]
     pub actions: Vec<ThingAction>,
+    /// A construction site's missing materials ("3 log, 2 stone"; "" = none / not a site).
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub needs: String,
+    /// A gathering spot's remaining supply (it regrows in fractions; shown whole).
+    #[serde(default, deserialize_with = "lenient_opt_i32")]
+    pub stock: Option<i32>,
 }
 
 #[derive(Deserialize, Clone, Default)]
@@ -1133,9 +1300,6 @@ pub struct Simulation {
     /// World announcements, newest first.
     #[serde(default)]
     pub chronicle: Vec<ChronicleEntry>,
-    /// Where the server-side storyteller is steering things.
-    #[serde(default)]
-    pub story: Story,
     /// Recent conversations, oldest first (played back as speech bubbles).
     #[serde(default)]
     pub conversations: Vec<Conversation>,
@@ -1160,12 +1324,6 @@ pub struct ConversationLine {
     pub speaker: String,
     #[serde(default, deserialize_with = "lenient_string")]
     pub text: String,
-}
-
-#[derive(Deserialize, Clone, Default)]
-pub struct Story {
-    #[serde(default, deserialize_with = "lenient_string")]
-    pub arc: String,
 }
 
 #[derive(Deserialize, Clone, Default)]
@@ -1218,6 +1376,12 @@ pub struct NpcActivity {
     pub step_line: String,
     #[serde(default, deserialize_with = "lenient_string")]
     pub now_label: String,
+    /// Their open request ("needs stone (3c)"), shown as a "!" over their head.
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub request: String,
+    /// A background NPC thinking with the LLM for a while (emergency / stuck).
+    #[serde(default)]
+    pub thinking_hard: bool,
     #[serde(default, deserialize_with = "lenient_string")]
     pub goal: String,
     #[serde(default, deserialize_with = "lenient_string")]
@@ -1251,6 +1415,10 @@ fn lenient_string<'de, D: serde::Deserializer<'de>>(de: D) -> Result<String, D::
 
 fn lenient_i32<'de, D: serde::Deserializer<'de>>(de: D) -> Result<i32, D::Error> {
     Ok(Value::deserialize(de)?.as_f64().map(|v| v as i32).unwrap_or(0))
+}
+
+fn lenient_opt_i32<'de, D: serde::Deserializer<'de>>(de: D) -> Result<Option<i32>, D::Error> {
+    Ok(Value::deserialize(de)?.as_f64().map(|v| v.floor() as i32))
 }
 
 fn lenient_vec<'de, D: serde::Deserializer<'de>>(de: D) -> Result<Vec<String>, D::Error> {
@@ -1640,6 +1808,50 @@ pub struct DirectorData {
     pub chronicle: Vec<DirectorLine>,
     #[serde(default)]
     pub questlines: Vec<QuestlineView>,
+    /// Prices by kind of thing (supply and demand).
+    #[serde(default)]
+    pub market: Vec<MarketRow>,
+    #[serde(default)]
+    pub alliances: Vec<AllianceView>,
+    #[serde(default)]
+    pub requests: Vec<DirectorLine>,
+}
+
+#[derive(Deserialize, Clone, Default)]
+pub struct MarketRow {
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub kind: String,
+    #[serde(default)]
+    pub price: i64,
+    #[serde(default)]
+    pub factor: f32,
+    #[serde(default)]
+    pub supply: i64,
+    #[serde(default)]
+    pub demand: f32,
+    /// "up" | "down" | ""
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub trend: String,
+}
+
+#[derive(Deserialize, Clone, Default)]
+pub struct AllianceView {
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub name: String,
+    #[serde(default, deserialize_with = "lenient_vec")]
+    pub members: Vec<String>,
+    #[serde(default)]
+    pub stances: Vec<StanceView>,
+}
+
+#[derive(Deserialize, Clone, Default)]
+pub struct StanceView {
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub other: String,
+    #[serde(default)]
+    pub value: i64,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub word: String,
 }
 
 #[derive(Deserialize, Clone, Default)]
@@ -1756,6 +1968,9 @@ pub struct ProfileView {
     pub fields: Vec<ProfileField>,
     #[serde(default)]
     pub status: Vec<String>,
+    /// "llm" (decides with the language model) | "routine" (background NPC) | "" (the player)
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub brain: String,
 }
 
 #[derive(Deserialize, Clone, Default)]
@@ -1806,6 +2021,9 @@ pub struct MemoryView {
 
 #[derive(Deserialize, Clone, Default)]
 pub struct KnowsView {
+    /// How they feel about people ("Likes Sage (4) [ally] - gave me berries").
+    #[serde(default)]
+    pub relations: Vec<String>,
     #[serde(default)]
     pub facts: Vec<FactView>,
     #[serde(default)]
@@ -1835,9 +2053,100 @@ mod url_tests {
     use super::url_encode;
 
     #[test]
+    fn a_regrowing_stock_with_decimals_still_parses() {
+        let thing: super::Thing = serde_json::from_str(r#"{"name": "QuarryFace", "stock": 5.0}"#).unwrap();
+        assert_eq!(thing.stock, Some(5));
+        let thing: super::Thing = serde_json::from_str(r#"{"name": "Pier", "stock": 3.7}"#).unwrap();
+        assert_eq!(thing.stock, Some(3), "shown whole: 3.7 left is 3 you can take");
+    }
+
+    #[test]
     fn query_values_are_percent_encoded() {
         assert_eq!(url_encode("oak tree"), "oak%20tree");
         assert_eq!(url_encode("木头"), "%E6%9C%A8%E5%A4%B4");
         assert_eq!(url_encode("a&b=c"), "a%26b%3Dc");
     }
+}
+
+/// One recipe as the Craft panel shows it.
+#[derive(Deserialize, Clone, Default)]
+pub struct RecipeView {
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub action: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub label: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub description: String,
+    #[serde(default)]
+    pub inputs: Vec<RecipeInput>,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub station: String,
+    #[serde(default)]
+    pub at_station: bool,
+    #[serde(default)]
+    pub ready: bool,
+}
+
+#[derive(Deserialize, Clone, Default)]
+pub struct RecipeInput {
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub kind: String,
+    #[serde(default)]
+    pub need: u32,
+    #[serde(default)]
+    pub have: u32,
+}
+
+/// A trader's offer: what they sell, what they would buy from you.
+#[derive(Deserialize, Clone, Default)]
+pub struct TradeView {
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub npc: String,
+    #[serde(default)]
+    pub trader: bool,
+    #[serde(default)]
+    pub my_coins: i64,
+    #[serde(default)]
+    pub npc_coins: i64,
+    #[serde(default)]
+    pub sells: Vec<TradeGood>,
+    #[serde(default)]
+    pub buys: Vec<TradeGood>,
+}
+
+#[derive(Deserialize, Clone, Default)]
+pub struct TradeGood {
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub name: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub label: String,
+    #[serde(default)]
+    pub price: i64,
+    #[serde(default)]
+    pub affordable: bool,
+}
+
+/// A request someone posted ("needs stone - pays 3 coins").
+#[derive(Deserialize, Clone, Default)]
+pub struct RequestView {
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub id: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub poster: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub kind: String,
+    /// "open" | "done" | "cancelled"
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub status: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub reason: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub taker: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub note: String,
+    /// Your items of that kind (you could deliver).
+    #[serde(default, deserialize_with = "lenient_vec")]
+    pub you_have: Vec<String>,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub line: String,
 }

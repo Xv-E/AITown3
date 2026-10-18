@@ -1,0 +1,129 @@
+{
+  "name": "buy",
+  "category": "trade",
+  "description": "Buy something a trader has for sale, paying its market price in coins",
+  "duration": 1.0,
+  "params": [
+    {
+      "name": "c",
+      "type": "Person",
+      "source": "self"
+    },
+    {
+      "name": "i",
+      "type": "Item",
+      "source": ""
+    },
+    {
+      "name": "seller",
+      "type": "Person",
+      "source": "people_here"
+    },
+    {
+      "name": "l",
+      "type": "Location",
+      "source": "here"
+    }
+  ],
+  "requires": [
+    {
+      "op": "neq",
+      "a": "@c",
+      "b": "@seller",
+      "message": "You can't buy from yourself"
+    },
+    {
+      "op": "person_at",
+      "person": "@c",
+      "location": "@l"
+    },
+    {
+      "op": "person_at",
+      "person": "@seller",
+      "location": "@l",
+      "message": "@seller is not here"
+    },
+    {
+      "op": "has_item",
+      "person": "@seller",
+      "item": "@i",
+      "message": "@seller doesn't have @i"
+    },
+    {
+      "op": "prop_eq",
+      "entity": "@seller",
+      "label": "Person",
+      "prop": "trader",
+      "value": true,
+      "message": "@seller is not a trader"
+    },
+    {
+      "op": "prop_eq",
+      "entity": "@i",
+      "prop": "for_sale",
+      "value": true,
+      "message": "@i is not for sale"
+    },
+    {
+      "op": "prop_gte",
+      "entity": "@c",
+      "label": "Person",
+      "prop": "coins",
+      "value": "@i.price",
+      "message": "You can't afford @i (@i.price coins)"
+    },
+    {
+      "op": "not_hostile",
+      "a": "@c",
+      "b": "@seller",
+      "message": "@seller won't trade with someone from a hostile alliance"
+    },
+    {
+      "op": "prop_gte",
+      "entity": "@i",
+      "prop": "price",
+      "value": 1,
+      "message": "@i has no price yet"
+    }
+  ],
+  "effects": [
+    {
+      "op": "add_prop",
+      "entity": "@c",
+      "label": "Person",
+      "prop": "coins",
+      "delta": "@i.price",
+      "scale": -1
+    },
+    {
+      "op": "add_prop",
+      "entity": "@seller",
+      "label": "Person",
+      "prop": "coins",
+      "delta": "@i.price"
+    },
+    {
+      "op": "unlink",
+      "a": "@seller",
+      "a_label": "Person",
+      "b": "@i",
+      "b_label": "Item",
+      "rel": "HAS_ITEM"
+    },
+    {
+      "op": "link",
+      "a": "@c",
+      "a_label": "Person",
+      "b": "@i",
+      "b_label": "Item",
+      "rel": "HAS_ITEM"
+    },
+    {
+      "op": "set_prop",
+      "entity": "@i",
+      "prop": "for_sale",
+      "value": false
+    }
+  ],
+  "narrative": "@c buys @i from @seller for @i.price coins."
+}

@@ -243,6 +243,12 @@ def ensure_cast_quality(
                 trust_toward_player=trust,
                 accepts_from=list(p.accepts_from or []),
                 routine=[dict(s) for s in (getattr(p, "routine", None) or []) if isinstance(s, dict)],
+                brain=getattr(p, "brain", "llm"),
+                coins=getattr(p, "coins", 0),
+                trader=getattr(p, "trader", False),
+                sells=list(getattr(p, "sells", []) or []),
+                shop_stock=getattr(p, "shop_stock", 1),
+                secret=getattr(p, "secret", ""),
             )
         )
 
@@ -344,6 +350,7 @@ def ensure_cast_quality(
         rumors=cleaned_rumors,
         social=social,
         source=bp.source,
+        terrain=getattr(bp, "terrain", None),
     )
 
 
@@ -540,6 +547,7 @@ def ensure_playable_mechanics(bp: EventBlueprint) -> EventBlueprint:
                 rumors=list(bp.rumors),
                 social=list(bp.social),
                 source=bp.source,
+                terrain=getattr(bp, "terrain", None),
             ),
             door,
         )
@@ -632,6 +640,7 @@ def ensure_playable_mechanics(bp: EventBlueprint) -> EventBlueprint:
         rumors=list(bp.rumors),
         social=list(bp.social),
         source=bp.source,
+        terrain=getattr(bp, "terrain", None),
     )
 
 

@@ -368,3 +368,60 @@ Routine 里用 `"action": "sleep"` 让角色在该时段去执行这个动作：
 2. 新状态：在 `states/` 放一个 JSON，再写一个 `"enter_state"` 指向它的动作。
 3. 新物品：在 `archetypes/` 放原型，在世界文件里用 `"archetype"` 引用。
 4. 重启 web 服务并重建世界。加载错误（参数签名不符、引用了不存在的状态等）会在启动日志里列出。
+
+---
+
+## 6. RPG 系统（`content/rpg/`）
+
+### 采集 `gathering/<id>.json`
+
+```json
+{ "id": "fell_log", "label": "Fell a log (axe)", "node": "tree", "tool": "axe", "stock": "logs",
+  "yield": { "archetype": "log" }, "duration": 3 }
+```
+
+加载时展开成动作 `gather_<id>(c, node, [tool], l)`：在采集点（`item_kind` = `node`）旁边、手里拿着工具（`item_kind` = `tool`，可省）、采集点的 `stock` 属性 ≥ 1 → 存量 -1，产物到手上。
+存量怎么恢复写在采集点原型的 `script.on_tick`（`add_prop` + `delta_per_sec` + `max`）。
+
+### 配方 `recipes/<id>.json`
+
+```json
+{ "id": "spear", "label": "Spear", "inputs": [{ "kind": "log" }, { "kind": "stone", "count": 2 }],
+  "station": "workbench", "output": { "archetype": "spear" }, "duration": 4 }
+```
+
+展开成 `craft_<id>(c, in1, in2, …, [station], l)`：手上有这些类别的材料（同类的是不同的物品），（站在 `station` 类别的设施旁）→ 材料用掉，产物到手上。最多 6 件材料。
+
+两种都是普通数据动作：PDDL 自动编译，NPC 会自己「采石头 → 做斧头 → 砍原木」。玩家那边由服务端挑材料 / 工具：`GET /api/crafting`、`POST /api/do {"action", "target"}`。
+
+### 钱和交易
+
+- 人物的 `coins`（数值）、`trader: true`（商人）写在世界文件里。
+- 商人手上 `for_sale: true` 的东西可以买（`buy`：按物品 `value` 付钱）；任何东西都能卖给商人（`sell`：拿 `value` 的一半）。
+- 条件里的 `value` 可以引用另一个实体的属性：`{"op": "prop_gte", "prop": "coins", "value": "@i.value"}`。
+- `GET /api/trade/{npc}` 列出商人卖什么、你能卖什么。
+
+### 关系（`agent/relations.py`）
+
+- `(:Person)-[:FEELS {value}]->(:Person)`：好感 -10..10；NPC 对玩家的好感就是 `trust_toward_player`。
+- 送东西 +3、做成买卖 +1、对话语气 -1..+2、东西被抢先拿走 -2；每两个游戏小时朝 0 回落 1 点，矛盾（TENSION）也降 1 级。
+- 互相好感 ≥ 6 自动结盟（`ALLY`），好感跌破 0 盟约破裂；玩家可以提出结盟（对方好感 ≥ 4）：`POST /api/ally/{npc}`。
+- 组队：`Person.follows = <队长>`，队员跟着队长走、不自己做决定；对方好感 ≥ 2 或是盟友才会答应：`POST /api/party/{npc}?join=true|false`。
+
+### 守恒（`planning.json` 里 `"conservation": true`）
+
+东西只能采集、制造出来：
+- `ensure_kind` 这类自动补货规则不再生效；资源都来自采集点（有存量、随时间恢复）。
+- 任务线的奖励 / 物品动作不能 `spawn_item`：交出给任务的人手里真有的东西，或从他的钱里付。
+- 剧情导演的 `adjust` 只能减（风雨、损耗），不能凭空加。
+- 钱只在买卖时从一个人转给另一个人。
+
+### 价格和商店（`agent/economy.py`）
+
+- 每个游戏小时按供需定价：`price = value × (基准数量+2)/(现有数量+2) × (1 + 0.15×需求)`，夹在 0.5–3 倍；买卖都按 `price`。
+- 商人写 `"sells": ["axe", "rod"]`、`"shop_stock": 1`：某类缺货就成了他自己的目标（`Collect item kind:<类别>`，规划器让他采集、制造或收购），拿到手就自动上架。
+
+### 联盟
+
+- 结盟的人聚成联盟（`(:Person)-[:MEMBER_OF]->(:Alliance)`），联盟之间的关系（`STANCE`，-10..10）= 两边成员互相好感的平均，每两个游戏小时重算：≥4 友好，≤-2 对立，≤-5 敌对（敌对联盟之间不做买卖）。
+- NPC 可以自己去结盟：目标 `Form alliance`（target = 人），规划器让他走过去 `propose_alliance`；对方好感 ≥ 4 才答应（条件 `feels_gte`，当面才知道）。
