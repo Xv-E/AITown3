@@ -188,6 +188,7 @@ class WorldSimulator:
                 verbose=False,
                 plan_engines=["unified_planning", "bfs"],
             )
+            self._hook_earlier_lines()
             if os.environ.get("AITOWN3_STORYTELLER", "1") != "0":
                 from storyteller import Storyteller
 
@@ -456,6 +457,18 @@ class WorldSimulator:
     def record_conversation(self, world, a: str, b: str, location: str, lines: List[Any]) -> None:
         """玩家通过界面说的话也进同一个列表（NPC 的回话同样冒气泡）。"""
         self._ensure_loop(world).record_conversation(a, b, location, lines)
+        self._hook_earlier_lines()
+
+    def _hook_earlier_lines(self) -> None:
+        """对话 prompt 里带上「之前已经跟对方说过的话」，NPC 不再每次都从头说一遍。"""
+        try:
+            import dialogue_service
+
+            dialogue_service.EARLIER_LINES = lambda speaker, listener: (
+                self._game_loop.said_to(speaker, listener) if self._game_loop is not None else []
+            )
+        except Exception:  # noqa: BLE001
+            pass
 
     def conflicts(self, limit: int = 8) -> List[Dict[str, Any]]:
         """最近的计划冲突（新的在前）。"""

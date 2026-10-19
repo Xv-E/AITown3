@@ -13,7 +13,7 @@ import json
 import logging
 import os
 import re
-from typing import Any, Dict, List, Optional
+from typing import Callable, Any, Dict, List, Optional
 
 from agent_profile import AgentProfile
 from npc_knowledge import (
@@ -533,6 +533,28 @@ def history_block(history: Optional[List[Dict[str, str]]]) -> str:
     return "Conversation so far:\n" + "\n".join(f'{who}: "{text}"' for who, text in turns) + "\n"
 
 
+# 之前聊天里这个人对对方说过的话：(说话的人, 听的人) -> 最近几句原话。模拟器启动时接上（见 GameLoop.said_to）。
+EARLIER_LINES: Optional[Callable[[str, str], List[str]]] = None
+
+
+def earlier_block(speaker: str, listener: str) -> str:
+    """之前已经跟对方说过的话：别再说一遍，接着往下聊。"""
+    if EARLIER_LINES is None or not speaker or not listener:
+        return ""
+    try:
+        lines = [str(t).strip().replace('"', "'") for t in EARLIER_LINES(speaker, listener) if str(t).strip()]
+    except Exception:  # noqa: BLE001
+        return ""
+    if not lines:
+        return ""
+    said = "\n".join(f'- "{t[:160]}"' for t in lines[-4:])
+    return (
+        f"\nEarlier you already told {listener}:\n{said}\n"
+        "Don't repeat that (not even reworded). Move on: answer what they say now, mention what changed, "
+        "or talk about something else.\n"
+    )
+
+
 def situation_brief(world, name: str) -> str:
     """说话的人此刻的处境：在忙什么、缺什么、挂着什么委托、店里卖什么缺什么。"""
     if world is None or not name:
@@ -734,7 +756,7 @@ def _llm_dialogue(
         limits=limits,
         history=history,
         speaker_is_player=_is_player_name(world, speaker_a),
-        situation=situation_brief(world, speaker_b),
+        situation=situation_brief(world, speaker_b) + earlier_block(speaker_b, speaker_a),
     )
 
     t0 = _time.perf_counter()
@@ -900,7 +922,7 @@ def _llm_dialogue(
         limits=limits,
         history=history,
         speaker_is_player=_is_player_name(world, speaker_a),
-        situation=situation_brief(world, speaker_b),
+        situation=situation_brief(world, speaker_b) + earlier_block(speaker_b, speaker_a),
         retry_note=(
             f"IMPORTANT: Previous answer was invalid (placeholder or bad JSON). "
             f"Write a real in-character reply for {speaker_b} about the player's question. "

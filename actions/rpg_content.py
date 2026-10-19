@@ -265,6 +265,17 @@ def crafting_view(world, actor: str) -> List[Dict[str, Any]]:
     return out
 
 
+def gather_tool_kinds() -> set:
+    """采集要用的工具种类（rod、axe……）：拿来干活的东西，不是随手送人的礼物。"""
+    from content import get_content
+
+    return {
+        str((spec.get("rpg") or {}).get("tool") or "").lower()
+        for spec in get_content().actions.values()
+        if (spec.get("rpg") or {}).get("system") == "gather" and (spec.get("rpg") or {}).get("tool")
+    }
+
+
 def gather_node_kinds() -> set:
     from content import get_content
 

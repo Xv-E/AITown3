@@ -282,6 +282,8 @@ import itertools
 import re
 
 _ACTION_SEQ = itertools.count(1)
+# 模拟秒：同一个人这么久之内重复同一个动作（重试）不再说同一句（约一个半游戏小时）
+REPEAT_GAP = 20.0
 
 ACTION_LINES: Dict[str, List[str]] = {
     "travel": ["Off to {place}.", "Right, {place} next.", "Better get to {place}.", "Heading for {place}."],
@@ -356,10 +358,20 @@ def action_line(name: str, action: str, args: List[str], *, goal: str = "") -> s
 
 
 def say_action(loop, name: str, action: str, args: List[str], *, goal: str = "") -> Optional[Dict[str, Any]]:
-    """动作开始：这句话放进 loop.mutters，客户端在他头上冒出来。"""
+    """动作开始：这句话放进 loop.mutters，客户端在他头上冒出来。
+
+    同一个人短时间里重试同一件事（做不成又重来）不重复说。
+    """
+    now = float(getattr(loop, "sim_time", 0.0))
+    key = f"{action}:{':'.join(map(str, args))}"
+    said = loop.__dict__.setdefault("_action_lines_said", {})
+    last = said.get(name)
+    if last and last[0] == key and now - last[1] < REPEAT_GAP:
+        return None
     text = action_line(name, action, list(args), goal=goal)
     if not text:
         return None
+    said[name] = (key, now)
     entry = {
         "id": f"a{next(_ACTION_SEQ)}:{name}",
         "t": round(float(getattr(loop, "sim_time", 0.0)), 2),

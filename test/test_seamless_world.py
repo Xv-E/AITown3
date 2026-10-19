@@ -316,3 +316,63 @@ def test_gathering_and_crafting_lines_read_like_speech():
     assert _doing_label("gather_fell_log") == "fell a log", "no tool hint in brackets"
     assert _doing_label("craft_stone_axe") == "make a stone axe"
     assert _doing_label("craft_cook_fish") == "cook fish"
+
+
+def test_npcs_remember_what_they_already_told_you():
+    """之前对话里说过的话进对话 prompt：别每次都从头说一遍。"""
+    import dialogue_service
+    from game_loop import GameLoop
+
+    class _NoWorld:
+        def run_query(self, *a, **k):
+            return []
+
+    loop = GameLoop.__new__(GameLoop)
+    loop.conversations = [
+        {"a": "Rookie", "b": "Pip", "lines": [{"speaker": "Rookie", "text": "Hi"},
+                                              {"speaker": "Pip", "text": "I need wood for a fishing rod."}]},
+        {"a": "Pip", "b": "Hale", "lines": [{"speaker": "Pip", "text": "Morning, Hale."}]},
+    ]
+    assert loop.said_to("Pip", "Rookie") == ["I need wood for a fishing rod."]
+    old = dialogue_service.EARLIER_LINES
+    try:
+        dialogue_service.EARLIER_LINES = loop.said_to
+        block = dialogue_service.earlier_block("Pip", "Rookie")
+        assert "I need wood for a fishing rod." in block and "Don't repeat" in block
+        assert "Morning, Hale" not in block, "only what was said to this listener"
+    finally:
+        dialogue_service.EARLIER_LINES = old
+
+
+def test_working_tools_are_not_given_away_as_gifts(world):
+    from director import build_from_blueprint, load_world
+    from goal_planner import _maybe_append_give
+    from registry import act
+
+    build_from_blueprint(world, load_world("riverford"), clear=True)
+    world.run_query("MATCH (p:Person {name:'Pip'}) CREATE (r:Item {name:'TestRod', item_kind:'rod', portable:true}) "
+                    "MERGE (p)-[:HAS_ITEM]->(r)")
+    plan = _maybe_append_give(world, "Pip", "Hale", [(act("converse"), ["Pip", "Hale", "RiverDocks"])])
+    assert not any(step[0] == act("give") and "TestRod" in step[1] for step in plan), plan
+
+
+def test_having_it_already_is_not_being_stuck(camp):
+    """日程要「采一个浆果」、手上已经有了：不算卡住，不挂委托。"""
+    from agent_profile import AgentProfile
+    from game_loop import REQUEST_AFTER, GameLoop
+
+    camp.run_query(
+        "MATCH (p:Person {name: 'Sage'}), (i:Item {name: 'Berry1'}) "
+        "OPTIONAL MATCH (i)-[r:LOCATED_AT]->() DELETE r MERGE (p)-[:HAS_ITEM]->(i)"
+    )
+    loop = GameLoop(camp, verbose=False)
+    loop.force_mock = True
+    loop.add_agent(AgentProfile.from_world(camp, "Sage"), force_mock=True)
+    sage = loop.get_agent_state("Sage")
+    wanted = {"goal": "Collect item", "target_entity": "kind:berry", "reason": "Routine: pick berries"}
+    for _ in range(REQUEST_AFTER + 2):
+        loop._note_progress(sage, wanted, None)
+    assert sage.stuck_count == 0
+    assert not camp.run_query("MATCH (r:Request) RETURN r LIMIT 1") and not any(
+        "Posted a request" in (e.get("text") or "") for e in sage.history)
+    loop.close()

@@ -65,6 +65,8 @@ RECENT_TALK_WINDOW = 25.0
 BRAINS = ("llm", "routine")
 # 卡住：日程 / 店里要做的事连着做不成几次就挂委托、再多就临时请大模型想办法
 REQUEST_AFTER = 2
+# 模拟秒：失败过的目标过这么久（一个游戏小时）再拿出来试
+RETRY_GOAL_AFTER = 12.5
 STUCK_LIMIT = 3
 # 背景 NPC 临时用大模型想事情多久（模拟秒；两个游戏小时）
 ESCALATE_FOR = 25.0
@@ -146,6 +148,8 @@ class AgentState:
     decision_cooldown_until: float = 0.0
     status: str = "idle"  # idle | acting | deciding | planning | failed
     tried_goal_keys: List[str] = field(default_factory=list)
+    # 每个试过（失败）的目标是什么时候失败的：过了 RETRY_GOAL_AFTER 就可以再试
+    tried_goal_at: Dict[str, float] = field(default_factory=dict)
     replan_reason: Optional[str] = None
     mission_complete: bool = False
     mission_complete_reason: str = ""
@@ -413,6 +417,16 @@ class GameLoop:
         if picked is not None and _goal_key(picked.goal_data) == _goal_key(wanted):
             state.stuck_count, state.stuck_on = 0, ""
             return
+        try:
+            from goal_feasibility import assess_goal
+
+            done = assess_goal(self.world, state.agent.name, wanted, engines=self.plan_engines)
+            if getattr(done, "already_satisfied", False) is True:
+                # 已经有了（手上就有条鱼）：不算卡住，不用挂委托
+                state.stuck_count, state.stuck_on = 0, ""
+                return
+        except Exception:  # noqa: BLE001
+            pass
         what = _goal_text(wanted)
         state.stuck_count = state.stuck_count + 1 if state.stuck_on == what else 1
         state.stuck_on = what
@@ -1311,6 +1325,7 @@ class GameLoop:
             state.status = "idle"
             state.decision_cooldown_until = self.sim_time + self.decision_cooldown
             state.tried_goal_keys.clear()
+            state.tried_goal_at.clear()
             state.replan_reason = None
             self._sync_quest_ui(state)
         elif action_result.success:
@@ -2222,6 +2237,18 @@ class GameLoop:
         self._push_triggers(state, [Trigger("event", "conversation", text[:600], prio, self.sim_time, {"with": other})])
         return True
 
+    def said_to(self, name: str, other: str, limit: int = 4) -> List[str]:
+        """name 在之前的对话里对 other 说过的话（最近 limit 句，旧的在前）。"""
+        out: List[str] = []
+        for c in reversed(self.conversations):
+            if {c.get("a"), c.get("b")} != {name, other}:
+                continue
+            mine = [str(ln.get("text") or "") for ln in c.get("lines") or [] if ln.get("speaker") == name]
+            out = mine + out
+            if len(out) >= limit:
+                break
+        return out[-limit:]
+
     def recent_talk(self, name: str) -> str:
         """决策用：最近和谁说过什么（逐句原话）。"""
         out = []
@@ -2559,6 +2586,12 @@ class GameLoop:
         state.candidate_goals = list(candidates)
         state.decision_steps = []
 
+        # 刚失败过的目标先不选；过了一阵（东西长回来了、拿到工具了）再试，别永远拉黑
+        expired = [k for k in state.tried_goal_keys
+                   if self.sim_time - state.tried_goal_at.get(k, self.sim_time) >= RETRY_GOAL_AFTER]
+        for k in expired:
+            state.tried_goal_keys.remove(k)
+            state.tried_goal_at.pop(k, None)
         exclude = list(state.tried_goal_keys)
         llm_goal = None
         if candidates:
@@ -2838,6 +2871,7 @@ class GameLoop:
                 return
             if key and key not in state.tried_goal_keys:
                 state.tried_goal_keys.append(key)
+                state.tried_goal_at[key] = self.sim_time
 
         # 2) 换次优候选 / 重新决策
         state.decision_cooldown_until = 0.0  # 允许立即决策

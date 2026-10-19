@@ -182,6 +182,10 @@ def test_a_stuck_background_npc_posts_a_request_then_thinks_with_the_llm(monkeyp
     loop._person_flags = lambda s: {"is_player": False, "role": "npc", "dead": False, "hp": 100,
                                     "brain": "routine", "follows": ""}
     monkeypatch.setattr(game_loop, "_llm_configured", lambda: True)
+    import goal_feasibility
+
+    # 假世界答不了「他手上有没有石头」：当作还没有（不然就不算卡住）
+    monkeypatch.setattr(goal_feasibility, "assess_goal", lambda *a, **k: MagicMock(already_satisfied=False))
     posted = []
     loop._post_request = lambda state, kind, why: posted.append(kind)
     reed = AgentState(agent=Who())
