@@ -11,15 +11,11 @@ use std::time::Instant;
 
 use crate::net::{trim_line, NpcActivity, SimClock, WorldSnapshot};
 use crate::speech::SpeechPlayer;
-use crate::scene::{cell_center, Interactive, TargetKind, TILE};
+use crate::scene::{cell_at, cell_center, Interactive, TargetKind, WalkGrid, TILE};
 
 /// Server walking speed (world cells per sim second); must match spatial.WALK_CELLS_PER_SEC.
 const SERVER_WALK_SPEED: f32 = 10.0;
-/// Fallback glide speed when correcting to the server position (pixels per second).
-const GLIDE_SPEED: f32 = 6.0 * TILE;
 const MIN_WALK_SECS: f32 = 0.2;
-/// An NPC behind schedule walks at most this many times faster to catch up (never teleports).
-const CATCH_UP: f32 = 2.0;
 /// Further than this from where they should be (cells) is a jump, not a walk (e.g. world reload).
 const TELEPORT_TILES: f32 = 25.0;
 
@@ -66,10 +62,17 @@ impl Walk {
     }
 }
 
-/// Points to walk and how long (sim seconds) it should take, at the server's walking
-/// speed. If we hear about the walk late, pick it up where the NPC should be by now
-/// instead of rushing through the whole route in the time that is left.
-fn walk_plan(here: Vec2, path: &[[i32; 2]], activity: &crate::net::NpcActivity, now: f32) -> (Vec<Vec2>, f32) {
+/// Points to walk and how long (sim seconds) it takes. NPCs always walk at the server's
+/// walking speed, so they never speed up or slow down. Heard about the walk late: join the
+/// route where they should be by now, getting there along open cells (never through a wall);
+/// the shortcut takes up the lag.
+fn walk_plan(
+    here: Vec2,
+    path: &[[i32; 2]],
+    activity: &crate::net::NpcActivity,
+    now: f32,
+    grid: &WalkGrid,
+) -> (Vec<Vec2>, f32) {
     let cells: Vec<Vec2> = path.iter().map(|c| cell_center(IVec2::new(c[0], c[1]))).collect();
     let total = activity
         .pending_walk_seconds
@@ -79,14 +82,36 @@ fn walk_plan(here: Vec2, path: &[[i32; 2]], activity: &crate::net::NpcActivity, 
     let walked = ((cells.len() - 1) as f32 * elapsed / total.max(1e-3)).floor() as usize;
     let walked = walked.min(cells.len() - 1);
     let expected = cells[walked];
-    // Behind: hurry along from where they are (up to CATCH_UP x walking speed) instead of
-    // jumping. Only something absurd (a world reload) is worth a jump.
-    let start = if here.distance(expected) <= TILE * TELEPORT_TILES { here } else { expected };
-    let mut points = vec![start];
+    // Only something absurd (a world reload) is worth a jump.
+    let mut points = if here.distance(expected) > TILE * TELEPORT_TILES {
+        vec![expected]
+    } else {
+        route_between(grid, here, IVec2::new(path[walked][0], path[walked][1]))
+    };
     points.extend(cells[walked + 1..].iter().copied());
-    let length: f32 = points.windows(2).map(|w| w[0].distance(w[1])).sum::<f32>() / TILE;
-    let hurried = length / (SERVER_WALK_SPEED * CATCH_UP);
-    (points, (total - elapsed).max(hurried))
+    (points.clone(), walk_secs(&points))
+}
+
+/// From a position to a cell along open cells (A*); a straight line only when there is no grid.
+fn route_between(grid: &WalkGrid, from: Vec2, to: IVec2) -> Vec<Vec2> {
+    let start = cell_at(from);
+    let mut points = vec![from];
+    if start == to {
+        points.push(cell_center(to));
+        return points;
+    }
+    let goals = std::collections::HashSet::from([to]);
+    match grid.path(start, &goals) {
+        Some(cells) if grid.has_layout() => points.extend(cells.into_iter().map(cell_center)),
+        _ => points.push(cell_center(to)),
+    }
+    points
+}
+
+/// Sim seconds to walk these points at the server's walking speed.
+fn walk_secs(points: &[Vec2]) -> f32 {
+    let tiles: f32 = points.windows(2).map(|w| w[0].distance(w[1])).sum::<f32>() / TILE;
+    tiles / SERVER_WALK_SPEED
 }
 
 #[derive(Component)]
@@ -124,6 +149,7 @@ pub fn sync_npcs(
     mut sprites: Query<&mut Sprite, With<NpcAvatar>>,
     mut looks: ResMut<crate::icons::PersonIcons>,
     mut images: ResMut<Assets<Image>>,
+    grid: Res<WalkGrid>,
 ) {
     if director.revision == Some(world.revision) {
         return;
@@ -177,7 +203,7 @@ pub fn sync_npcs(
                     continue;
                 }
                 avatar.walk_key = key;
-                let (points, sim_secs) = walk_plan(here, &path, a, clock.now());
+                let (points, sim_secs) = walk_plan(here, &path, a, clock.now(), &grid);
                 avatar.walk = Some(Walk {
                     points,
                     started: Instant::now(),
@@ -190,11 +216,14 @@ pub fn sync_npcs(
                     continue;
                 }
                 avatar.walk_key.clear();
-                avatar.walk = Some(Walk {
-                    points: vec![here, target],
-                    started: Instant::now(),
-                    secs: (here.distance(target) / GLIDE_SPEED).max(MIN_WALK_SECS),
-                });
+                if here.distance(target) > TILE * TELEPORT_TILES {
+                    avatar.walk = Some(Walk { points: vec![target], started: Instant::now(), secs: MIN_WALK_SECS });
+                    continue;
+                }
+                // Back to where the server says they stand: around walls, at walking speed.
+                let points = route_between(&grid, here, server_cell);
+                let secs = walk_secs(&points) * clock.wall_per_sim();
+                avatar.walk = Some(Walk { points, started: Instant::now(), secs: secs.max(MIN_WALK_SECS) });
             }
         }
     }
@@ -407,23 +436,42 @@ mod tests {
     }
 
     #[test]
-    fn a_late_walk_hurries_along_instead_of_teleporting() {
+    fn a_late_walk_keeps_the_pace_and_joins_the_route_without_jumping() {
         let path: Vec<[i32; 2]> = (0..21).map(|x| [x, 0]).collect(); // 20 cells = 2 sim s
+        let grid = WalkGrid::from_cells((0..21).map(|x| IVec2::new(x, 0)));
         let activity = crate::net::NpcActivity {
             pending_started_at: Some(10.0),
             pending_walk_seconds: Some(2.0),
             ..Default::default()
         };
         let start = cell_center(IVec2::new(0, 0));
-        let (points, secs) = walk_plan(start, &path, &activity, 10.0);
-        assert_eq!((points.len(), secs), (21, 2.0), "on time: the whole route, full time");
-        let (points, secs) = walk_plan(start, &path, &activity, 11.0);
-        assert_eq!(points[0], start, "late: no jump, they hurry from where they are");
-        assert_eq!(points.len(), 11, "...along the rest of the route");
-        assert!((secs - 1.0).abs() < 1e-3, "20 cells at double speed = the 1 s that is left: {secs}");
+        let (points, secs) = walk_plan(start, &path, &activity, 10.0, &grid);
+        assert_eq!(points.len(), 22, "on time: from here, the whole route");
+        assert!((secs - 2.0).abs() < 1e-3, "{secs}");
+        let (points, secs) = walk_plan(start, &path, &activity, 11.0, &grid);
+        assert_eq!(points[0], start, "late: no jump");
+        assert!((secs - 2.0).abs() < 1e-3, "late: the same pace, not double speed ({secs})");
         let far = cell_center(IVec2::new(0, 40));
-        let (points, _) = walk_plan(far, &path, &activity, 11.0);
+        let (points, _) = walk_plan(far, &path, &activity, 11.0, &grid);
         assert_eq!(points[0], cell_center(IVec2::new(10, 0)), "absurdly far off (a reload): jump");
+    }
+
+    #[test]
+    fn joining_the_route_goes_around_a_wall() {
+        // A wall at x = 1 except a gap at y = 2: from (0, 0) to the route at (2, 0).
+        let mut open: Vec<IVec2> = Vec::new();
+        for y in 0..3 {
+            for x in 0..4 {
+                if x != 1 || y == 2 {
+                    open.push(IVec2::new(x, y));
+                }
+            }
+        }
+        let grid = WalkGrid::from_cells(open);
+        let points = route_between(&grid, cell_center(IVec2::ZERO), IVec2::new(2, 0));
+        let cells: Vec<IVec2> = points.iter().map(|p| cell_at(*p)).collect();
+        assert!(cells.contains(&IVec2::new(1, 2)), "through the gap: {cells:?}");
+        assert!(!cells.contains(&IVec2::new(1, 0)) && !cells.contains(&IVec2::new(1, 1)), "not through the wall");
     }
     use std::time::Duration;
 
