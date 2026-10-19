@@ -83,7 +83,7 @@ pub fn structure_image(tiles: &[String]) -> Image {
     for cy in 0..h {
         for cx in 0..w {
             let kind = at(cx as isize, cy as isize);
-            if !matches!(kind, b'#' | b'%' | b'~' | b'+') {
+            if !matches!(kind, b'#' | b'%' | b'~' | b'+' | b'^') {
                 continue;
             }
             let (x, y) = (cx as isize, cy as isize);
@@ -117,6 +117,18 @@ pub fn structure_image(tiles: &[String]) -> Image {
                                 [74, 120, 58, 255]
                             } else {
                                 [42, 78, 38, 255]
+                            }
+                        }
+                        // Tree: a round canopy (lighter top-left), trunk shadow showing at the bottom.
+                        b'^' => {
+                            let (fx, fy) = (sx as f32 - 3.5, sy as f32 - 3.2);
+                            let r2 = fx * fx + fy * fy;
+                            if r2 <= 12.5 {
+                                if fx + fy < -3.0 { [92, 150, 70, 255] } else if r2 > 9.0 { [30, 70, 34, 255] } else { [52, 108, 50, 255] }
+                            } else if sy >= 6 && (3..=4).contains(&sx) {
+                                [84, 58, 36, 255]
+                            } else {
+                                [0, 0, 0, 0]
                             }
                         }
                         // Water: blue with a few wave highlights.

@@ -26,6 +26,39 @@ def _entity_label_for_name(world: "Neo4jWorld", name: str) -> Optional[str]:
     return None
 
 
+def _doors_for_locked_edges(world: "Neo4jWorld", bp: EventBlueprint) -> None:
+    """锁着的相邻（locked + key）在地图上就是一扇锁着的门：没有现成的门就补一扇，钥匙能打开它。
+
+    连通关系以地图为准，「锁」得落在门这个物品上，地图同步时才认得出来。
+    """
+    from .validate import _default_key_door_effect
+
+    doors = {
+        frozenset((i.located_at or "", i.connects_to or ""))
+        for i in bp.items
+        if (i.item_kind or "").lower() == "door"
+    }
+    for edge in bp.adjacencies:
+        if not (edge.locked and edge.key) or frozenset((edge.a, edge.b)) in doors:
+            continue
+        door = f"{edge.a}{edge.b}Door"[:48]
+        world.add_entity(
+            door, entity_type="Item", item_kind="door", portable=False, locked=True, value=0,
+            connects_to=edge.b, accepts_from=json.dumps([edge.key]),
+            description=f"A locked door between {edge.a} and {edge.b}.",
+        )
+        world.link_entities(door, "Item", edge.a, "Location", "LOCATED_AT")
+        rows = world.run_query("MATCH (k:Item {name: $k}) RETURN k.effects_on AS e", k=edge.key) or []
+        try:
+            effects = json.loads(rows[0]["e"]) if rows and rows[0].get("e") else []
+        except ValueError:
+            effects = []
+        effects.append(_default_key_door_effect(key_name=edge.key, door_name=door,
+                                                from_loc=edge.a, to_loc=edge.b, consume=False))
+        world.run_query("MATCH (k:Item {name: $k}) SET k.effects_on = $e", k=edge.key,
+                        e=json.dumps(effects, ensure_ascii=False))
+
+
 def build_from_blueprint(
     world: "Neo4jWorld",
     blueprint: EventBlueprint,
@@ -107,7 +140,12 @@ def build_from_blueprint(
             "trader": bool(getattr(person, "trader", False)),
             "sells": list(getattr(person, "sells", []) or []),
             "shop_stock": int(getattr(person, "shop_stock", 1) or 1),
+            "max_hp": int(person.hp or 100),
         }
+        if getattr(person, "faction", ""):
+            props["faction"] = person.faction
+        if getattr(person, "guard", False):
+            props["guard"] = True
         if getattr(person, "secret", ""):
             props["secret"] = person.secret
         if person.accepts_from:
@@ -188,6 +226,11 @@ def build_from_blueprint(
             world.link_entities(item.name, "Item", item.located_at, "Location", "LOCATED_AT")
         if item.owned_by:
             world.link_entities(item.owned_by, "Person", item.name, "Item", "OWNS")
+        elif item.held_by and item.item_kind != "door" and item.portable is not False:
+            # 一开始就拿在手上的东西是他自己的
+            world.link_entities(item.held_by, "Person", item.name, "Item", "OWNS")
+
+    _doors_for_locked_edges(world, bp)
 
     # Quests
     for quest in bp.quests:

@@ -134,6 +134,12 @@ The world is one continuous terrain map (`actions/terrain_gen.py`, stored as a `
 {"name": "Tavern", "tags": "food,social", "indoor": true, "parent": "TownSquare", "grid": [16, 12]}
 ```
 
+**Connectivity comes from the map.** The `ADJACENT_TO` / `LOCKED_ADJACENT_TO` edges in the graph are a summary of the terrain, rewritten by `spatial.sync_adjacency()`: places joined by open ground or an open doorway are `ADJACENT_TO`; places joined only through a locked door are `LOCKED_ADJACENT_TO` (with the door's key). The planner, routines and prompts read those edges as before. A world's `adjacencies` are only the design intent for generating the first map; a `locked` adjacency becomes a locked door item. After that, changes go through the map:
+
+- `spatial.edit_terrain(world, {(x, y): ("#", None), ...})` builds or knocks down walls, opens doorways, lays ground, then re-syncs.
+- Script ops: `link` / `unlink` of two Locations with `ADJACENT_TO` cut a passage / wall them off on the map; `spawn_location` grows the new place onto the map; setting a door's `locked` re-syncs (`graph_ops.apply_all`).
+- An edge added straight to the graph with no passage on the map is dropped at the next sync.
+
 `area` / `map` place a location's centre (optional); `grid` sets its rough size. The same world always gets the same map. A world can also hand-draw its map: `"terrain": {"rows": [...], "legend": {"V": "Village", "t": "Tavern"}}` with `#`, `%`, `~`, `+` and spaces as above. Places a questline adds later grow into the wilderness next to their neighbour; existing ground isn't touched.
 
 - **AI reasons in regions** (PDDL, routines, knowledge, the Storyteller): "go to the Forest", "chop the OakTree".
@@ -143,6 +149,14 @@ The world is one continuous terrain map (`actions/terrain_gen.py`, stored as a `
 - The play state's `world` block carries every region, item and person in world cells.
 
 Coordinates: `Person.x/y` are world cells; `Item.x/y` stay local to the item's region (add the region's `area_x/area_y`, which is the bounding box of its ground on the map). Items are only placed on the location's own ground, never in walls, doorways or a nested building.
+
+## Ownership, hostility and combat
+
+**Ownership** (`agent/ownership.py`, `(:Person)-[:OWNS]->(:Item)`): what you start out holding, pick up when it's nobody's, gather or make is yours. Giving, buying and selling hand it over; stolen goods still belong to the owner when they change hands. Taking a living person's thing (not an ally's) is **theft**: everyone who can see you (`VIEW_RADIUS`, not through walls) records it (`WITNESSED`), the owner likes you less (−5), onlookers too (−2). Give it back to win some of that back. The dead own nothing, so their things are lootable. The client shows whose things are whose and offers "Steal (Mira's)" instead of "Pick up".
+
+**Hostility** (`combat.hostility(a, b)`, the reason `a` treats `b` as an enemy): `attacked me` / `fighting` (within two game hours), `faction` (different factions where one is `monster` / `bandit` / …: set `"faction"` on a person), `criminal` (a person with `"guard": true` saw them steal or assault), `hatred` (feeling ≤ −6), `war` (alliances at war). The first four make NPCs attack; the last two only when they are clearly stronger. The client shows hostile people's names in red.
+
+**Combat**: `attack` does one `strike`: damage = power + best held weapon (`Item.damage`) − target's armour (`Item.armor`), at least 1. At 0 HP a person dies, drops everything on the ground and owns nothing. The victim (−4), their allies (−3) and onlookers (−2) think worse of the attacker; an unprovoked attack is a crime the witnesses remember. NPCs react by rule before anything else (`GameLoop._combat_step`): hit back or chase, flee to a neighbouring place without enemies when losing at low HP, and drop what they were doing if they get hit. HP regenerates for people who aren't fighting. The LLM sees enemies and owners in its prompt.
 
 ## Object actions
 

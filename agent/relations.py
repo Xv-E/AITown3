@@ -307,6 +307,21 @@ def after_action(world, actor: str, action: str, params: Dict[str, str], *, at: 
         from economy import add_demand, kind_of
 
         add_demand(world, kind_of(world, params["i"]), 1.0)  # 有人买 → 这类东西更抢手
+    if world is not None:
+        consequences(world, actor, action, params, at=at)
+
+
+def consequences(world, actor: str, action: str, params: Dict[str, str], *, at: float = 0.0) -> Dict[str, Any]:
+    """任何动作做完之后：东西易手 / 认领 / 偷窃（ownership.py）；打人的后果（combat.py）。"""
+    from content import get_content
+    from ownership import after_action as ownership_after
+
+    out = dict(ownership_after(world, actor, action, params, at=at) or {})
+    if (get_content().capability_of(action) or action) == "attack" and params.get("target"):
+        from combat import after_attack
+
+        out.update(after_attack(world, actor, params["target"], at=at))
+    return out
 
 
 # ----- 联盟（一伙人）-----

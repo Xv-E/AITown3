@@ -3,6 +3,7 @@
   "name": "Axe",
   "item_kind": "axe",
   "portable": true,
+  "damage": 4,
   "value": 8,
   "description": "A stone axe lashed to a handle. Fells logs from trees."
 }

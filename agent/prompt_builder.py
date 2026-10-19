@@ -344,11 +344,17 @@ Respond with a JSON object:
                 me=name,
             ) or []
             if people:
-                bits = [
-                    f"{r['n']}(hp={r.get('hp')}, mood={r.get('mood') or '-'}, role={r.get('role')})"
-                    for r in people
-                    if r.get("n")
-                ]
+                from combat import hostility
+
+                bits = []
+                for r in people:
+                    if not r.get("n"):
+                        continue
+                    why = hostility(self.world, name, r["n"])
+                    against = hostility(self.world, r["n"], name)
+                    tag = f", YOUR ENEMY ({why})" if why else ""
+                    tag += f", hostile to you ({against})" if against and against != why else ""
+                    bits.append(f"{r['n']}(hp={r.get('hp')}, mood={r.get('mood') or '-'}, role={r.get('role')}{tag})")
                 lines.append("People here: " + "; ".join(bits))
             else:
                 lines.append("People here: (none)")
@@ -360,9 +366,11 @@ Respond with a JSON object:
                 """
                 MATCH (i:Item)-[:LOCATED_AT]->(l:Location {name: $loc})
                 WHERE NOT (:Person)-[:HAS_ITEM]->(i)
+                OPTIONAL MATCH (o:Person)-[:OWNS]->(i)
                 RETURN i.name AS n,
                        coalesce(i.item_kind, '') AS kind,
-                       coalesce(i.locked, false) AS locked
+                       coalesce(i.locked, false) AS locked,
+                       o.name AS owner
                 ORDER BY n
                 """,
                 loc=loc,
@@ -376,6 +384,10 @@ Respond with a JSON object:
                     extra = ""
                     if kind == "door":
                         extra = " locked" if r.get("locked") else " open"
+                    if r.get("owner") and r["owner"] != name:
+                        extra += f", {r['owner']}'s: taking it is stealing"
+                    elif r.get("owner") == name:
+                        extra += ", yours"
                     bits.append(f"{r['n']}[{kind}{extra}]")
                 lines.append("Ground items / interactables: " + ", ".join(bits))
             else:
