@@ -356,7 +356,7 @@ def save_terrain(world: "Neo4jWorld", terrain: Terrain) -> None:
 
 
 def save_authored_terrain(world: "Neo4jWorld", raw: Dict[str, Any]) -> Optional[Terrain]:
-    """world JSON 里手画的地形（"terrain": {"rows": [...], "legend": {...}}）。"""
+    """world JSON 里手画的地形（"terrain": {"rows": [...], "legend": {...}, "decor": [...]}）。"""
     rows = [str(r) for r in raw.get("rows") or []]
     legend = {str(k): str(v) for k, v in (raw.get("legend") or {}).items() if len(str(k)) == 1}
     if not rows or not legend:
@@ -367,7 +367,10 @@ def save_authored_terrain(world: "Neo4jWorld", raw: Dict[str, Any]) -> Optional[
     ) or []
     indoor = {r["n"] for r in info if r.get("indoor") or _tag_set(r.get("tags")) & INDOOR_TAGS}
     parents = {r["n"]: r["parent"] for r in info if r.get("parent")}
-    terrain = from_ascii(rows, legend, indoor, parents)
+    # 门（物品）所在的那边算门洞的主人，门才摆得进门洞
+    sides = {frozenset((d["here"], d["other"])): d["here"] for d in door_pairs(world).values()}
+    decor = [str(r) for r in raw.get("decor") or []]
+    terrain = from_ascii(rows, legend, indoor, parents, decor=decor, door_side=sides)
     save_terrain(world, terrain)
     return terrain
 

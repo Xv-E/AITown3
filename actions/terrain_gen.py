@@ -32,9 +32,13 @@ DOOR = "+"      # 门洞（墙或篱笆上能走过去的一格；锁着的门�
 WALL = "#"      # 房子的墙
 FENCE = "%"     # 篱笆 / 树篱：室外地点之间的隔断
 WATER = "~"     # 水（只在手画地图里出现）
+TREE = "^"      # 树（只在手画地图里出现）：挡路
 
 WALKABLE = frozenset((GROUND, FLOOR, DOOR))
-OBSTACLES = frozenset((WALL, FENCE, WATER))
+OBSTACLES = frozenset((WALL, FENCE, WATER, TREE))
+
+# 装饰层（只改地面的样子，不影响能不能走）：手画地图里和地形同样大小的一层
+#   '=' 土路  'c' 石板路  'p' 木板（码头 / 桥）  'w' 麦田  'v' 菜地  'f' 花  'g' 碎石  's' 集市摊位  ' ' 无
 
 DEFAULT_SIZE = (20, 12)
 # 室内房间按地点格子尺寸缩小，再夹在这个范围里
@@ -75,6 +79,7 @@ class Terrain:
     indoor: Set[str] = field(default_factory=set)
     parents: Dict[str, str] = field(default_factory=dict)
     doorways: List[Doorway] = field(default_factory=list)
+    decor: List[str] = field(default_factory=list)   # 装饰层（每行一串；空 = 没有）
 
     def __post_init__(self) -> None:
         self._cells: Optional[Dict[str, Set[Cell]]] = None
@@ -153,6 +158,7 @@ class Terrain:
             "parents": json.dumps(self.parents, ensure_ascii=False),
             "doorways": json.dumps([[d.cell[0], d.cell[1], d.owner, d.other] for d in self.doorways],
                                    ensure_ascii=False),
+            "decor_rows": list(self.decor),
         }
 
     @classmethod
@@ -175,6 +181,7 @@ class Terrain:
             indoor=set(props.get("indoor") or []),
             parents=dict(json.loads(str(props.get("parents") or "{}"))),
             doorways=doorways,
+            decor=list(props.get("decor_rows") or []),
         )
 
 
@@ -251,6 +258,7 @@ class _Canvas:
         self.owner = [[-1] * width for _ in range(height)]
         self.kind = [[VOID] * width for _ in range(height)]
         self.doorways: List[Doorway] = []
+        self.decor: List[List[str]] = []
 
     def inside(self, c: Cell) -> bool:
         return 0 <= c[0] < self.w and 0 <= c[1] < self.h
@@ -271,8 +279,9 @@ class _Canvas:
                 if self.owner[y][x] == i and self.kind[y][x] in kinds}
 
     def terrain(self, indoor: Set[str], parents: Dict[str, str]) -> Terrain:
+        decor = ["".join(row) for row in self.decor] if any(c != " " for row in self.decor for c in row) else []
         return Terrain(self.w, self.h, list(self.names), self.owner, self.kind,
-                       indoor=set(indoor), parents=dict(parents), doorways=list(self.doorways))
+                       indoor=set(indoor), parents=dict(parents), doorways=list(self.doorways), decor=decor)
 
 
 def _area_of(p: Place) -> int:
@@ -1096,6 +1105,12 @@ def extend(
         for x in range(terrain.width):
             canvas.set((x + pad, y + pad), terrain.owner[y][x], terrain.kind[y][x])
     canvas.doorways = [Doorway((d.cell[0] + pad, d.cell[1] + pad), d.owner, d.other) for d in terrain.doorways]
+    if terrain.decor:
+        blank = [" "] * canvas.w
+        canvas.decor = [list(blank) for _ in range(canvas.h)]
+        for y, row in enumerate(terrain.decor[:terrain.height]):
+            for x, ch in enumerate(row[:terrain.width]):
+                canvas.decor[y + pad][x + pad] = ch
     indoor = set(terrain.indoor)
     parents = dict(terrain.parents)
     outdoor_all = [n for n in names if n not in indoor and not (n in by_name and by_name[n].indoor)]
@@ -1167,8 +1182,9 @@ def _crop(canvas: _Canvas, indoor: Set[str], parents: Dict[str, str], pad: int) 
     owner = [row[min_x:max_x + 1] for row in canvas.owner[min_y:max_y + 1]]
     kind = [row[min_x:max_x + 1] for row in canvas.kind[min_y:max_y + 1]]
     doorways = [Doorway((d.cell[0] - min_x, d.cell[1] - min_y), d.owner, d.other) for d in canvas.doorways]
+    decor = ["".join(row[min_x:max_x + 1]) for row in canvas.decor[min_y:max_y + 1]] if canvas.decor else []
     t = Terrain(max_x - min_x + 1, max_y - min_y + 1, list(canvas.names), owner, kind,
-                indoor=set(indoor), parents=dict(parents), doorways=doorways)
+                indoor=set(indoor), parents=dict(parents), doorways=doorways, decor=decor)
     return t, (pad - min_x, pad - min_y)
 
 
@@ -1180,8 +1196,11 @@ def _crop(canvas: _Canvas, indoor: Set[str], parents: Dict[str, str], pad: int) 
 
 
 def from_ascii(rows: List[str], legend: Dict[str, str], indoor: Iterable[str] = (),
-               parents: Optional[Dict[str, str]] = None) -> Terrain:
+               parents: Optional[Dict[str, str]] = None, *, decor: Optional[List[str]] = None,
+               door_side: Optional[Dict[Pair, str]] = None) -> Terrain:
+    """door_side：两个地点之间的门洞算在哪一边（门这个物品所在的那边）；不给就优先算室内那边。"""
     indoor = set(indoor)
+    door_side = dict(door_side or {})
     names = sorted(set(legend.values()))
     index = {n: i for i, n in enumerate(names)}
     height = len(rows)
@@ -1192,7 +1211,7 @@ def from_ascii(rows: List[str], legend: Dict[str, str], indoor: Iterable[str] = 
             if ch in legend:
                 n = legend[ch]
                 canvas.set((x, y), index[n], FLOOR if n in indoor else GROUND)
-            elif ch in (WALL, FENCE, WATER):
+            elif ch in (WALL, FENCE, WATER, TREE):
                 canvas.set((x, y), -1, ch)
     for y, row in enumerate(rows):
         for x, ch in enumerate(row):
@@ -1209,10 +1228,17 @@ def from_ascii(rows: List[str], legend: Dict[str, str], indoor: Iterable[str] = 
             if not sides:
                 continue
             sides.sort(key=lambda i: (names[i] not in indoor, names[i]))
+            if len(sides) > 1:
+                want = door_side.get(frozenset((names[sides[0]], names[sides[1]])))
+                if want in (names[sides[0]], names[sides[1]]):
+                    sides.sort(key=lambda i: names[i] != want)
             owner = sides[0]
             canvas.set((x, y), owner, DOOR)
             if len(sides) > 1:
                 canvas.doorways.append(Doorway((x, y), names[owner], names[sides[1]]))
+    if decor:
+        canvas.decor = [list(str(row).ljust(width)[:width]) for row in decor[:height]]
+        canvas.decor += [[" "] * width for _ in range(height - len(canvas.decor))]
     return canvas.terrain(indoor, dict(parents or {}))
 
 
@@ -1255,6 +1281,7 @@ def _canvas_from(terrain: Terrain) -> _Canvas:
     canvas.owner = [list(row) for row in terrain.owner]
     canvas.kind = [list(row) for row in terrain.kind]
     canvas.doorways = list(terrain.doorways)
+    canvas.decor = [list(row.ljust(terrain.width)[:terrain.width]) for row in terrain.decor]
     return canvas
 
 

@@ -785,12 +785,15 @@ def world_view(world, viewer: Optional[str]) -> Dict[str, Any]:
         width, height = terrain.width, terrain.height
         # 整张地形的格子种类：'.' 室外地 ',' 室内地板 '+' 门洞 '#' 墙 '%' 篱笆 '~' 水 ' ' 荒野
         tiles = terrain.kind_rows()
+        decor = list(terrain.decor)
     else:
         width = max((x + w for x, _, w, _ in areas.values()), default=0)
         height = max((y + h for _, y, _, h in areas.values()), default=0)
         tiles = []
+        decor = []
+    # decor：装饰层（土路、石板、麦田……只管好看），和 tiles 一样每行一串
     return {"width": width, "height": height, "regions": regions, "items": items, "persons": persons,
-            "tiles": tiles}
+            "tiles": tiles, "decor": decor}
 
 
 def get_play_state(world) -> Dict[str, Any]:

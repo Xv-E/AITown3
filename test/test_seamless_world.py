@@ -208,7 +208,7 @@ def _edges(world, rel="ADJACENT_TO"):
 
 
 @pytest.mark.parametrize("world_id", ["key_and_door", "sealed_archive", "town_daily_life", "adventurer_town",
-                                      "market_town", "frontier_village"])
+                                      "market_town", "frontier_village", "riverford"])
 def test_the_graph_says_what_the_map_says(world, world_id):
     from spatial import locked_door_cells, terrain_of
     from terrain_gen import links_present

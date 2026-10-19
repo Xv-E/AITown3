@@ -299,3 +299,22 @@ def test_connect_cuts_a_passage_and_separate_closes_it():
     sealed = separate(town, "GuildHall", "Crypt")
     assert frozenset(("GuildHall", "Crypt")) not in links_present(sealed)
     assert not sealed.doorways_between("GuildHall", "Crypt")
+
+
+def test_riverford_is_drawn_by_hand_and_renders():
+    """手画的 Riverford：城里的房子都朝街开门，过河只能走桥，墓穴只能从公会大厅进；美术图画得出来。"""
+    from terrain_art import render
+
+    data = json.loads((WORLDS / "riverford.json").read_text(encoding="utf-8"))
+    raw = data["terrain"]
+    indoor = {l["name"]: l["parent"] for l in data["locations"] if l.get("indoor")}
+    t = from_ascii(raw["rows"], raw["legend"], indoor.keys(), indoor, decor=raw["decor"])
+    links = links_present(t)
+    assert links == {frozenset((e["a"], e["b"])) for e in data["adjacencies"]}
+    for room in ("Tavern", "Smithy", "Chapel", "Cottages"):
+        assert links & {frozenset((room, other)) for other in t.names} == {frozenset((room, "TownSquare"))}
+    assert {p for p in links if "Crypt" in p} == {frozenset(("Crypt", "GuildHall"))}
+    assert {p for p in links if "Meadow" in p} == {frozenset(("Meadow", "RiverDocks")), frozenset(("Meadow", "Quarry"))}
+    assert len(t.decor) == t.height and any("=" in row for row in t.decor)
+    image = render(t, labels=False, scale=1)
+    assert image.size == (t.width * 16, t.height * 16)
