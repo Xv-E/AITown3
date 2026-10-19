@@ -618,6 +618,8 @@ class GameLoop:
                 continue
             if state.pending_action or self._engaged(state) or self._leader(state):
                 continue
+            if self.__dict__.get("_combat_until", {}).get(state.agent.name, -1.0) > self.sim_time:
+                continue  # 正在打 / 逃：战斗反应说了算
             in_plan = bool(state.current_plan and state.plan_index < len(state.current_plan))
             # 第一轮里下一步预检失败（status=failed）的计划也要在这一轮重规划
             if in_plan and not self._wants_interrupt(state) and state.status != "failed":
@@ -765,6 +767,19 @@ class GameLoop:
             return result
 
         agent.refresh_from_world()
+
+        # 战斗：挨打了 / 敌人就在眼前 → 先打或先逃（规则反应，不等大模型）
+        if (
+            not instant
+            and not self._is_player(state)
+            and not self._is_dead(state)
+            and self._may_auto_plan(state, include_player=include_player)
+            and self._combat_step(state)
+        ):
+            result["phase"] = "combat"
+            result["goal"] = state.last_goal
+            result["status"] = state.status
+            return result
 
         # 硬中断：死亡 / 极低 HP — 可取消进行中动作（不 apply）
         if self._hard_interrupt(state):
@@ -1921,6 +1936,60 @@ class GameLoop:
             if state is not None:
                 self._log(state, "event", f"Put {', '.join(items)} up for sale")
 
+    def _combat_step(self, state: AgentState) -> bool:
+        """打、追、逃（见 combat.react）。接手了这个人这一拍就返回 True。
+
+        正在做别的事：只有在动手之后又挨了打才打断；正在打 / 逃：让它做完这一下。
+        """
+        from combat import react
+
+        name = state.agent.name
+        checks = self.__dict__.setdefault("_combat_checks", {})
+        until = self.__dict__.setdefault("_combat_until", {})
+        pending = state.pending_action
+        in_combat = (state.last_goal or {}).get("source") == "combat"
+        if pending is not None:
+            if in_combat:
+                return False
+            rows = self.world.run_query(
+                "MATCH (p:Person {name: $n}) RETURN p.attacked_at AS t", n=name
+            ) or []
+            hit_at = rows[0].get("t") if rows else None
+            if hit_at is None or float(hit_at) < pending.started_at:
+                return False
+        else:
+            if in_combat and state.current_plan and state.plan_index < len(state.current_plan):
+                return False  # 战斗计划还有下一步（先走过去再打）：照常推进
+            if self.sim_time < checks.get(name, -1.0):
+                return False
+        checks[name] = self.sim_time + 1.0  # 环顾四周不用每拍都做
+        try:
+            choice = react(self.world, name, at=self.sim_time)
+        except Exception as e:  # noqa: BLE001
+            if self.verbose:
+                print(f"[WARN] combat react {name}: {e}")
+            return False
+        if not choice:
+            return False
+        if pending is not None:
+            state.pending_action = None
+            state.sim_busy_until = 0.0
+        attack = choice["kind"] == "attack"
+        target = choice.get("target") if attack else choice.get("to")
+        state.current_plan, state.plan_index = list(choice["plan"]), 0
+        state.last_goal = {
+            "goal": "Defeat enemy" if attack else "Flee",
+            "target_entity": target,
+            "reason": choice.get("why") or "",
+            "source": "combat",
+        }
+        until[name] = self.sim_time + 3.0
+        text = (f"Fights {target} ({choice.get('why')})" if attack
+                else f"Flees from {choice.get('from')} to {target}")
+        self._log(state, "event", text, reason=choice.get("why") or "")
+        self._start_next_step(state)
+        return True
+
     def _relations_step(self) -> None:
         """每两个游戏小时：好感回落、矛盾消退，够亲近的人自然结盟。"""
         from relations import DECAY_EVERY, decay
@@ -1932,6 +2001,13 @@ class GameLoop:
         if self.sim_time < due:
             return
         self._next_relations_at = self.sim_time + DECAY_EVERY
+        try:
+            from combat import regen
+
+            regen(self.world, at=self.sim_time)  # 没在打仗的人慢慢回血
+        except Exception as e:  # noqa: BLE001
+            if self.verbose:
+                print(f"[WARN] regen: {e}")
         try:
             decay(self.world, at=self.sim_time)
         except Exception as e:  # noqa: BLE001

@@ -150,6 +150,14 @@ The world is one continuous terrain map (`actions/terrain_gen.py`, stored as a `
 
 Coordinates: `Person.x/y` are world cells; `Item.x/y` stay local to the item's region (add the region's `area_x/area_y`, which is the bounding box of its ground on the map). Items are only placed on the location's own ground, never in walls, doorways or a nested building.
 
+## Ownership, hostility and combat
+
+**Ownership** (`agent/ownership.py`, `(:Person)-[:OWNS]->(:Item)`): what you start out holding, pick up when it's nobody's, gather or make is yours. Giving, buying and selling hand it over; stolen goods still belong to the owner when they change hands. Taking a living person's thing (not an ally's) is **theft**: everyone who can see you (`VIEW_RADIUS`, not through walls) records it (`WITNESSED`), the owner likes you less (−5), onlookers too (−2). Give it back to win some of that back. The dead own nothing, so their things are lootable. The client shows whose things are whose and offers "Steal (Mira's)" instead of "Pick up".
+
+**Hostility** (`combat.hostility(a, b)`, the reason `a` treats `b` as an enemy): `attacked me` / `fighting` (within two game hours), `faction` (different factions where one is `monster` / `bandit` / …: set `"faction"` on a person), `criminal` (a person with `"guard": true` saw them steal or assault), `hatred` (feeling ≤ −6), `war` (alliances at war). The first four make NPCs attack; the last two only when they are clearly stronger. The client shows hostile people's names in red.
+
+**Combat**: `attack` does one `strike`: damage = power + best held weapon (`Item.damage`) − target's armour (`Item.armor`), at least 1. At 0 HP a person dies, drops everything on the ground and owns nothing. The victim (−4), their allies (−3) and onlookers (−2) think worse of the attacker; an unprovoked attack is a crime the witnesses remember. NPCs react by rule before anything else (`GameLoop._combat_step`): hit back or chase, flee to a neighbouring place without enemies when losing at low HP, and drop what they were doing if they get hit. HP regenerates for people who aren't fighting. The LLM sees enemies and owners in its prompt.
+
 ## Object actions
 
 Interactive objects (a tree, a dial…) list what can be done with them in their script, as **data**: the same `requires` / `effects` primitives as the content-pack actions.

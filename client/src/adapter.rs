@@ -100,6 +100,15 @@ pub struct NpcThought {
     owner: Entity,
 }
 
+/// The name under an NPC: red while they are hostile to the player.
+#[derive(Component)]
+pub struct NpcName {
+    owner: Entity,
+}
+
+const NAME_COLOR: Color = Color::srgb(0.98, 0.88, 0.84);
+const HOSTILE_COLOR: Color = Color::srgb(1.0, 0.35, 0.30);
+
 #[derive(Resource, Default)]
 pub struct NpcDirector {
     revision: Option<u64>,
@@ -249,8 +258,9 @@ fn spawn_npc(commands: &mut Commands, name: &str, alive: bool, hp: i32, at: Vec2
                 font_size: 12.0,
                 ..default()
             },
-            TextColor(Color::srgb(0.98, 0.88, 0.84)),
+            TextColor(NAME_COLOR),
             Transform::from_xyz(0.0, -TILE * 0.75, 0.2),
+            NpcName { owner: npc },
         ));
         parent.spawn((
             Text2d::new(""),
@@ -302,9 +312,24 @@ pub fn update_npc_bubbles(
     world: Res<WorldSnapshot>,
     speech: Res<SpeechPlayer>,
     avatars: Query<&NpcAvatar>,
-    mut bubbles: Query<(&NpcBubble, &mut Text2d), Without<NpcThought>>,
-    mut thoughts: Query<(&NpcThought, &mut Text2d), Without<NpcBubble>>,
+    mut bubbles: Query<(&NpcBubble, &mut Text2d), (Without<NpcThought>, Without<NpcName>)>,
+    mut thoughts: Query<(&NpcThought, &mut Text2d), (Without<NpcBubble>, Without<NpcName>)>,
+    mut names: Query<(&NpcName, &mut TextColor)>,
 ) {
+    for (label, mut color) in &mut names {
+        let Ok(avatar) = avatars.get(label.owner) else {
+            continue;
+        };
+        let hostile = world
+            .world
+            .persons
+            .iter()
+            .any(|p| p.name == avatar.name && !p.hostile.is_empty());
+        let next = if hostile { HOSTILE_COLOR } else { NAME_COLOR };
+        if color.0 != next {
+            color.0 = next;
+        }
+    }
     for (bubble, mut text) in &mut bubbles {
         let Ok(avatar) = avatars.get(bubble.owner) else {
             continue;

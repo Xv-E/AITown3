@@ -346,6 +346,13 @@ def apply_op(world, op_spec: Dict[str, Any], ctx: Dict[str, str]) -> None:
         set_property(world, entity, label, prop, value)
         return
 
+    if op == "strike":
+        # 一击：伤害 = 力量 + 武器 - 护甲；打死了东西掉地上（见 agent/combat.py）
+        from combat import strike
+
+        strike(world, str(resolve_token(op_spec["attacker"], ctx)), str(resolve_token(op_spec["target"], ctx)))
+        return
+
     if op == "add_prop":
         entity = resolve_token(op_spec["entity"], ctx)
         label = op_spec.get("label") or "Item"

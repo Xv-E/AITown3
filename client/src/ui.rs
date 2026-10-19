@@ -477,6 +477,12 @@ fn target_menu(world: &WorldSnapshot, target: &Interactive) -> Menu {
                     subtitle.push_str("  ·  trader");
                 }
             }
+            // Hostility comes with the seamless-world snapshot (the person entry there).
+            if let Some(p) = world.world.persons.iter().find(|p| &p.name == name) {
+                if !p.hostile.is_empty() {
+                    subtitle.push_str(&format!("  ·  HOSTILE ({})", p.hostile));
+                }
+            }
             let mut menu = Menu::new(name.clone(), subtitle);
             if alive {
                 menu.add("Talk", Command::Talk { person: name.clone() });
@@ -533,9 +539,17 @@ fn target_menu(world: &WorldSnapshot, target: &Interactive) -> Menu {
             if thing.locked {
                 subtitle = format!("{subtitle} (locked)").trim().to_string();
             }
+            let theirs = !thing.owner.is_empty() && thing.owner != me;
+            if theirs {
+                subtitle = format!("{subtitle}  ·  {}'s", thing.owner).trim().to_string();
+            } else if thing.owner == me {
+                subtitle = format!("{subtitle}  ·  yours").trim().to_string();
+            }
             let mut menu = Menu::new(name, subtitle);
             if thing.can_pick_up() {
-                menu.add("Pick up", act("pick_up", &[("c", me), ("i", name), ("l", here)]));
+                // Someone else's: taking it is stealing (anyone who sees it will remember).
+                let label = if theirs { format!("Steal ({}'s)", thing.owner) } else { "Pick up".to_string() };
+                menu.add(label, act("pick_up", &[("c", me), ("i", name), ("l", here)]));
             }
             // The object's own actions: what you can do now, and why the rest can't be done.
             for action in &thing.actions {

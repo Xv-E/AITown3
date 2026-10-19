@@ -1188,6 +1188,9 @@ pub struct Actor {
     pub x: Option<i32>,
     #[serde(default)]
     pub y: Option<i32>,
+    /// Why this person treats the player as an enemy ("" = they don't).
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub hostile: String,
 }
 
 impl Actor {
@@ -1226,6 +1229,9 @@ pub struct Thing {
     /// A gathering spot's remaining supply (it regrows in fractions; shown whole).
     #[serde(default, deserialize_with = "lenient_opt_i32")]
     pub stock: Option<i32>,
+    /// Whose it is ("" = nobody's: finders keepers). Taking someone else's is stealing.
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub owner: String,
 }
 
 #[derive(Deserialize, Clone, Default)]

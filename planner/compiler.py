@@ -396,6 +396,14 @@ def _parse_json(raw: Any) -> Any:
         return None
 
 
+def _as_planned(op: Dict[str, Any]) -> Dict[str, Any]:
+    """规划时的近似：strike（一击，真实伤害还算武器和护甲）≈ 目标 HP 减掉打人者的力量。"""
+    if op.get("op") == "strike":
+        return {"op": "add_prop", "entity": op["target"], "label": "Person", "prop": "hp",
+                "delta": f"{op['attacker']}.power_level", "scale": -1, "min": 0}
+    return op
+
+
 def _effects_on(props: Dict[str, Any]) -> List[Dict[str, Any]]:
     from world_interactions import _parse_json_field, normalize_effect
 
@@ -582,6 +590,7 @@ class Compiler:
                 self.sym_values.setdefault(c["prop"], set()).update(str(v) for v in c.get("values") or [])
 
     def _scan_op(self, op: Dict[str, Any]) -> None:
+        op = _as_planned(op)
         kind = op.get("op")
         prop = op.get("prop")
         if prop in self.cfg.drop_props:
@@ -791,6 +800,7 @@ class Compiler:
     # ----- 效果 -----
 
     def _op(self, v: Variant, op: Dict[str, Any], env: Dict[str, Term]) -> Variant:
+        op = _as_planned(op)
         kind = op.get("op")
         w = Variant(list(v.pre), list(v.eff), list(v.params))
         if kind in ("set_prop", "add_prop"):

@@ -140,7 +140,12 @@ def build_from_blueprint(
             "trader": bool(getattr(person, "trader", False)),
             "sells": list(getattr(person, "sells", []) or []),
             "shop_stock": int(getattr(person, "shop_stock", 1) or 1),
+            "max_hp": int(person.hp or 100),
         }
+        if getattr(person, "faction", ""):
+            props["faction"] = person.faction
+        if getattr(person, "guard", False):
+            props["guard"] = True
         if getattr(person, "secret", ""):
             props["secret"] = person.secret
         if person.accepts_from:
@@ -221,6 +226,9 @@ def build_from_blueprint(
             world.link_entities(item.name, "Item", item.located_at, "Location", "LOCATED_AT")
         if item.owned_by:
             world.link_entities(item.owned_by, "Person", item.name, "Item", "OWNS")
+        elif item.held_by and item.item_kind != "door" and item.portable is not False:
+            # 一开始就拿在手上的东西是他自己的
+            world.link_entities(item.held_by, "Person", item.name, "Item", "OWNS")
 
     _doors_for_locked_edges(world, bp)
 
