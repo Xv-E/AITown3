@@ -1021,8 +1021,30 @@ class GameLoop:
         if apply and state.pending_action:
             self._complete_pending(state)
             return
+        if state.pending_action is not None and state.pending_action.path:
+            # 路走到一半不走了：停在走到的地方（不退回出发点）
+            from spatial import stop_walk_here
+
+            try:
+                stop_walk_here(self.world, state.agent.name, self.sim_time)
+            except Exception as e:  # noqa: BLE001
+                if self.verbose:
+                    print(f"[WARN] stop walk {state.agent.name}: {e}")
         state.pending_action = None
         state.sim_busy_until = 0.0
+
+    def _walk_started(self, state: AgentState) -> None:
+        """动作前要走路：记下路线和出发时刻，别处（死了、被打断）才知道他走到哪了。"""
+        pending = state.pending_action
+        if pending is None or not pending.path or pending.walk_seconds <= 0:
+            return
+        from spatial import start_walk
+
+        try:
+            start_walk(self.world, state.agent.name, list(pending.path), pending.started_at, pending.walk_seconds)
+        except Exception as e:  # noqa: BLE001
+            if self.verbose:
+                print(f"[WARN] start walk {state.agent.name}: {e}")
 
     def _start_next_step(
         self,
@@ -1073,6 +1095,7 @@ class GameLoop:
         state.sim_busy_until = pending.completes_at
         state.status = "acting"
         state.waiting_for = None
+        self._walk_started(state)
         if partner is not None:
             # 对方站着等我走过去，说完（或超时）就放开
             partner.engaged_by = state.agent.name
@@ -1111,9 +1134,10 @@ class GameLoop:
             state.status = "idle"
             if pending.path:
                 # 只是走过去（跟着队长）：走到了就站在那里
-                from spatial import set_person_cell
+                from spatial import end_walk, set_person_cell
 
                 set_person_cell(self.world, state.agent.name, tuple(pending.path[-1]))
+                end_walk(self.world, state.agent.name)
             return None
         agent = state.agent
         action_name, args = pending.name, pending.args
@@ -1150,11 +1174,13 @@ class GameLoop:
         if action_result.success:
             self._feelings_after(agent, action_name, args)
             self._list_new_goods(state)
-        if pending.path and (action_result.success or not pending.travel):
-            # 走到了（赶路失败的人还留在原区域，不挪）
-            from spatial import set_person_cell
+        if pending.path:
+            from spatial import end_walk, set_person_cell
 
-            set_person_cell(self.world, agent.name, tuple(pending.path[-1]))
+            if action_result.success or not pending.travel:
+                # 走到了（赶路失败的人还留在原区域，不挪）
+                set_person_cell(self.world, agent.name, tuple(pending.path[-1]))
+            end_walk(self.world, agent.name)
         self._observe(state, places=True)
 
         state.last_action_result = action_result
@@ -1972,8 +1998,7 @@ class GameLoop:
         if not choice:
             return False
         if pending is not None:
-            state.pending_action = None
-            state.sim_busy_until = 0.0
+            self._cancel_pending(state, apply=False)
         attack = choice["kind"] == "attack"
         target = choice.get("target") if attack else choice.get("to")
         state.current_plan, state.plan_index = list(choice["plan"]), 0
@@ -2136,6 +2161,7 @@ class GameLoop:
             completes_at=self.sim_time + secs, path=list(path), hold=True, walk_seconds=secs,
         )
         state.sim_busy_until = state.pending_action.completes_at
+        self._walk_started(state)
 
     def heard(self, name: str, other: str, lines: List[Any]) -> bool:
         """name 刚和 other 说完话：推一个「要不要因此改主意」的触发器（带上说了什么）。"""

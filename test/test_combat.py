@@ -225,3 +225,40 @@ def test_hp_comes_back_when_nobody_is_fighting(camp):
     assert stats(camp, "Reed")["hp"] == 50, "still in a fight: no healing"
     regen(camp, at=COMBAT_MEMORY + 1.0)
     assert stats(camp, "Reed")["hp"] == 50 + REGEN
+
+
+def test_someone_killed_on_the_road_lies_where_they_fell(camp):
+    """路走到一半被打死：倒在走到的地方，东西掉在身边；之后也不会被挪回出发点。"""
+    from agent_profile import AgentProfile
+    from combat import stats, strike
+    from game_loop import GameLoop
+    from spatial import entity_world_cells, person_cell, region_at
+
+    loop = GameLoop(camp, verbose=False)
+    loop.force_mock = True
+    loop.add_agent(AgentProfile.from_world(camp, "Reed"), force_mock=True)
+    reed = loop.get_agent_state("Reed")
+    start = _stand(camp, "Reed", "RiverBank")
+    camp.run_query(
+        "MATCH (p:Person {name: 'Reed'}), (i:Item {name: 'Wood1'}) "
+        "OPTIONAL MATCH (i)-[r:LOCATED_AT]->() DELETE r MERGE (p)-[:HAS_ITEM]->(i)"
+    )
+    reed.current_plan, reed.plan_index = [("move", ["Reed", "RiverBank", "CampfireClearing"])], 0
+    loop._start_next_step(reed)
+    pending = reed.pending_action
+    assert pending.path and len(pending.path) > 4
+    half = pending.started_at + pending.walk_seconds / 2
+    loop.sim_time = half
+    camp.run_query("MATCH (p:Person {name: 'Reed'}) SET p.hp = 1")
+    out = strike(camp, "Rowan", "Reed", at=half)
+    assert out["killed"]
+    fell = person_cell(camp, "Reed")
+    assert fell != start and fell in [tuple(c) for c in pending.path[1:-1]], "halfway along the road"
+    assert region_at(camp, fell) == camp.run_query(
+        "MATCH (:Person {name: 'Reed'})-[:LOCATED_AT]->(l) RETURN l.name AS l")[0]["l"]
+    wood = entity_world_cells(camp, "Wood1")[0]
+    assert max(abs(wood[0] - fell[0]), abs(wood[1] - fell[1])) <= 3, "dropped beside the body"
+    loop.tick(0.25, auto_plan=True)  # 下一拍：死人的动作被取消
+    assert reed.pending_action is None and not stats(camp, "Reed")["alive"]
+    assert person_cell(camp, "Reed") == fell, "the body stays put"
+    loop.close()

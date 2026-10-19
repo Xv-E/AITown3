@@ -949,6 +949,72 @@ def set_person_cell(world: "Neo4jWorld", name: str, cell: Cell) -> None:
     world.run_query("MATCH (p:Person {name: $n}) SET p.x = $x, p.y = $y", n=name, x=cell[0], y=cell[1])
 
 
+# ---------------------------------------------------------------------
+# 走在路上：Person.x / y 还是出发的那一格，走到哪了按时间算（Person.walk_*）
+# ---------------------------------------------------------------------
+
+
+def start_walk(world: "Neo4jWorld", name: str, path: List[Cell], started_at: float, seconds: float) -> None:
+    import json
+
+    world.run_query(
+        "MATCH (p:Person {name: $n}) SET p.walk_path = $path, p.walk_t0 = $t0, p.walk_secs = $secs",
+        n=name, path=json.dumps([list(c) for c in path]), t0=float(started_at), secs=float(seconds),
+    )
+
+
+def end_walk(world: "Neo4jWorld", name: str) -> None:
+    world.run_query("MATCH (p:Person {name: $n}) REMOVE p.walk_path, p.walk_t0, p.walk_secs", n=name)
+
+
+def walked_cell(path: List[Cell], started_at: float, seconds: float, now: float) -> Cell:
+    """按时间算走到了路上哪一格（匀速）。"""
+    if not path:
+        raise ValueError("empty path")
+    frac = 1.0 if seconds <= 0 else min(1.0, max(0.0, (now - started_at) / seconds))
+    return tuple(path[min(len(path) - 1, int(frac * (len(path) - 1)))])  # type: ignore[return-value]
+
+
+def current_cell(world: "Neo4jWorld", name: str, now: float) -> Optional[Cell]:
+    """这个人此刻站在哪：正在走路就是路上走到的那一格，否则是 person_cell。"""
+    import json
+
+    rows = world.run_query(
+        "MATCH (p:Person {name: $n}) RETURN p.walk_path AS path, p.walk_t0 AS t0, p.walk_secs AS secs", n=name
+    ) or []
+    if rows and rows[0].get("path"):
+        path = [tuple(c) for c in json.loads(rows[0]["path"])]
+        if path:
+            return walked_cell(path, float(rows[0]["t0"] or 0), float(rows[0]["secs"] or 0), now)
+    return person_cell(world, name)
+
+
+def stop_walk_here(world: "Neo4jWorld", name: str, now: float) -> Optional[Cell]:
+    """路走到一半停下（死了、被打断）：就停在走到的地方，人算在那块地上。"""
+    rows = world.run_query("MATCH (p:Person {name: $n}) RETURN p.walk_path IS NOT NULL AS w", n=name) or []
+    if not rows or not rows[0].get("w"):
+        return person_cell(world, name)
+    cell = current_cell(world, name, now)
+    end_walk(world, name)
+    if cell is None:
+        return None
+    set_person_cell(world, name, cell)
+    region = region_at(world, cell)
+    if region and region != person_region_name(world, name):
+        world.run_query(
+            """
+            MATCH (p:Person {name: $n})
+            OPTIONAL MATCH (p)-[r:LOCATED_AT]->()
+            DELETE r
+            WITH DISTINCT p
+            MATCH (l:Location {name: $loc})
+            MERGE (p)-[:LOCATED_AT]->(l)
+            """,
+            n=name, loc=region,
+        )
+    return cell
+
+
 def place_people(world: "Neo4jWorld") -> None:
     for r in world.run_query("MATCH (p:Person) RETURN p.name AS n") or []:
         person_cell(world, r["n"])

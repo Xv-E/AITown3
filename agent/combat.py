@@ -146,10 +146,16 @@ def _drop_everything(world, name: str, location: str) -> List[str]:
     return dropped
 
 
-def die(world, name: str) -> List[str]:
-    """死了：东西掉在地上、都没主了。返回掉下的东西。"""
+def die(world, name: str, *, at: Optional[float] = None) -> List[str]:
+    """死了：倒在走到的地方（路走到一半也停在那里），东西掉在身边、都没主了。返回掉下的东西。"""
     from ownership import release_all
 
+    try:
+        import spatial
+
+        spatial.stop_walk_here(world, name, now(world) if at is None else float(at))
+    except Exception:  # noqa: BLE001  没有地形的老世界
+        pass
     s = stats(world, name)
     world.run_query("MATCH (p:Person {name: $n}) SET p.dead = true, p.hp = 0", n=name)
     dropped = _drop_everything(world, name, str(s.get("location") or ""))
@@ -180,7 +186,7 @@ def strike(world, attacker: str, target: str, *, at: Optional[float] = None) -> 
     out: Dict[str, Any] = {"damage": dmg, "hp": hp, "killed": False, "provoked": provoked}
     if hp <= 0:
         out["killed"] = True
-        out["dropped"] = die(world, target)
+        out["dropped"] = die(world, target, at=at)
     return out
 
 

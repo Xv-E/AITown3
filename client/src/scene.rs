@@ -112,6 +112,7 @@ impl WalkGrid {
             .min_by_key(|c| ((*c - from).length_squared(), c.x, c.y))
     }
 
+    #[cfg(test)]
     pub fn from_cells(cells: impl IntoIterator<Item = IVec2>) -> Self {
         Self { revision: None, walkable: cells.into_iter().collect() }
     }

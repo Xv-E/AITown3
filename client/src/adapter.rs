@@ -192,6 +192,17 @@ pub fn sync_npcs(
             radius: TILE * 1.8,
         });
         let here = transform.translation.truncate();
+        if !person.alive {
+            // The dead don't walk: they lie where they fell (the server keeps that cell).
+            avatar.walk = None;
+            avatar.walk_key.clear();
+            avatar.bubble.clear();
+            let fell = cell_center(server_cell);
+            if here.distance(fell) > TILE * 0.75 {
+                commands.entity(entity).insert(Transform::from_xyz(fell.x, fell.y, transform.translation.z));
+            }
+            continue;
+        }
         let activity = world.activity(&person.name);
         avatar.bubble = activity.map(action_text).unwrap_or_default();
 
