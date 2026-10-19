@@ -21,6 +21,8 @@ const BUBBLE_COLOR: Color = Color::srgb(1.0, 0.92, 0.55);
 const MUTTER_COLOR: Color = Color::srgb(0.84, 0.86, 0.92);
 const SECRET_COLOR: Color = Color::srgb(1.0, 0.66, 0.30);
 const MIN_WALK_SECS: f32 = 0.2;
+/// Show "goal -> target" under NPC names (off: they say what they're doing instead).
+const SHOW_GOALS: bool = false;
 /// Further than this from where they should be (cells) is a jump, not a walk (e.g. world reload).
 const TELEPORT_TILES: f32 = 25.0;
 
@@ -397,13 +399,15 @@ pub fn update_npc_bubbles(
             // Something important the player was close enough to catch stands out.
             if m.important && m.overheard {
                 (format!("! {} !", trim_line(&m.text, 44)), SECRET_COLOR)
+            } else if m.kind == "action" {
+                // What they say as they set about something (instead of showing their goal).
+                (format!("\"{}\"", trim_line(&m.text, 44)), BUBBLE_COLOR)
             } else {
                 (format!("~ {} ~", trim_line(&m.text, 44)), MUTTER_COLOR)
             }
-        } else if !state_label.is_empty() && avatar.bubble.is_empty() {
-            (state_label, BUBBLE_COLOR)
         } else {
-            (avatar.bubble.clone(), BUBBLE_COLOR)
+            // Nothing said right now: only a lasting state (asleep...), no action label.
+            (state_label, BUBBLE_COLOR)
         };
         if text.0 != next {
             text.0 = next;
@@ -435,6 +439,11 @@ pub fn thought_line(activity: &NpcActivity) -> String {
     if activity.thinking_hard {
         return "(thinking it over...)".to_string();
     }
+    // Goals are no longer shown under the name: NPCs say a short line when they start
+    // something instead (see the bubble above their head).
+    if !SHOW_GOALS {
+        return String::new();
+    }
     // The server keeps the last goal after the plan is done; only show it while they're working on it.
     let working = !activity.pending_action.is_empty()
         || matches!(activity.status.as_str(), "acting" | "ready");
@@ -454,19 +463,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_goal_line_clears_once_they_are_done() {
+    fn under_the_name_only_requests_and_deep_thought_not_goals() {
         let mut a = crate::net::NpcActivity {
             goal: "Go to location".into(),
             target: "Tavern".into(),
-            status: "completed".into(),
+            status: "acting".into(),
+            pending_action: "move".into(),
             ..Default::default()
         };
-        assert_eq!(thought_line(&a), "", "arrived: nothing to show");
-        a.status = "acting".into();
-        assert_eq!(thought_line(&a), "Go to location -> Tavern");
-        a.status = "waiting".into();
-        a.pending_action = "move".into();
-        assert_eq!(thought_line(&a), "Go to location -> Tavern", "still on the way");
+        assert_eq!(thought_line(&a), "", "goals aren't shown: they say what they're doing instead");
+        a.thinking_hard = true;
+        assert_eq!(thought_line(&a), "(thinking it over...)");
+        a.request = "needs stone (3c)".into();
+        assert_eq!(thought_line(&a), "! needs stone (3c)");
     }
 
     #[test]

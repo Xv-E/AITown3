@@ -1326,6 +1326,9 @@ pub struct Mutter {
     /// Mood icon key (happy, angry, sad, scared, tired, love, surprised, thinking, hurt, secret).
     #[serde(default, deserialize_with = "lenient_string")]
     pub icon: String,
+    /// "action": what they say as they start doing something; "" = a mutter to themselves.
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub kind: String,
     /// Something that matters (a secret slipping out); `overheard` when the player was close enough.
     #[serde(default)]
     pub important: bool,

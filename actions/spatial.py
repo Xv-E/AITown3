@@ -16,6 +16,7 @@ grid_w × grid_h）为准，物品的格子坐标存在 Item.x / Item.y（左上
 from __future__ import annotations
 
 import math
+import random
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Set, Tuple
 
@@ -905,16 +906,50 @@ def _stable_hash(text: str) -> int:
     return h
 
 
-def resting_spot(walkable: Set[Cell], terrain: Terrain, region: str, who: str) -> Optional[Cell]:
-    """地点里给某人的落脚点：中间附近，按名字错开，免得大家叠在一个格子上；不站在门洞里。"""
-    inside = [c for c in terrain.cells_of(region) if c in walkable and terrain.kind_at(c) != DOOR]
-    mid = terrain.anchor(region)
-    if not inside or mid is None:
+def resting_spot(walkable: Set[Cell], terrain: Terrain, region: str, who: str,
+                 avoid: Iterable[Cell] = ()) -> Optional[Cell]:
+    """地点里给某人的落脚点：每人在每个地点有自己固定的一块（按名字散开在地点中间那一半里，不是都挤在正中间），
+    避开别人站着 / 正要去的格子和它们旁边一格；不站在门洞里，尽量不贴着墙。"""
+    inside = sorted(c for c in terrain.cells_of(region) if c in walkable and terrain.kind_at(c) != DOOR)
+    if not inside:
         return None
-    jitter = _stable_hash(who)
-    cx = mid[0] + (jitter % 7) - 3
-    cy = mid[1] + (jitter // 7 % 5) - 2
-    return min(inside, key=lambda c: (_octile(c, (cx, cy)), c))
+    roomy = [c for c in inside
+             if sum((c[0] + dx, c[1] + dy) in walkable for dx in (-1, 0, 1) for dy in (-1, 0, 1)) >= 8]
+    pool = roomy or inside
+    # 自己的那块：散在地点中间那一半里（不跑到边上，走路不至于太远）
+    mid = terrain.anchor(region) or pool[len(pool) // 2]
+    reach = max(3.0, 0.5 * math.sqrt(len(inside) / math.pi))
+    near_mid = [c for c in pool if _octile(c, mid) <= reach] or pool
+    rnd = random.Random(_stable_hash(f"{who}@{region}"))
+    want = near_mid[rnd.randrange(len(near_mid))]
+    near_others = {(x + dx, y + dy) for x, y in avoid for dx in (-1, 0, 1) for dy in (-1, 0, 1)}
+    free = [c for c in pool if c not in near_others] or [c for c in inside if c not in set(avoid)] or inside
+    return min(free, key=lambda c: (_octile(c, want), c))
+
+
+def people_cells(world: "Neo4jWorld", *, besides: str = "") -> Set[Cell]:
+    """别人站着的格子，和正在走去的终点。"""
+    import json
+
+    rows = world.run_query(
+        """
+        MATCH (p:Person)
+        WHERE p.name <> $me AND p.x IS NOT NULL AND p.y IS NOT NULL
+        RETURN p.x AS x, p.y AS y, p.walk_path AS path
+        """,
+        me=besides,
+    ) or []
+    out: Set[Cell] = set()
+    for r in rows:
+        out.add((_int(r["x"]), _int(r["y"])))
+        if r.get("path"):
+            try:
+                path = json.loads(r["path"])
+                if path:
+                    out.add((int(path[-1][0]), int(path[-1][1])))
+            except (ValueError, TypeError, IndexError):
+                pass
+    return out
 
 
 def person_cell(world: "Neo4jWorld", name: str) -> Optional[Cell]:
@@ -939,7 +974,7 @@ def person_cell(world: "Neo4jWorld", name: str) -> Optional[Cell]:
         cell = (_int(r["x"]), _int(r["y"]))
         if t.owner_at(cell) == loc and cell in walkable:
             return cell
-    spot = resting_spot(walkable, t, loc, name)
+    spot = resting_spot(walkable, t, loc, name, avoid=people_cells(world, besides=name))
     if spot:
         set_person_cell(world, name, spot)
     return spot
@@ -1078,9 +1113,10 @@ def plan_walk(world: "Neo4jWorld", actor: str, action_name: str, args: List[Any]
     walkable = walkable_cells(world) | {start}
     capability = get_content().capability_of(action_name)
 
+    others = people_cells(world, besides=actor)
     if capability == "travel":
         target = str(args[2]) if len(args) > 2 else ""
-        spot = resting_spot(walkable, t, target, actor) if target in t.names else None
+        spot = resting_spot(walkable, t, target, actor, avoid=others) if target in t.names else None
         goals = {spot} if spot else set()
     else:
         idx = _APPROACH_BY_NAME.get(action_name, _APPROACH_ARG.get(capability or ""))
@@ -1098,6 +1134,7 @@ def plan_walk(world: "Neo4jWorld", actor: str, action_name: str, args: List[Any]
             for dy in (-1, 0, 1)
             if (tx + dx, ty + dy) not in target_cells
         }
+        goals = (goals - others) or goals  # 别站到已经有人的那一格上
     path = find_path(walkable, start, goals)
     if not path or len(path) < 2:
         return None

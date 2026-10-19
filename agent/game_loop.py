@@ -1120,6 +1120,16 @@ class GameLoop:
             partner.engaged_until = pending.completes_at + ENGAGE_MARGIN
         if not instant:
             self._prefetch_talk(state, action_name, list(args))
+        if action_name != act("idle") and not self._is_player(state) and not instant:
+            # 做事时说一句短话（代替头顶显示目标）
+            try:
+                from mutter import say_action
+
+                say_action(self, state.agent.name, action_name, list(args),
+                           goal=str((state.last_goal or {}).get("goal") or ""))
+            except Exception as e:  # noqa: BLE001
+                if self.verbose:
+                    print(f"[WARN] action line {state.agent.name}: {e}")
         if action_name != act("idle"):
             self._log(
                 state,

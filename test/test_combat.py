@@ -34,7 +34,8 @@ def _stand(world, name, region, near=None, *, far_from=None):
     elif far_from is not None:
         cell = max(cells, key=lambda c: (_octile(c, far_from), c))
     else:
-        cell = t.anchor(region)
+        mid = t.anchor(region)
+        cell = min(cells, key=lambda c: (_octile(c, mid), c))  # 正中间可能摆着东西（篝火）
     world.run_query(
         """
         MATCH (p:Person {name: $n}) SET p.x = $x, p.y = $y

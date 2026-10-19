@@ -271,3 +271,39 @@ def test_scripts_that_link_or_unlink_places_change_the_map(camp):
 
     sync_adjacency(camp)
     assert frozenset(("Shelter", "RiverBank")) not in _edges(camp)
+
+
+def test_people_spread_out_instead_of_piling_up_in_the_middle(camp):
+    """所有人都去空地：各站各的，不叠在一起，也不都挤在正中间。"""
+    from spatial import _octile, person_cell, plan_walk, start_walk, terrain_of
+
+    t = terrain_of(camp)
+    spots = []
+    for name in camp.list_entities("Person"):
+        here = camp.run_query("MATCH (:Person {name: $n})-[:LOCATED_AT]->(l) RETURN l.name AS l", n=name)[0]["l"]
+        walk = plan_walk(camp, name, "move", [name, here, "CampfireClearing"])
+        if walk is None:
+            continue
+        start_walk(camp, name, walk.path, 0.0, walk.seconds)  # 别人看得见他要去哪
+        spots.append(walk.dest)
+    assert len(spots) >= 3
+    assert len(set(spots)) == len(spots), "nobody on the same cell"
+    assert all(_octile(a, b) >= 2 for i, a in enumerate(spots) for b in spots[i + 1:]), "not even side by side"
+    mid = t.anchor("CampfireClearing")
+    assert max(_octile(s, mid) for s in spots) >= 2, "spread out, not all at the centre"
+
+
+def test_npcs_say_a_short_line_when_they_start_something():
+    from mutter import action_line
+
+    assert action_line("Ash", "move", ["Ash", "Forest", "BerryGrove"]) in {
+        "Off to BerryGrove.", "Right, BerryGrove next.", "Better get to BerryGrove.", "Heading for BerryGrove."}
+    for _ in range(10):
+        line = action_line("Ash", "pick_up", ["Ash", "Berry2", "BerryGrove"])
+        assert "berry" in line or line == "Mine now.", line          # "Berry2" is said as "berry"
+        line = action_line("Ash", "attack", ["Ash", "Hale", "TownSquare"])
+        assert "Hale" in line or line == "Enough!", line
+    assert action_line("Ash", "move", ["Ash", "Forest", "Meadow"], goal="Flee") in {
+        "I'm getting out of here!", "Not today!", "Run!"}
+    assert action_line("Ash", "talk", ["Ash", "Hale", "TownSquare"]) == "", "they'll talk anyway"
+    assert action_line("Ash", "wait", ["Ash"]) == ""
