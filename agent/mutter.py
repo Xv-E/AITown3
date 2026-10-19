@@ -305,6 +305,27 @@ def _plain(name: str) -> str:
     return spaced.lower() if spaced and spaced[0].isupper() and " " not in spaced else spaced
 
 
+def _doing_label(action: str) -> str:
+    """采集 / 制造这类动作说成人话：用作者写的 label（"Gather dry sticks" -> "gather dry sticks"），
+    没有就把动作名里的前缀去掉（gather_fell_log -> "fell log"）。"""
+    label = ""
+    try:
+        from registry import get_registry
+
+        spec = getattr(get_registry().get(action), "spec", None) or {}
+        label = str(spec.get("label") or (spec.get("rpg") or {}).get("label") or "")
+    except Exception:  # noqa: BLE001
+        label = ""
+    if not label:
+        label = re.sub(r"^(gather|craft|do)_", "", action).replace("_", " ")
+    label = re.sub(r"\s*\([^)]*\)", "", label).strip()          # "fell a log (axe)" -> "fell a log"
+    label = label[:1].lower() + label[1:] if label else action.replace("_", " ")
+    if action.startswith("craft_") and not label.startswith(("make", "build", "cook", "smoke", "pack")):
+        article = "an" if label[:1] in "aeiou" else "a"
+        label = f"make {article} {label}"                         # 做出来的是东西：说成「做一个……」
+    return label
+
+
 def action_line(name: str, action: str, args: List[str], *, goal: str = "") -> str:
     """name 开始做 action(args) 时说的一句；空 = 不说（走过去搭话、发呆之类的）。"""
     from content import get_content
@@ -326,7 +347,7 @@ def action_line(name: str, action: str, args: List[str], *, goal: str = "") -> s
         "place": arg(2) if cap in ("travel", "flee") else "",
         "item": _plain(arg(1)),
         "who": arg(2) if cap == "give" else arg(1),
-        "label": action.replace("_", " ") if cap == "gather" else (arg(2) or "use").replace("_", " "),
+        "label": _doing_label(action) if cap == "gather" else (arg(2) or "use").replace("_", " "),
     }
     if cap == "use_on":
         fill["item"] = _plain(arg(1))

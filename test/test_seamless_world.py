@@ -307,3 +307,12 @@ def test_npcs_say_a_short_line_when_they_start_something():
         "I'm getting out of here!", "Not today!", "Run!"}
     assert action_line("Ash", "talk", ["Ash", "Hale", "TownSquare"]) == "", "they'll talk anyway"
     assert action_line("Ash", "wait", ["Ash"]) == ""
+
+
+def test_gathering_and_crafting_lines_read_like_speech():
+    from mutter import _doing_label
+
+    assert _doing_label("gather_gather_sticks") == "gather dry sticks"
+    assert _doing_label("gather_fell_log") == "fell a log", "no tool hint in brackets"
+    assert _doing_label("craft_stone_axe") == "make a stone axe"
+    assert _doing_label("craft_cook_fish") == "cook fish"
