@@ -413,6 +413,15 @@ async def api_execute(req: ExecuteActionRequest):
                     reason = f"{reason} ({receiver} trust → {get_trust(world, receiver)})"
             except Exception:
                 pass
+            try:
+                from inner_life import settle_favors
+                from llm_service import get_web_memory
+
+                settled = settle_favors(world, memory=get_web_memory())
+                if settled:
+                    reason = f"{reason} (favor kept: {'; '.join(settled)})"
+            except Exception:
+                pass
         interaction = None
         if ok and req.action == "interact":
             try:

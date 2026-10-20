@@ -71,6 +71,31 @@ class AdjacencySpec:
         return AdjacencySpec(a=a_n, b=b_n, locked=locked, key=key_n if locked else "")
 
 
+def _clean_bonds(raw: Any) -> Dict[str, str]:
+    """bonds 接受 {name: text} 或 [{with/name, feeling, history}]。"""
+    if isinstance(raw, dict):
+        pairs = list(raw.items())
+    elif isinstance(raw, list):
+        pairs = []
+        for x in raw:
+            if not isinstance(x, dict):
+                continue
+            who = x.get("with") or x.get("name") or x.get("b") or ""
+            text = "; ".join(
+                str(x.get(k)).strip() for k in ("feeling", "history") if str(x.get(k) or "").strip()
+            )
+            pairs.append((who, text))
+    else:
+        return {}
+    out: Dict[str, str] = {}
+    for who, text in pairs:
+        who = str(who or "").strip()
+        text = str(text or "").strip()
+        if who and text:
+            out[_clean_name(who)] = text
+    return out
+
+
 @dataclass
 class PersonSpec:
     name: str
@@ -93,6 +118,12 @@ class PersonSpec:
     routine: List[Dict[str, Any]] = field(default_factory=list)
     # 开局知识：{"all": true} 全知；{"places": [...], "items": [...]} 额外知道的地点 / 物品
     knows: Dict[str, Any] = field(default_factory=dict)
+    # 内心：深层渴望 / 恐惧 / 不愿说出口的秘密；对话与求助都从这里长出来
+    desire: str = ""
+    fear: str = ""
+    secret: str = ""
+    # 与他人的羁绊：{对方名字: "感受 + 共同经历"}
+    bonds: Dict[str, str] = field(default_factory=dict)
 
     def normalized(self) -> "PersonSpec":
         routine_out: List[Dict[str, Any]] = []
@@ -143,6 +174,10 @@ class PersonSpec:
             accepts_from=[_clean_name(str(x)) for x in (self.accepts_from or []) if x],
             routine=routine_out,
             knows=dict(self.knows or {}),
+            desire=(self.desire or "").strip(),
+            fear=(self.fear or "").strip(),
+            secret=(self.secret or "").strip(),
+            bonds=_clean_bonds(self.bonds),
         )
 
 
@@ -295,7 +330,7 @@ class RumorSpec:
         )
 
 
-# (person_a, relation, person_or_item_b)  relation in KNOWS|FRIENDS_WITH|LIKES
+# (person_a, relation, person_or_item_b)  relation in KNOWS|FRIENDS_WITH|LIKES|RIVALS_WITH|FAMILY_OF
 SocialLink = Tuple[str, str, str]
 
 # 仅匹配复合 CamelCase 实体名（StolenLedger），避免把 "The Missing Key" 当物品
@@ -616,6 +651,10 @@ class EventBlueprint:
                     accepts_from=list(p.accepts_from or []),
                     routine=routine_fixed,
                     knows=dict(p.knows or {}),
+                    desire=p.desire,
+                    fear=p.fear,
+                    secret=p.secret,
+                    bonds=dict(p.bonds or {}),
                 )
             )
         person_names = {p.name for p in fixed_persons}
@@ -688,7 +727,7 @@ class EventBlueprint:
         facts = [x.normalized() for x in self.facts]
         rumors = [x.normalized() for x in self.rumors]
         social: List[SocialLink] = []
-        allowed_rel = {"KNOWS", "FRIENDS_WITH", "LIKES"}
+        allowed_rel = {"KNOWS", "FRIENDS_WITH", "LIKES", "RIVALS_WITH", "FAMILY_OF"}
         for link in self.social:
             if len(link) != 3:
                 continue
@@ -781,6 +820,10 @@ class EventBlueprint:
                 accepts_from=list(x.get("accepts_from") or []),
                 routine=[dict(s) for s in (x.get("routine") or []) if isinstance(s, dict)],
                 knows=dict(x.get("knows") or {}) if isinstance(x.get("knows"), dict) else {},
+                desire=str(x.get("desire") or ""),
+                fear=str(x.get("fear") or ""),
+                secret=str(x.get("secret") or ""),
+                bonds=_clean_bonds(x.get("bonds")),
             )
             for x in (data.get("persons") or [])
             if isinstance(x, dict)

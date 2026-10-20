@@ -39,17 +39,19 @@ Rules:
 - English CamelCase names for entities (TownSquare, StolenLedger, VaultDoor, InnkeeperMara).
 - cast MUST include exactly one role=player (Traveler unless user named another).
 - cast SHOULD include 1-3 NPCs (role=npc) and usually one antagonist when the plot needs opposition.
-- Each cast entry needs a short function (why they matter to the quest).
+- Each cast entry needs a function: why they matter to the quest AND what they personally stand to gain or lose.
+- backstory: what happened BEFORE play starts, as cause and effect — who did what, why, and who is hurt by it.
+  The quest must follow from the backstory; avoid "X is missing, fetch X" with no reason behind it.
 - One clear quest objective and one macguffin CamelCase item name.
 - puzzle_kind must be one of: key_door | deliver | use_on_person | talk_info | custom
 - If the draft implies a locked door/vault/gate, use puzzle_kind=key_door and name both key and door.
 - talk_info / use_on_person MUST name the informant or target NPC in cast.
-- EVERY string field <= 12 words. Output ONLY valid JSON.
+- backstory <= 45 words; function <= 20 words; every other string <= 12 words. Output ONLY valid JSON.
 """
 
 SKELETON_SCHEMA = """
 Required JSON keys:
-title, premise,
+title, premise, backstory,
 cast: [{name, role, function}]  role: player|npc|antagonist,
 player_name (must match the cast player),
 antagonist_name (empty if none),
@@ -75,8 +77,10 @@ Rules:
   located_at start-side room, accepts_from:[KeyName], connects_to=goal_location.
   Keys: item_kind=key, portable=true, quest_flag=main_macguffin when it is the macguffin.
 - 1 quest; involves must list existing Person/Location/Item names only.
+- quest.description carries the human stakes from the skeleton backstory: what went wrong,
+  who is hurt, and why the giver cares personally (<= 40 words).
 - Leave facts/rumors/social empty ([]) — cast step owns those.
-- EVERY string <= 12 words. Output ONLY valid JSON.
+- quest.description <= 40 words; every other string <= 12 words. Output ONLY valid JSON.
 """
 
 WORLD_SCHEMA = """
@@ -99,17 +103,27 @@ Do NOT rename cast members. Do NOT add/remove locations or items. Do NOT write i
 Rules:
 - Keep every cast name/role from the world stubs EXACTLY.
 - Every person needs: personality, background, goal, values, mood, hp, power_level,
-  speech_style, secret_policy, trust_toward_player, located_at (must be an existing location).
+  speech_style, secret_policy, trust_toward_player, located_at (must be an existing location),
+  desire, fear, secret, bonds.
+- background: a concrete past event that ties this person to the backstory (not a job title).
+- desire: what they long for beyond today's chores; fear: what they dread losing or facing.
+- secret: something they hide that touches the backstory or another cast member.
+  The antagonist's secret must explain WHY they oppose the player — a motive, not pure villainy.
+- bonds: 1-2 entries per person {with, feeling, history}: a shared past with another cast member
+  (a debt, an old love, a rivalry, family, guilt, a broken promise). Bonds should pull people in
+  different directions so conversations carry tension and warmth.
 - Optional: works_at, accepts_from (tool names that may be used ON this person).
 - secret_policy: share_gossip | guarded | lie | open
 - trust_toward_player: integer -5..10 (antagonist usually <= 1; helpful npc >= 2)
 - Player goal should match the quest objective; NPC goals should be local motives.
 - 1-3 facts with known_by listing who already knows them (plot-critical info on the right NPC).
+  Facts are links in the backstory's chain of cause and effect, not game instructions.
 - 0-2 rumors with believed_by.
-- social: KNOWS between player and each NPC; FRIENDS_WITH/LIKES sparingly.
+- social: KNOWS between player and each NPC; FRIENDS_WITH/LIKES/RIVALS_WITH/FAMILY_OF to mirror bonds.
 - For talk_info: at least one fact known_by an NPC but NOT the player.
 - For use_on_person: target person.accepts_from must list the tool item name.
-- EVERY string <= 12 words. Output ONLY valid JSON.
+- background/desire/fear/secret/bond history/fact text <= 35 words; other strings <= 12 words.
+- Output ONLY valid JSON.
 """
 
 CAST_SCHEMA = """
@@ -118,13 +132,15 @@ JSON shape:
   "persons":[{
     "name","located_at","works_at","role",
     "personality","background","goal","values","mood","hp","power_level",
-    "speech_style","secret_policy","trust_toward_player","accepts_from"
+    "speech_style","secret_policy","trust_toward_player","accepts_from",
+    "desire","fear","secret",
+    "bonds":[{"with","feeling","history"}]
   }],
   "facts":[{name,text,secret_level,known_by}],
   "rumors":[{name,text,about,believed_by}],
   "social":[{a,rel,b}]
 }
-rel: KNOWS|FRIENDS_WITH|LIKES
+rel: KNOWS|FRIENDS_WITH|LIKES|RIVALS_WITH|FAMILY_OF
 """
 
 MECHANICS_SYSTEM = """You are the Director of a small playable RPG town simulation.
@@ -409,9 +425,12 @@ def _normalize_skeleton(raw: Dict[str, Any], prompt: str) -> Optional[Dict[str, 
         )
         npcs = [informant]
 
+    backstory = str(raw.get("backstory") or "").strip()
+
     return {
         "title": title,
         "premise": premise,
+        "backstory": backstory,
         "player_name": player,
         "antagonist_name": antagonist,
         "npc_names": npcs[:3],
@@ -439,7 +458,7 @@ def _stage_skeleton(
     data = _invoke_json(
         system=SKELETON_SYSTEM,
         user=user,
-        max_tokens=550,
+        max_tokens=700,
         stage="skeleton",
     )
     if not data:
@@ -701,9 +720,14 @@ def _apply_cast_patch(
             "speech_style",
             "secret_policy",
             "parent_goal",
+            "desire",
+            "fear",
+            "secret",
         ):
             if key in upd and upd[key] is not None and str(upd[key]).strip():
                 cur[key] = str(upd[key]).strip()
+        if isinstance(upd.get("bonds"), (list, dict)):
+            cur["bonds"] = upd["bonds"]
         if "hp" in upd and upd["hp"] is not None:
             try:
                 cur["hp"] = int(upd["hp"])
@@ -759,6 +783,7 @@ def _stage_cast(
     compact = {
         "title": world.get("title"),
         "premise": world.get("premise"),
+        "backstory": skeleton.get("backstory"),
         "puzzle_kind": skeleton.get("puzzle_kind"),
         "quest": skeleton.get("quest"),
         "cast": skeleton.get("cast"),
@@ -800,7 +825,7 @@ def _stage_cast(
     return _invoke_json(
         system=CAST_SYSTEM,
         user=user,
-        max_tokens=900,
+        max_tokens=1600,
         stage="cast",
     )
 
@@ -1018,7 +1043,7 @@ def _fallback_world_from_skeleton(sk: Dict[str, Any]) -> Dict[str, Any]:
             "quests": [
                 {
                     "name": sk["quest"]["name"],
-                    "description": sk["quest"]["objective"],
+                    "description": sk.get("backstory") or sk["quest"]["objective"],
                     "stage": "intro",
                     "state": "active",
                     "involves": involves,
@@ -1038,6 +1063,17 @@ def _fallback_world_from_skeleton(sk: Dict[str, Any]) -> Dict[str, Any]:
         },
         sk,
     )
+
+
+def _with_backstory(world: Dict[str, Any], sk: Dict[str, Any]) -> Dict[str, Any]:
+    """前情写进 premise：所有 NPC 决策 / 对话都会读到世界前提。"""
+    backstory = str(sk.get("backstory") or "").strip()
+    premise = str(world.get("premise") or sk.get("premise") or "").strip()
+    if not backstory or backstory in premise:
+        return world
+    out = dict(world)
+    out["premise"] = f"{premise} Before all this: {backstory}".strip()
+    return out
 
 
 def _llm_plan(
@@ -1064,6 +1100,7 @@ def _llm_plan(
     if not world:
         logger.warning("Director world stage failed; using skeleton fallback world")
         world = _fallback_world_from_skeleton(sk)
+    world = _with_backstory(world, sk)
 
     cast_patch = _stage_cast(prompt, world, sk)
     if cast_patch:

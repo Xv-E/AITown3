@@ -38,6 +38,9 @@ class PromptBuilder:
                 "If your current goal is still best, choose it again.",
                 "",
             ]
+        heart = self._get_heart_text(agent)
+        if heart:
+            parts += ["=== Your Heart & Promises ===", heart, ""]
         parts += [
             "=== Nearby Graph (current place) ===",
             self._get_local_graph_text(agent),
@@ -119,6 +122,27 @@ Respond with a JSON object:
 }}
 """
         return prompt
+
+    def _get_heart_text(self, agent: "AgentProfile") -> str:
+        """深层渴望 / 恐惧 + 未了的人情：让选择有个人动机。"""
+        try:
+            from inner_life import favors_text, load_inner_life
+        except Exception:
+            return ""
+        lines: List[str] = []
+        try:
+            inner = load_inner_life(self.world, agent.name)
+            if inner.desire:
+                lines.append(f"You long for: {inner.desire}")
+            if inner.fear:
+                lines.append(f"You fear: {inner.fear}")
+            favors = favors_text(self.world, agent.name)
+            if favors:
+                lines.append("Open favors (keeping or breaking a promise changes how people feel about you):")
+                lines.append(favors)
+        except Exception:
+            return ""
+        return "\n".join(lines)
 
     def _get_world_premise(self) -> str:
         try:

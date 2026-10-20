@@ -104,6 +104,13 @@
     },
     {
       "name": "Rowan",
+      "desire": "To find the grove his father planted, so the camp never has to fell the last old trees.",
+      "fear": "Being the one who let the forest die and forced the camp to move on.",
+      "secret": "He hurt his back last winter and can no longer carry what he pretends to.",
+      "bonds": {
+        "Ash": "fiercely protective; he carried Ash out of the fire that took the old camp",
+        "Reed": "old friends who bicker; Reed's loose talk once cost Rowan a promise he still regrets"
+      },
       "located_at": "Forest",
       "role": "npc",
       "personality": "blunt, tireless, loyal",
@@ -181,6 +188,13 @@
     },
     {
       "name": "Sage",
+      "desire": "To see the whole camp eat together every night without anyone counting portions.",
+      "fear": "Hunger turning friends against each other, as it did in the hard winter.",
+      "secret": "She hid a sack of dried berries for a lean season and has told no one, not even Ash.",
+      "bonds": {
+        "Ash": "dear friend; they promised each other the fire would never go out on their watch",
+        "Rowan": "worries about him; he works himself to the bone and won't let anyone help"
+      },
       "located_at": "BerryGrove",
       "role": "npc",
       "personality": "gentle, observant, practical",
@@ -259,6 +273,14 @@
     },
     {
       "name": "Ash",
+      "desire": "To get through one night without waking in a panic, and to be trusted rather than pitied.",
+      "fear": "The dark. The fire went out the night the old camp burned, and Ash's sister was lost in it.",
+      "secret": "Ash sometimes burns tomorrow's wood just to keep the light high, because the dark is unbearable.",
+      "bonds": {
+        "Rowan": "owes him their life, and hates having to beg him for wood every single day",
+        "Sage": "closest friend; the only one Ash lets see them cry",
+        "Reed": "suspects Reed knows about the fear, and dreads it spreading around camp"
+      },
       "located_at": "CampfireClearing",
       "role": "npc",
       "personality": "watchful, anxious, caring",
@@ -338,6 +360,13 @@
     },
     {
       "name": "Reed",
+      "desire": "To be needed by someone, not merely useful to everyone.",
+      "fear": "Being left behind when the camp moves on, as his own family once left him.",
+      "secret": "He knows how badly Ash fears the dark and has kept it to himself, though it would make a juicy story.",
+      "bonds": {
+        "Ash": "keeps their secret; feels a quiet tenderness he has never said aloud",
+        "Rowan": "old friends who bicker; Rowan still holds a grudge over a broken promise"
+      },
       "located_at": "RiverBank",
       "role": "npc",
       "personality": "restless, friendly, discreet",

@@ -74,6 +74,13 @@
     },
     {
       "name": "InnkeeperMara",
+      "desire": "To clear the name of her brother, the old archivist, who died blamed for the theft.",
+      "fear": "That the sealed records will prove her brother guilty after all.",
+      "secret": "She has been feeding travellers rumours on purpose, hoping one of them will open the archive for her.",
+      "bonds": {
+        "BlacksmithTor": "old friends; she covered his debts the year the forge nearly closed",
+        "ScholarElise": "her brother's apprentice; Mara feels responsible for her"
+      },
       "located_at": "Tavern",
       "role": "npc",
       "personality": "witty, observant, helpful",
@@ -89,6 +96,13 @@
     },
     {
       "name": "BlacksmithTor",
+      "desire": "To make something that matters more than hinges and horseshoes.",
+      "fear": "That a flaw in the archive locks he forged is how the thief got in.",
+      "secret": "He has lain awake for months wondering whether his own locks failed.",
+      "bonds": {
+        "InnkeeperMara": "owes her; she kept his forge alive when no one else would",
+        "GuardRenn": "respects his rigour, but thinks the man went cold after the sealing"
+      },
       "located_at": "Workshop",
       "role": "npc",
       "personality": "blunt, helpful",
@@ -104,6 +118,13 @@
     },
     {
       "name": "GuardRenn",
+      "desire": "To redeem himself after the archive was robbed on his watch.",
+      "fear": "Being blamed again and dismissed in disgrace.",
+      "secret": "He fell asleep on duty the night of the theft, and sealed the archive to bury the shame.",
+      "bonds": {
+        "ScholarElise": "guilty; she lies hurt in the antechamber because he keeps everyone out",
+        "BlacksmithTor": "avoids him; Tor keeps asking questions about the night of the theft"
+      },
       "located_at": "Courtyard",
       "role": "antagonist",
       "personality": "suspicious, rigid",
@@ -122,6 +143,13 @@
     },
     {
       "name": "ScholarElise",
+      "desire": "To finish her late master's history of the town before the records rot.",
+      "fear": "Dying in the dark with the work unfinished.",
+      "secret": "She suspects Renn was asleep on duty that night, but pity keeps her silent.",
+      "bonds": {
+        "GuardRenn": "pities him and resents him at once",
+        "InnkeeperMara": "her master's sister; Elise owes her more than she can repay"
+      },
       "located_at": "ArchiveAntechamber",
       "role": "npc",
       "personality": "frail, grateful, scholarly",

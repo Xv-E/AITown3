@@ -663,7 +663,13 @@
       return;
     }
     el.textContent = quests
-      .map((q) => `${q.name}: ${q.objective || q.description || q.stage}`)
+      .map((q) => {
+        const done = (q.state || "").toLowerCase() === "completed" ? "✓ " : "";
+        const goal = q.objective || q.description || q.stage;
+        // 人情任务：附上「为什么」，而不只是「要什么」
+        const why = q.objective && q.description ? ` — "${q.description}"` : "";
+        return `${done}${q.name}: ${goal}${why}`;
+      })
       .join(" · ");
   }
 

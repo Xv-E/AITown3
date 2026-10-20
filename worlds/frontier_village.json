@@ -54,6 +54,13 @@
     },
     {
       "name": "Oren",
+      "desire": "To build the village his late wife always talked about — a place worth staying in.",
+      "fear": "That the settlers who followed him into the wild will come to regret it.",
+      "secret": "He spent the last of the group's money on the land deed; the winter stores are thinner than he admits.",
+      "bonds": {
+        "Kai": "a father figure; sees his younger self in Kai and pushes him too hard",
+        "Lia": "relies on her; she was his late wife's closest friend"
+      },
       "located_at": "Village",
       "role": "npc",
       "personality": "patient, methodical, proud of good joinery",
@@ -76,6 +83,13 @@
     },
     {
       "name": "Kai",
+      "desire": "To earn Oren's respect and one day lead a building crew of his own.",
+      "fear": "Being sent back to the city as the useless boy his family always called him.",
+      "secret": "He is sweet on Lia but is sure she still sees him as a kid.",
+      "bonds": {
+        "Oren": "wants his approval more than anything, and chafes at every correction",
+        "Lia": "best friend; quietly in love with her"
+      },
       "located_at": "Village",
       "role": "npc",
       "personality": "energetic, strong, a little impatient",
@@ -98,6 +112,13 @@
     },
     {
       "name": "Lia",
+      "desire": "To bake the first loaf from the village's own wheat and share it at a proper table.",
+      "fear": "A failed harvest and hungry children, like the famine she lived through as a girl.",
+      "secret": "She suspects the winter stores are short and has been skipping meals so there is more for others.",
+      "bonds": {
+        "Oren": "loyal; she promised his dying wife she would look after him",
+        "Kai": "fond of him; has noticed how he looks at her and isn't sure what she feels"
+      },
       "located_at": "Village",
       "role": "npc",
       "personality": "warm, practical, worries about food",

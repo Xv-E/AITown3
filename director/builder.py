@@ -101,6 +101,11 @@ def build_from_blueprint(
             props["accepts_from"] = json.dumps(list(person.accepts_from), ensure_ascii=False)
         if getattr(person, "routine", None):
             props["routine"] = json.dumps(list(person.routine), ensure_ascii=False)
+        for key in ("desire", "fear", "secret"):
+            if getattr(person, key, ""):
+                props[key] = getattr(person, key)
+        if getattr(person, "bonds", None):
+            props["bonds"] = json.dumps(dict(person.bonds), ensure_ascii=False)
         world.add_entity(person.name, entity_type="Person", **props)
         world.link_entities(person.name, "Person", person.located_at, "Location", "LOCATED_AT")
         world.link_entities(person.name, "Person", person.located_at, "Location", "VISITED")
@@ -222,8 +227,8 @@ def build_from_blueprint(
             world.link_entities(a, "Person", b, "Item", rel)
         else:
             world.link_entities(a, "Person", b, "Person", rel)
-            if rel == "FRIENDS_WITH":
-                world.link_entities(b, "Person", a, "Person", "FRIENDS_WITH")
+            if rel in ("FRIENDS_WITH", "FAMILY_OF", "RIVALS_WITH"):
+                world.link_entities(b, "Person", a, "Person", rel)
 
     try:
         import sys

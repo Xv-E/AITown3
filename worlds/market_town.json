@@ -57,6 +57,13 @@
     },
     {
       "name": "Mira",
+      "desire": "To buy the empty shop beside the Warehouse and stop living from stall to stall.",
+      "fear": "Ending up like her father, whose shop failed the winter its shelves went bare.",
+      "secret": "She still owes Bruno three months of coin from a loan that saved her stall, and has told no one.",
+      "bonds": {
+        "Bruno": "grateful and embarrassed; he lent her money when the stall nearly folded last winter and never asks for it back",
+        "Tilda": "fond but impatient; Tilda's late deliveries cost her customers, yet Tilda never charges her full price"
+      },
       "located_at": "Cottages",
       "role": "npc",
       "personality": "shrewd, cheerful, organised",
@@ -80,6 +87,13 @@
     },
     {
       "name": "Bruno",
+      "desire": "To cook one feast good enough that his daughter in the city would come home for it.",
+      "fear": "Cooking for an empty room again, like the quiet months after his wife died.",
+      "secret": "A fever last spring took most of his sense of smell; he tastes every dish twice, terrified someone will notice.",
+      "bonds": {
+        "Tilda": "his closest friend; she sat with him every night the winter his wife died",
+        "Mira": "protective of her; he lent her money and would never ask for it back, which she hates"
+      },
       "located_at": "Cottages",
       "role": "npc",
       "personality": "gruff, proud of his cooking, generous",
@@ -102,6 +116,13 @@
     },
     {
       "name": "Tilda",
+      "desire": "To save enough to buy the field she works instead of renting it from an absent landlord.",
+      "fear": "A bad harvest — her brother lost his farm that way and left town in shame.",
+      "secret": "She quietly gives bruised vegetables to a hungry family, and the landlord counts every crate.",
+      "bonds": {
+        "Bruno": "best friend; she keeps him company after closing so he is never alone",
+        "Mira": "likes her but feels judged; Mira counts things Tilda would rather just share"
+      },
       "located_at": "Cottages",
       "role": "npc",
       "personality": "hard-working, talkative, always hungry",

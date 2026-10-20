@@ -196,7 +196,7 @@ class TestGenericGrammars(unittest.TestCase):
             "Where is the key?",
         )
         self.assertIn("npc-text", g)
-        self.assertIn("char{1,160}", g)
+        self.assertIn("char{1,220}", g)
         self.assertNotIn("revealed", g)
         self.assertNotIn("clue", g)
         self.assertNotIn("player-line", g)

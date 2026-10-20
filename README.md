@@ -87,6 +87,25 @@ VS Code / Cursor: launch configs under `.vscode/launch.json` (`AITown3: Web 服�
 
 Add a new world by placing a JSON file in `worlds/` (filename stem = world id).
 
+### Character inner life
+
+Persons may carry optional fields that drive emotional dialogue and motivated requests:
+
+```json
+{
+  "name": "Ash",
+  "desire": "To get through one night without waking in a panic.",
+  "fear": "The dark — the fire went out the night the old camp burned.",
+  "secret": "Sometimes burns tomorrow's wood just to keep the light high.",
+  "bonds": { "Rowan": "owes him their life; hates begging him for wood" }
+}
+```
+
+- Dialogue prompts include desire / fear / bonds with the listener; the secret is only confided to close people (`FRIENDS_WITH` / `FAMILY_OF`, or player trust ≥ 6).
+- When an NPC genuinely asks for help, the reply may carry a `favor` → a `Quest` (`kind=favor`) whose description is the personal reason. It completes when the asker holds the item; helping as the player raises trust.
+- Dialogue may also update the speaker's `mood`.
+- Social relations also accept `RIVALS_WITH` and `FAMILY_OF`.
+
 ## Project layout
 
 ```

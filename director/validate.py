@@ -243,6 +243,11 @@ def ensure_cast_quality(
                 trust_toward_player=trust,
                 accepts_from=list(p.accepts_from or []),
                 routine=[dict(s) for s in (getattr(p, "routine", None) or []) if isinstance(s, dict)],
+                knows=dict(p.knows or {}),
+                desire=(p.desire or "").strip(),
+                fear=(p.fear or "").strip(),
+                secret=(p.secret or "").strip(),
+                bonds=dict(p.bonds or {}),
             )
         )
 

@@ -258,7 +258,7 @@ def generate_json_array_grammar() -> str:
 # —— Talk 对话 JSON：分字段长度上限（GBNF + 提示词共用）——
 DIALOGUE_FIELD_LIMITS = {
     "player_text": 200,
-    "npc_text": 160,
+    "npc_text": 220,
     "npc_lines_min": 1,
     "npc_lines_max": 2,
 }

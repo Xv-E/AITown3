@@ -851,7 +851,7 @@ class GameLoop:
         try:
             from mission import sync_quest_progress
 
-            note = sync_quest_progress(self.world, agent.name)
+            note = sync_quest_progress(self.world, agent.name, memory=self.memory)
             if note and self.verbose:
                 print(f"[QUEST] [{agent.name}] {note}")
         except Exception:
