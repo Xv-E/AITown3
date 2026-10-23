@@ -1,5 +1,5 @@
 """
-世界系统 — 昼夜时钟 + 通用物品脚本 tick（无玩法特判）。
+世界系统 — 昼夜时钟 + 通用物品脚本 tick + 势力演化（无玩法特判）。
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from neo4j_world import Neo4jWorld
 
 
-def tick_world_systems(world: "Neo4jWorld", dt: float, sim_time: float) -> Dict[str, Any]:
+def tick_world_systems(world: "Neo4jWorld", dt: float, sim_time: float, *, memory=None) -> Dict[str, Any]:
     from item_scripts import tick_item_scripts
     from routine import day_phase, format_clock, hour_of_day, is_night
 
@@ -25,6 +25,17 @@ def tick_world_systems(world: "Neo4jWorld", dt: float, sim_time: float) -> Dict[
     report["events"].extend(scripts.get("events") or [])
     report["alerts"] = scripts.get("alerts") or []
     report["respawned"] = scripts.get("spawned") or []
+    # 势力演化：到点结算；大事作为公告进新闻，NPC 会因此重新决策
+    try:
+        from faction_sim import maybe_tick
+
+        fac = maybe_tick(world, sim_time, memory=memory) or {}
+    except Exception:
+        fac = {}
+    report["factions"] = fac.get("events") or []
+    report["events"].extend(
+        {"type": "announce", "text": ev["text"], "source": "factions"} for ev in report["factions"] if ev.get("text")
+    )
     report["clock"] = format_clock(sim_time)
     report["phase"] = phase
     report["night"] = night

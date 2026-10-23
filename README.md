@@ -6,7 +6,8 @@ A small open-world play sandbox: locations, people, and items live in **Neo4j**;
 
 - **Playable web UI** — map, people/things at a location, actions, simulation, character dossiers
 - **Template worlds** — JSON scenarios under `worlds/`
-- **Director** — sketch an event; AI expands it into a playable blueprint
+- **Director** — sketch an event; AI places people, items, quests and factions on a hand-configured map
+- **Living factions** — families, gangs and guilds hold territory, feud, split and rise on their own
 - **NPC loop** — goals → PDDL/rule plans → timed actions; dialogue + Chroma memory
 - **LLM inspect** — `/inspect` shows Qwen / local GBNF / PDDL traces
 
@@ -70,7 +71,7 @@ VS Code / Cursor: launch configs under `.vscode/launch.json` (`AITown3: Web 服�
 ### In the UI
 
 1. **Template worlds** — load a preset from `worlds/*.json` (clears world + memory)
-2. **New event** — Director drafts / expands a custom blueprint
+2. **New event** — pick a hand-configured map, then the Director drafts / expands a custom blueprint on it
 3. Click exits or map rooms to move; click people/things to act
 4. **Simulation** — NPCs (optionally the player) auto-plan with rules or LLM
 5. **LLM log** — `/inspect` for decision and dialogue traces
@@ -126,6 +127,44 @@ Worlds may declare factions of any size — a family, a gang, a guild, the town 
 - **Standing ripples**: giving (+2), attacking (−6), talk outcomes and kept favors change the actor's standing with every faction of the target, and with that faction's allies (same way) and rivals / enemies (opposite way). Small factions react hardest; hurting your own faction counts 1.5×.
 - Facts may set `"faction"`: that faction's private business, shared with members, maybe with allies, never with rivals.
 - The play UI shows your standing with each faction; dossiers list memberships.
+
+#### Territory and traits
+
+- `territory`: `{"Place": strength 0-10}`. A place is **held** by the faction with the highest strength (≥ 1); the map shows a coloured dot and the tooltip names the holder.
+- `traits`: `[{"id": "...", "why": "..."}]`, picked from `expansionist`, `insular`, `welcoming`, `militant`, `pacifist`, `vengeful`, `mercantile`, `zealous`, `secretive`. Each one needs a story reason (`why`) and has a mechanical effect:
+
+| trait | effect |
+|-------|--------|
+| expansionist | claims ground 1.5× faster |
+| insular | claims 0.7×, join threshold +2 |
+| welcoming | join threshold −2, good deeds ripple 1.25×, recruits less loyal people |
+| militant | wears rivals down 1.5× in contested places, escalates faster |
+| pacifist | escalates at half speed, condemns any attack (−1 standing for the attacker) |
+| vengeful | wrongs ripple 1.5×, escalates 1.5× |
+| mercantile | gifts and favours ripple 1.5×, escalates slower |
+| zealous | members' loyalty +0.2 per round, escalates faster |
+| secretive | join threshold +1 |
+
+- On a faction's own ground it sees everything: standing changes there count 1.25×. Meeting someone from a rival faction on your ground makes you warier of them (−1 attitude); on their ground, −0.5.
+
+#### Factions evolve on their own
+
+Every `FACTION_TICK_HOURS` (default 6) game hours, `agent/faction_sim.py` runs a round. It also catches up, at most 4 rounds at a time, after skipping time.
+
+1. **Territory**: members standing in a place raise their faction's hold (more loyalty, faster). Unwatched ground loses 0.3 per round. Rival or hostile factions in the same place wear each other down.
+2. **Tension**: factions sharing ground build tension (allies ease it). At ±6 (about a game day and a half of friction) the stance moves one step along hostile ↔ rival ↔ neutral ↔ friendly ↔ allied. Parent and child factions never clash.
+3. **Loyalty**: rises on your own ground; falls away from it, on hostile ground, when your faction loses ground, or when you dislike its leader.
+4. **New factions**, at most one per game day:
+   - **splinter**: a member whose loyalty falls to 3 or below walks out with like-minded members (towns don't split);
+   - **coalition**: two people from different sides, both barely loyal and close to each other, found their own;
+   - **arrival**: newcomers settle an unheld place (`FACTION_ARRIVAL_CHANCE`, default 0.15 per round). They keep unnamed members there until driven out.
+
+   The LLM writes the new faction's name, goal, origin and traits, grounded in the founders' lives, the parent faction's history and recent events. Each trait must cite the story. Without an LLM (or with `FACTION_STORY_LLM=0`), rules write them.
+5. **Recruiting, growth, decline**: a faction takes in people on its ground whose loyalty elsewhere has faded. It grows small → medium → large with members plus ground, and dissolves with neither.
+
+Every event goes into the chronicle (`:FactionEvent`, shown in the play UI). Members remember it, and it is announced as news, so NPCs reconsider their plans. Dialogue and decision prompts show each faction's traits, territory and latest history.
+
+Knobs: `FACTION_SIM=0` turns evolution off; `FACTION_MAX_ACTIVE` (default 12). `POST /api/factions/tick?ticks=N` pushes history forward right away.
 
 #### Joining factions
 

@@ -271,7 +271,9 @@ class GameLoop:
         try:
             from world_systems import tick_world_systems
 
-            world_report = tick_world_systems(self.world, float(dt), self.sim_time) or {}
+            world_report = tick_world_systems(
+                self.world, float(dt), self.sim_time, memory=self.memory
+            ) or {}
         except Exception as e:
             if self.verbose:
                 print(f"[WARN] world_systems: {e}")

@@ -234,6 +234,8 @@
   "factions": [
     {
       "name": "Hearthvale",
+      "territory": {"Clinic": 5, "Home": 4},
+      "traits": [{"id": "welcoming", "why": "a village that looks after its own and its neighbours"}],
       "join_policy": "open",
       "join_standing": 0,
       "kind": "town",
@@ -260,6 +262,7 @@
     },
     {
       "name": "LilaHousehold",
+      "territory": {"Home": 6},
       "join_policy": "closed",
       "kind": "family",
       "scale": "small",

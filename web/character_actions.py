@@ -613,7 +613,7 @@ def list_locations_graph(world) -> Dict[str, Any]:
         RETURN l.name AS name,
                coalesce(l.description, '') AS description,
                coalesce(l.tags, '') AS tags,
-               l.map_x AS map_x, l.map_y AS map_y,
+               l.map_x AS map_x, l.map_y AS map_y, l.controlled_by AS controlled_by,
                collect(DISTINCT p.name) AS persons,
                collect(DISTINCT adj.name) AS adjacent
         ORDER BY name
@@ -641,6 +641,7 @@ def list_locations_graph(world) -> Dict[str, Any]:
             "tags": r.get("tags") or "",
             "map_x": r.get("map_x"),
             "map_y": r.get("map_y"),
+            "controlled_by": r.get("controlled_by") or "",
             "persons": persons,
             "items": [x["name"] for x in pickable],
             "interactables": [
@@ -741,6 +742,12 @@ def get_play_state(world) -> Dict[str, Any]:
         faction_rows = player_faction_summary(world, name)
     except Exception:
         faction_rows = []
+    try:
+        from faction_sim import chronicle
+
+        faction_chronicle = chronicle(world, 8)
+    except Exception:
+        faction_chronicle = []
 
     return {
         "found": True,
@@ -763,6 +770,7 @@ def get_play_state(world) -> Dict[str, Any]:
         "all_actions": actions_data.get("actions") or [],
         "quests": quests,
         "factions": faction_rows,
+        "faction_chronicle": faction_chronicle,
         "map": list_locations_graph(world),
         "simulation": _play_simulation_snapshot(world),
         "characters": list_characters(world),

@@ -333,7 +333,13 @@ class TestPlayabilityAndMechanics(unittest.TestCase):
         )
         self.assertIsNotNone(sk)
         assert sk is not None
-        raw = _fallback_world_from_skeleton(sk)
+        from director.maps import load_map
+        from director.planner import _fit_skeleton_to_map
+
+        map_data = load_map("key_and_door")
+        sk = _fit_skeleton_to_map(sk, map_data)
+        raw = _fallback_world_from_skeleton(sk, map_data)
+        self.assertEqual({x["name"] for x in raw["locations"]}, {"Hall", "Storage", "Vault"})
         bp = EventBlueprint.from_dict(raw, source="test")
         from director import ensure_playable_mechanics, is_minimally_playable
 
@@ -593,3 +599,79 @@ class TestDirectorBuild(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestFixedMaps(unittest.TestCase):
+    """导演只用手动配置的地图。"""
+
+    def _sk(self, puzzle="key_door", start="Nowhere", goal="Moon"):
+        from director.planner import _normalize_skeleton
+
+        return _normalize_skeleton(
+            {
+                "title": "T", "premise": "p", "player_name": "Traveler",
+                "cast": [{"name": "Traveler", "role": "player", "function": "hero"},
+                         {"name": "Mira", "role": "npc", "function": "helper"}],
+                "quest": {"name": "Q", "objective": "o", "macguffin": "DoorKey"},
+                "puzzle_kind": puzzle, "key_name": "DoorKey", "door_name": "VaultDoor",
+                "goal_location": goal, "start_location": start,
+            },
+            "p",
+        )
+
+    def test_maps_list_includes_worlds(self):
+        from director.maps import list_maps, load_map
+
+        ids = {m["id"] for m in list_maps()}
+        self.assertIn("frontier_village", ids)
+        m = load_map("frontier_village")
+        self.assertEqual(m["source"], "worlds")
+        self.assertTrue(all("map" in x for x in m["locations"]))
+        with self.assertRaises(ValueError):
+            load_map("no_such_map")
+
+    def test_skeleton_snaps_to_map_and_needs_a_dead_end(self):
+        from director.maps import load_map
+        from director.planner import _fit_skeleton_to_map
+
+        m = load_map("market_town")
+        sk = _fit_skeleton_to_map(self._sk(), m)
+        names = {x["name"] for x in m["locations"]}
+        self.assertIn(sk["start_location"], names)
+        # market_town 没有死角 → 门谜题改成 deliver
+        if sk["puzzle_kind"] == "key_door":
+            self.assertIn(sk["goal_location"], names)
+        else:
+            self.assertEqual(sk["puzzle_kind"], "deliver")
+
+    def test_fixed_map_never_grows(self):
+        from director.maps import load_map
+        from director.planner import _apply_fixed_map, _fit_skeleton_to_map
+
+        m = load_map("frontier_village")
+        sk = _fit_skeleton_to_map(self._sk(puzzle="deliver"), m)
+        world = {
+            "locations": [{"name": "InventedCastle"}],
+            "adjacencies": [{"a": "InventedCastle", "b": "Village"}],
+            "persons": [{"name": "Mira", "located_at": "InventedCastle"}],
+            "items": [{"name": "Thing", "located_at": "InventedCastle"}],
+        }
+        out = _apply_fixed_map(world, m, sk)
+        self.assertEqual([x["name"] for x in out["locations"]], [x["name"] for x in m["locations"]])
+        self.assertEqual(out["adjacencies"], m["adjacencies"])
+        self.assertEqual(out["persons"][0]["located_at"], sk["start_location"])
+        self.assertEqual(out["items"][0]["located_at"], sk["start_location"])
+
+    def test_door_replaces_the_edge_into_a_dead_end(self):
+        from director.planner import _apply_fixed_map, _fit_skeleton_to_map
+
+        m = {
+            "id": "t", "locations": [{"name": "Hub", "tags": "hub"}, {"name": "Yard"}, {"name": "Crypt"}],
+            "adjacencies": [{"a": "Hub", "b": "Yard"}, {"a": "Yard", "b": "Crypt"}],
+        }
+        sk = _fit_skeleton_to_map(self._sk(goal="Crypt"), m)
+        self.assertEqual((sk["start_location"], sk["goal_location"]), ("Hub", "Crypt"))
+        out = _apply_fixed_map({"persons": [], "items": [{"name": "VaultDoor", "located_at": "Hub"}]}, m, sk)
+        self.assertEqual(out["adjacencies"], [{"a": "Hub", "b": "Yard"}])
+        door = out["items"][0]
+        self.assertEqual((door["located_at"], door["connects_to"]), ("Yard", "Crypt"))

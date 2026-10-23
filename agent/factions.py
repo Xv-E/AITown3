@@ -53,6 +53,35 @@ class Membership:
         return not self.via
 
 
+def _trait_mult(world, faction: str, key: str) -> float:
+    try:
+        from faction_sim import trait_mult
+
+        return trait_mult(world, faction, key)
+    except Exception:
+        return 1.0
+
+
+def _trait_sum(world, faction: str, key: str) -> float:
+    try:
+        from faction_sim import trait_sum
+
+        return trait_sum(world, faction, key)
+    except Exception:
+        return 0.0
+
+
+def _controller_at(world, location: Optional[str]) -> Optional[str]:
+    if not location:
+        return None
+    rows = _rows(world, "MATCH (l:Location {name: $l}) RETURN l.controlled_by AS c LIMIT 1", l=location)
+    return (rows[0].get("c") or None) if rows else None
+
+
+TURF_PENALTY = 1.0
+TURF_HERE_BONUS = 1.25
+
+
 def _rows(world, query: str, **params) -> List[Dict[str, Any]]:
     if world is None:
         return []
@@ -68,6 +97,7 @@ def memberships(world, person: str) -> List[Membership]:
         world,
         """
         MATCH (p:Person {name: $n})-[m:MEMBER_OF]->(f:Faction)
+        WHERE coalesce(f.status, 'active') = 'active'
         OPTIONAL MATCH path = (f)-[:PART_OF*1..3]->(up:Faction)
         RETURN f.name AS f, coalesce(f.kind, 'other') AS fk, coalesce(f.scale, 'medium') AS fs,
                coalesce(f.goal, '') AS fg, coalesce(f.description, '') AS fd,
@@ -265,6 +295,16 @@ def pair_view(world, me: str, other: str) -> PairView:
         if abs(part) >= 0.1:
             score += part
             reasons.append(f"{f} thinks of them as {standing_label(v)}")
+    # 地盘：在我方地盘上遇到敌方的人更不客气；在对方地盘上则更提防
+    ctl = _controller_at(world, _location_of(world, me))
+    if ctl:
+        foes_of_ctl = {s["other"] for s in stances_of(world, ctl) if s["stance"] in ("rival", "hostile")}
+        if ctl in mine_by and foes_of_ctl & their_names:
+            score -= TURF_PENALTY
+            reasons.append(f"they are on your {ctl}'s ground")
+        elif ctl in their_names and foes_of_ctl & set(mine_by):
+            score -= TURF_PENALTY / 2
+            reasons.append(f"you are on their {ctl}'s ground")
     score = round(max(-10.0, min(10.0, score)), 1)
     return PairView(me, other, mine, theirs, shared, cross, their_standing, score, reasons)
 
@@ -273,6 +313,24 @@ def _membership_line(m: Membership) -> str:
     via = f", through {m.via}" if m.via else ""
     goal = f" — goal: {m.goal}" if m.goal else ""
     return f"{m.faction} ({m.kind}, {m.scale}; {m.role}, loyalty {m.loyalty:.0f}/10{via}){goal}"
+
+
+def faction_detail_lines(world, faction: str, *, history: int = 1) -> List[str]:
+    """势力的特性（带剧情理由）、地盘、最近大事。"""
+    try:
+        from faction_sim import recent_events, territory_of, traits_text
+    except Exception:
+        return []
+    lines: List[str] = []
+    traits = traits_text(world, faction)
+    if traits:
+        lines.append(f"  {faction}'s character: {traits}")
+    terr = territory_of(world, faction)
+    if terr:
+        lines.append(f"  {faction} holds: " + ", ".join(f"{loc} ({s:.0f}/10)" for loc, s in list(terr.items())[:4]))
+    for e in recent_events(world, faction, history):
+        lines.append(f"  Lately (day {e.get('day')}): {e.get('text')}")
+    return lines
 
 
 def faction_secret_lines(world, me: str, view: PairView) -> List[str]:
@@ -359,7 +417,10 @@ def faction_block(world, me: str, other: str, view: Optional[PairView] = None) -
     lines: List[str] = []
     if view.mine:
         lines.append("Your factions:")
-        lines += [f"- {_membership_line(m)}" for m in view.mine[:4]]
+        for m in view.mine[:4]:
+            lines.append(f"- {_membership_line(m)}")
+            if m.direct:
+                lines += faction_detail_lines(world, m.faction)
     else:
         lines.append("Your factions: none — you stand alone.")
     if view.theirs:
@@ -368,6 +429,10 @@ def faction_block(world, me: str, other: str, view: Optional[PairView] = None) -
         ))
     else:
         lines.append(f"{other} belongs to no faction you know of.")
+    here = _location_of(world, me)
+    ctl = _controller_at(world, here)
+    if ctl:
+        lines.append(f"This place ({here}) is held by {ctl}.")
     for f in view.shared:
         lines.append(f"You and {other} are both of {f}.")
     for c in view.cross:
@@ -392,13 +457,22 @@ def faction_situation_text(world, me: str, people_here: Iterable[str]) -> str:
     lines: List[str] = []
     if mine:
         lines.append("Your factions (their goals are yours too, as far as your loyalty goes):")
-        lines += [f"- {_membership_line(m)}" for m in mine[:4]]
-        for m in mine:
+        for m in mine[:4]:
+            lines.append(f"- {_membership_line(m)}")
             if not m.direct:
                 continue
+            lines += faction_detail_lines(world, m.faction)
             foes = [s for s in stances_of(world, m.faction) if s["stance"] in ("rival", "hostile")]
             if foes:
                 lines.append(f"  {m.faction} opposes: " + ", ".join(f"{s['other']} ({s['stance']})" for s in foes))
+        lines.append(
+            "Territory: members standing in a place strengthen their faction's hold on it; "
+            "unwatched ground slips away, and rivals in the same place wear each other down."
+        )
+    here = _location_of(world, me)
+    ctl = _controller_at(world, here)
+    if ctl:
+        lines.append(f"You are standing on {ctl}'s ground ({here}).")
     for other in people_here:
         view = pair_view(world, me, other)
         if not view.reasons:
@@ -407,8 +481,11 @@ def faction_situation_text(world, me: str, people_here: Iterable[str]) -> str:
     return "\n".join(lines)
 
 
-def ripple(world, actor: str, target: str, delta: float, *, why: str = "") -> List[str]:
-    """actor 对 target 做了分量为 delta 的事 → 更新 actor 在相关势力的声望。返回变化说明。"""
+def ripple(world, actor: str, target: str, delta: float, *, why: str = "", where: str = "") -> List[str]:
+    """actor 对 target 做了分量为 delta 的事 → 更新 actor 在相关势力的声望。返回变化说明。
+
+    特性放大：mercantile / welcoming 更看重好意，vengeful 更记仇；在某势力自己的地盘上发生的事它看得更清楚。
+    """
     if world is None or not actor or not target or actor == target or not delta:
         return []
     targets = memberships(world, target)
@@ -434,7 +511,11 @@ def ripple(world, actor: str, target: str, delta: float, *, why: str = "") -> Li
                 continue
             changes[s["other"]] = changes.get(s["other"], 0.0) + delta * share * k
     notes: List[str] = []
+    here = _controller_at(world, where) if where else None
     for fac, d in sorted(changes.items()):
+        d *= _trait_mult(world, fac, "pos_ripple" if d > 0 else "neg_ripple")
+        if here == fac:
+            d *= TURF_HERE_BONUS
         if abs(d) < 0.05:
             continue
         before = standing(world, actor, fac)
@@ -452,17 +533,34 @@ def on_action(world, capability: Optional[str], args: List[str], *, memory=None)
     if world is None or not capability or capability not in ACTION_DELTA:
         return []
     pre: List[str] = []
+    where = ""
     if capability == "give" and len(args) >= 3:
         actor, target = args[0], args[2]
         why = f"gave {args[1]} to {target}"
+        where = args[3] if len(args) >= 4 else ""
         pre = complete_trials_on_give(world, actor, args[1], target, memory=memory)
     elif capability == "attack" and len(args) >= 2:
         actor, target = args[0], args[1]
         why = f"attacked {target}"
+        where = args[2] if len(args) >= 3 else ""
         _personal_grudge(world, actor, target)
+        pre = _pacifists_condemn(world, actor, target)
     else:
         return []
-    return pre + ripple(world, actor, target, ACTION_DELTA[capability], why=why)
+    return pre + ripple(world, actor, target, ACTION_DELTA[capability], why=why, where=where)
+
+
+def _pacifists_condemn(world, actor: str, target: str) -> List[str]:
+    """pacifist 势力谴责任何动手的人，不管打的是谁。"""
+    notes: List[str] = []
+    rows = _rows(world, "MATCH (f:Faction) WHERE coalesce(f.status, 'active') = 'active' RETURN f.name AS f")
+    for r in rows:
+        pen = _trait_sum(world, r["f"], "attack_penalty")
+        if pen > 0:
+            before = standing(world, actor, r["f"])
+            after = adjust_standing(world, actor, r["f"], -pen)
+            notes.append(f"{r['f']} condemns the violence against {target}: {actor} {before:+.1f}→{after:+.1f}")
+    return notes
 
 
 def _personal_grudge(world, actor: str, target: str) -> None:
@@ -487,9 +585,11 @@ def player_faction_summary(world, player: str) -> List[Dict[str, Any]]:
         world,
         """
         MATCH (f:Faction)
+        WHERE coalesce(f.status, 'active') = 'active'
         OPTIONAL MATCH (f)-[:PART_OF]->(par:Faction)
         RETURN f.name AS name, coalesce(f.kind, 'other') AS kind,
                coalesce(f.scale, 'medium') AS scale, coalesce(f.goal, '') AS goal,
+               coalesce(f.description, '') AS description, f.founded_day AS founded_day,
                par.name AS parent
         ORDER BY name
         """,
@@ -516,8 +616,20 @@ def player_faction_summary(world, player: str) -> List[Dict[str, Any]]:
             "label": "member" if m else standing_label(v),
             "direct": bool(m and m.direct),
             "join": check.to_dict() if check else None,
+            "description": r.get("description") or "",
+            "founded_day": r.get("founded_day"),
+            **_territory_and_traits(world, name),
         })
     return out
+
+
+def _territory_and_traits(world, faction: str) -> Dict[str, Any]:
+    try:
+        from faction_sim import faction_traits, territory_of
+
+        return {"territory": territory_of(world, faction), "traits": faction_traits(world, faction)}
+    except Exception:
+        return {"territory": {}, "traits": []}
 
 
 def membership_summary(world, person: str) -> str:
@@ -713,7 +825,7 @@ def join_check(world, person: str, faction: str, *, via: Optional[str] = None) -
     mine_direct = {m.faction for m in mine if m.direct}
     current = standing(world, person, faction)
     blockers: List[str] = []
-    threshold = rules.threshold
+    threshold = rules.threshold + _trait_sum(world, faction, "join")
 
     if faction in mine_direct:
         blockers.append("already a member")

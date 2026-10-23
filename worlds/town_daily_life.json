@@ -734,6 +734,8 @@
   "factions": [
     {
       "name": "EmberCamp",
+      "territory": {"CampfireClearing": 6, "Shelter": 5, "RiverBank": 3},
+      "traits": [{"id": "zealous", "why": "the fire must never die — a vow made the night the old camp burned"}],
       "join_policy": "open",
       "join_standing": 1,
       "kind": "town",
@@ -765,6 +767,8 @@
     },
     {
       "name": "Axemen",
+      "territory": {"Forest": 6, "CampfireClearing": 2},
+      "traits": [{"id": "militant", "why": "they settle arguments with fists, the way Rowan's father did"}, {"id": "expansionist", "why": "always pushing deeper into the forest for wood"}],
       "join_policy": "trial",
       "join_standing": 3,
       "trial": {"item": "firewood", "text": "Nobody runs with the Axemen until they have hauled wood to the boss with their own hands."},
@@ -795,6 +799,8 @@
     },
     {
       "name": "BerryCircle",
+      "territory": {"BerryGrove": 6, "CampfireClearing": 2},
+      "traits": [{"id": "pacifist", "why": "Sage believes food shared at the fire keeps the camp kind"}, {"id": "welcoming", "why": "anyone who comes hungry to the fire gets a share"}],
       "join_policy": "sponsor",
       "join_standing": 3,
       "kind": "crew",
@@ -817,6 +823,8 @@
     },
     {
       "name": "OldCampKin",
+      "territory": {"Shelter": 3},
+      "traits": [{"id": "insular", "why": "the two who survived the fire share their grief with no one else"}],
       "join_policy": "closed",
       "kind": "family",
       "scale": "small",

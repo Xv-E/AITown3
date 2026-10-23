@@ -27,7 +27,9 @@ def _entity_label_for_name(world: "Neo4jWorld", name: str) -> Optional[str]:
 
 
 def _join_props(f) -> Dict[str, Any]:
-    props: Dict[str, Any] = {}
+    props: Dict[str, Any] = {"status": "active"}
+    if getattr(f, "traits", None):
+        props["traits"] = json.dumps(list(f.traits), ensure_ascii=False)
     if getattr(f, "join_policy", ""):
         props["join_policy"] = f.join_policy
     if getattr(f, "join_standing", None) is not None:
@@ -65,6 +67,15 @@ def _build_factions(world: "Neo4jWorld", factions) -> None:
             )
         for person, value in f.standing.items():
             world.link_entities(person, "Person", f.name, "Faction", "STANDING", value=float(value))
+        for loc, strength in (getattr(f, "territory", None) or {}).items():
+            world.link_entities(f.name, "Faction", loc, "Location", "CONTROLS", strength=float(strength))
+    # 每处地点的当前控制者（最强的一方），供界面与 prompt 快速读取
+    try:
+        from faction_sim import refresh_control
+
+        refresh_control(world)
+    except Exception:
+        logger.debug("refresh_control skipped", exc_info=True)
 
 
 def build_from_blueprint(
@@ -363,8 +374,9 @@ def plan_and_build(
     template_id: Optional[str] = None,
     world_id: Optional[str] = None,
     draft: Optional[Dict[str, Any]] = None,
+    map_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """规划 + 构建一站式入口。也可直接指定 world_id 加载模板世界。"""
+    """规划 + 构建一站式入口。也可直接指定 world_id 加载模板世界。地图取自 map_id / 当前地图。"""
     from .planner import plan_event
     from .world_loader import load_world
 
@@ -378,5 +390,7 @@ def plan_and_build(
             template_id=template_id,
             world_id=world_id,
             draft=draft,
+            map_id=map_id,
+            world=world,
         )
     return build_from_blueprint(world, blueprint, clear=clear)

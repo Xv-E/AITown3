@@ -119,6 +119,8 @@ class DirectorPlanRequest(BaseModel):
     template_id: Optional[str] = None
     # Optional partial blueprint from the user; AI completes it
     draft: Optional[Dict[str, Any]] = None
+    # 手动配置的地图（maps/ 或 worlds/ 的 id，或 "current"）；不填 = 当前地图
+    map_id: Optional[str] = None
 
 
 class DirectorBuildRequest(BaseModel):
@@ -131,6 +133,7 @@ class DirectorBuildRequest(BaseModel):
     template_id: Optional[str] = None
     blueprint: Optional[Dict[str, Any]] = None
     draft: Optional[Dict[str, Any]] = None
+    map_id: Optional[str] = None
 
 
 _sim_task: Optional[asyncio.Task] = None
@@ -282,6 +285,19 @@ def api_faction_leave(name: str):
         return _faction_call("leave_faction", name)
     except HTTPException:
         raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.post("/api/factions/tick")
+def api_faction_tick(ticks: int = 1):
+    """立刻推进势力历史若干轮（每轮 = FACTION_TICK_HOURS 游戏小时）。"""
+    try:
+        import faction_sim
+        from llm_service import get_web_memory
+
+        events = faction_sim.force_tick(get_world(), ticks=ticks, memory=get_web_memory())
+        return {"ok": True, "events": events, "chronicle": faction_sim.chronicle(get_world(), 12)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
@@ -950,6 +966,17 @@ async def api_load_world(world_id: str, clear: bool = True):
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+@app.get("/api/maps")
+def api_maps():
+    """手动配置的地图（导演只在这些地图上排布事件）。"""
+    try:
+        from director.maps import list_maps
+
+        return {"maps": list_maps(get_world())}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
 @app.post("/api/director/plan")
 async def api_director_plan(body: DirectorPlanRequest):
     """Plan/complete an event blueprint from user draft (does not write to world)."""
@@ -961,6 +988,8 @@ async def api_director_plan(body: DirectorPlanRequest):
                 body.prompt,
                 force_mock=body.force_mock,
                 draft=body.draft,
+                map_id=body.map_id,
+                world=get_world(),
             ).to_dict()
 
         loop = asyncio.get_running_loop()
@@ -1008,6 +1037,7 @@ async def api_director_build(body: DirectorBuildRequest):
                 clear=body.clear,
                 force_mock=body.force_mock,
                 draft=body.draft,
+                map_id=body.map_id,
             )
 
         loop = asyncio.get_running_loop()

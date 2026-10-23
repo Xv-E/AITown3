@@ -231,6 +231,8 @@
   "factions": [
     {
       "name": "Settlers",
+      "territory": {"Village": 6},
+      "traits": [{"id": "expansionist", "why": "they came to build something new at the edge of the wild"}],
       "join_policy": "open",
       "join_standing": 0,
       "kind": "town",
@@ -257,6 +259,8 @@
     },
     {
       "name": "OrenHousehold",
+      "territory": {"Village": 3, "Forest": 2},
+      "traits": [{"id": "zealous", "why": "Oren's promise to build the village his late wife wanted"}],
       "join_policy": "closed",
       "kind": "family",
       "scale": "small",
@@ -285,6 +289,8 @@
     },
     {
       "name": "Fieldfolk",
+      "territory": {"Field": 6},
+      "traits": [{"id": "pacifist", "why": "Lia lived through a famine war and hates fighting"}],
       "join_policy": "sponsor",
       "join_standing": 2,
       "kind": "crew",

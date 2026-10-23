@@ -675,6 +675,8 @@
   "factions": [
     {
       "name": "Ashford",
+      "territory": {"MarketSquare": 6},
+      "traits": [{"id": "insular", "why": "since the theft the town distrusts strangers"}],
       "join_policy": "open",
       "join_standing": 1,
       "kind": "town",
@@ -706,6 +708,8 @@
     },
     {
       "name": "TownWatch",
+      "territory": {"Courtyard": 7, "ArchiveAntechamber": 5, "SealedArchive": 5, "Cellar": 3},
+      "traits": [{"id": "militant", "why": "the Watch answered the theft with seals and force"}, {"id": "secretive", "why": "Renn hides what really happened that night"}],
       "join_policy": "trial",
       "join_standing": 3,
       "trial": {"item": "Lantern", "text": "Bring a lantern for the night round and hand it to the sergeant — show you will keep watch."},
@@ -736,6 +740,8 @@
     },
     {
       "name": "ArchivistHouse",
+      "territory": {"Tavern": 4, "ArchiveAntechamber": 2},
+      "traits": [{"id": "vengeful", "why": "they will not forgive the Watch for blaming the old archivist"}],
       "join_policy": "closed",
       "kind": "family",
       "scale": "small",
@@ -756,6 +762,8 @@
     },
     {
       "name": "CraftsGuild",
+      "territory": {"Workshop": 6, "Tavern": 4},
+      "traits": [{"id": "mercantile", "why": "the trades hold together by doing business with each other"}],
       "join_policy": "sponsor",
       "join_standing": 3,
       "kind": "guild",

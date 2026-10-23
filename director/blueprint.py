@@ -365,6 +365,10 @@ class FactionSpec:
     join_policy: str = ""
     join_standing: Optional[float] = None
     trial: Dict[str, str] = field(default_factory=dict)
+    # 势力范围：{地点: 控制力 0..10}（列表写法 = 每处 5）
+    territory: Dict[str, float] = field(default_factory=dict)
+    # 由剧情来的特性：[{id, why}]，id 取自 agent/faction_sim.TRAITS
+    traits: List[Dict[str, str]] = field(default_factory=list)
 
     def normalized(self) -> "FactionSpec":
         kind = (self.kind or "other").strip().lower()
@@ -422,11 +426,36 @@ class FactionSpec:
                 k: str(v).strip() for k, v in (self.trial or {}).items()
                 if k in ("item", "text") and str(v or "").strip()
             } if isinstance(self.trial, dict) else {},
+            territory=_clean_territory(self.territory),
+            traits=_clean_traits(self.traits),
         )
 
 
-def _normalize_factions(raw: List[FactionSpec], person_names: set) -> List[FactionSpec]:
-    """去重；成员 / 声望只留存在的人，关系 / 上级只留存在的势力。"""
+def _clean_territory(raw: Any) -> Dict[str, float]:
+    if isinstance(raw, list):
+        raw = {str(x): 5.0 for x in raw if x}
+    if not isinstance(raw, dict):
+        return {}
+    return {_clean_name(str(k)): _clamp(v, 0, 10, 5) for k, v in raw.items() if k}
+
+
+def _clean_traits(raw: Any) -> List[Dict[str, str]]:
+    out: List[Dict[str, str]] = []
+    for t in raw or []:
+        if isinstance(t, str):
+            t = {"id": t}
+        if not isinstance(t, dict) or not t.get("id"):
+            continue
+        tid = str(t["id"]).strip().lower().replace(" ", "_")
+        if tid and all(x["id"] != tid for x in out):
+            out.append({"id": tid, "why": str(t.get("why") or "").strip()})
+    return out[:4]
+
+
+def _normalize_factions(
+    raw: List[FactionSpec], person_names: set, loc_names: Optional[set] = None
+) -> List[FactionSpec]:
+    """去重；成员 / 声望只留存在的人，关系 / 上级只留存在的势力，范围只留存在的地点。"""
     out: List[FactionSpec] = []
     seen: set = set()
     for f in raw or []:
@@ -444,6 +473,9 @@ def _normalize_factions(raw: List[FactionSpec], person_names: set) -> List[Facti
             members=[m for m in f.members if m["name"] in person_names],
             relations=[r for r in f.relations if r["with"] in names and r["with"] != f.name],
             standing={k: v for k, v in f.standing.items() if k in person_names},
+            territory={
+                k: v for k, v in f.territory.items() if loc_names is None or k in loc_names
+            },
         ))
     return fixed
 
@@ -859,7 +891,7 @@ class EventBlueprint:
             if a_n in person_names and (b_n in person_names or b_n in item_names_set):
                 social.append((a_n, rel_u, b_n))
 
-        factions = _normalize_factions(self.factions, person_names)
+        factions = _normalize_factions(self.factions, person_names, loc_names)
         faction_names = {f.name for f in factions}
         facts = [
             replace(f, faction=f.faction if f.faction in faction_names else None) for f in facts
@@ -1072,6 +1104,8 @@ class EventBlueprint:
                     join_policy=str(x.get("join_policy") or ""),
                     join_standing=x.get("join_standing"),
                     trial=dict(x.get("trial") or {}) if isinstance(x.get("trial"), dict) else {},
+                    territory=x.get("territory") or {},
+                    traits=list(x.get("traits") or []),
                 )
                 for x in (data.get("factions") or [])
                 if isinstance(x, dict) and x.get("name")

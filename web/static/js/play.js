@@ -103,6 +103,7 @@
     renderActions(data);
     renderQuests(data.quests || []);
     renderFactions(data.factions || []);
+    renderChronicle(data.faction_chronicle || []);
     renderClues(data.known_clues || []);
     renderSimulation(data.simulation || {});
     renderNpcRoster(data.characters || []);
@@ -674,6 +675,18 @@
       .join(" · ");
   }
 
+  function factionTitle(f) {
+    const bits = [];
+    if (f.description) bits.push(f.description);
+    if (f.goal) bits.push(`Goal: ${f.goal}`);
+    const traits = (f.traits || []).map((t) => (t.why ? `${t.id} (${t.why})` : t.id));
+    if (traits.length) bits.push(`Traits: ${traits.join("; ")}`);
+    const terr = Object.entries(f.territory || {}).map(([loc, s]) => `${loc} ${Math.round(s)}/10`);
+    if (terr.length) bits.push(`Holds: ${terr.join(", ")}`);
+    if (f.founded_day) bits.push(`Founded on day ${f.founded_day}`);
+    return bits.join("\n");
+  }
+
   function renderFactions(factions) {
     const el = $("faction-text");
     if (!el) return;
@@ -694,7 +707,7 @@
           const leave = f.direct
             ? ` <button class="faction-btn" data-faction="${name}" data-op="leave">Leave</button>`
             : "";
-          return `<span class="faction">${name} (${escapeHtml(where)}) — you: ${escapeHtml(f.role || "member")}${leave}</span>`;
+          return `<span class="faction" title="${escapeHtml(factionTitle(f))}">${name} (${escapeHtml(where)}) — you: ${escapeHtml(f.role || "member")}${leave}</span>`;
         }
         const sign = f.standing > 0 ? "+" : "";
         let join = "";
@@ -708,12 +721,27 @@
             j.can_join ? "" : " disabled"
           } title="${escapeHtml(why)}">${label}</button>`;
         }
-        return `<span class="faction">${name} (${escapeHtml(where)}) — ${escapeHtml(f.label)} ${sign}${f.standing}${join}</span>`;
+        return `<span class="faction" title="${escapeHtml(factionTitle(f))}">${name} (${escapeHtml(where)}) — ${escapeHtml(f.label)} ${sign}${f.standing}${join}</span>`;
       })
       .join(" · ");
     el.querySelectorAll(".faction-btn").forEach((btn) => {
       btn.addEventListener("click", () => factionOp(btn.dataset.faction, btn.dataset.op));
     });
+  }
+
+  function renderChronicle(events) {
+    const el = $("chronicle-text");
+    if (!el) return;
+    el.textContent = events.length
+      ? events.map((e) => `Day ${e.day}: ${e.text}`).join(" · ")
+      : "(nothing has happened yet)";
+  }
+
+  // 每个势力一个稳定的颜色（地图上标出地盘）
+  function factionColor(name) {
+    let h = 0;
+    for (const ch of String(name)) h = (h * 31 + ch.charCodeAt(0)) % 360;
+    return `hsl(${h}, 60%, 55%)`;
   }
 
   async function factionOp(faction, op) {
@@ -1350,6 +1378,13 @@
     ctx.textBaseline = "middle";
     ctx.fillStyle = isCur ? "#f0a070" : chalk;
     ctx.fillText(shortName(loc.name, 10), left + w / 2, top + titleH / 2 + 1);
+    if (loc.controlled_by) {
+      // 地盘：标题栏左侧一面小旗，颜色对应控制它的势力
+      ctx.fillStyle = factionColor(loc.controlled_by);
+      ctx.beginPath();
+      ctx.arc(left + 12, top + titleH / 2 + 1, 5, 0, Math.PI * 2);
+      ctx.fill();
+    }
 
     // Two rows: people / things (with icons)
     const bodyTop = top + titleH + padY;
@@ -1432,11 +1467,14 @@
       ? `<div class="tt-row"><span class="tt-label">Connected</span> ${escapeHtml((loc.adjacent || []).join(", "))}</div>`
       : "";
 
+    const held = loc.controlled_by
+      ? `<div class="tt-row"><span class="tt-label">Held by</span> <span style="color:${factionColor(loc.controlled_by)}">●</span> ${escapeHtml(loc.controlled_by)}</div>`
+      : `<div class="tt-row"><span class="tt-label">Held by</span> nobody</div>`;
     tip.innerHTML = `
       <div class="tt-name">${escapeHtml(loc.name)}</div>
       ${badge}
       <div class="tt-desc">${escapeHtml(desc)}</div>
-      ${tags}${people}${things}${exits}
+      ${tags}${held}${people}${things}${exits}
     `;
     tip.classList.remove("hidden");
 
@@ -1697,6 +1735,26 @@
   // —— Director ——
   function openDirector() {
     $("director-modal").classList.add("visible");
+    loadDirectorMaps();
+  }
+
+  // 地图手动配置：导演只在选中的地图上排布事件
+  async function loadDirectorMaps() {
+    const sel = $("director-map");
+    if (!sel) return;
+    try {
+      const res = await api("/api/maps");
+      const keep = sel.value;
+      sel.innerHTML = (res.maps || [])
+        .map((m) => {
+          const tail = m.source === "graph" ? "" : ` · ${m.source}${m.locations ? `, ${m.locations} places` : ""}`;
+          return `<option value="${escapeHtml(m.id)}">${escapeHtml(m.title)}${escapeHtml(tail)}</option>`;
+        })
+        .join("");
+      if (keep) sel.value = keep;
+    } catch (e) {
+      sel.innerHTML = `<option value="">(maps unavailable)</option>`;
+    }
   }
   function closeDirector() {
     $("director-modal").classList.remove("visible");
@@ -1777,10 +1835,12 @@
       return;
     }
     const body = { prompt, force_mock: false };
+    const mapId = $("director-map") ? $("director-map").value : "";
+    if (mapId) body.map_id = mapId;
     const draft = parseOptionalDraftJson();
     if (draft) body.draft = draft;
     setDirectorBusy(true);
-    $("director-preview").textContent = "AI step-by-step expansion (skeleton→world→cast→mechanics, up to ~110s)…";
+    $("director-preview").textContent = "AI step-by-step expansion on the chosen map (skeleton→placement→cast→mechanics, up to ~110s)…";
     setDirectorStatus("AI expanding blueprint (skeleton / world / cast / mechanics)…");
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 120000);
