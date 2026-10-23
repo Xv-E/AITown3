@@ -215,6 +215,16 @@
   ],
   "facts": [
     {
+      "name": "GuildPriceDeal",
+      "text": "The guild agreed in secret to hold vegetable prices down until the farmers give in.",
+      "secret_level": 2,
+      "known_by": [
+        "Mira",
+        "Bruno"
+      ],
+      "faction": "TradersGuild"
+    },
+    {
       "name": "BreadForACoin",
       "text": "Mira's stall sells bread for one coin; crates from the Warehouse restock it.",
       "secret_level": 0,
@@ -233,5 +243,73 @@
     { "a": "Mira", "rel": "KNOWS", "b": "Tilda" },
     { "a": "Bruno", "rel": "KNOWS", "b": "Tilda" },
     { "a": "Tilda", "rel": "FRIENDS_WITH", "b": "Bruno" }
+  ],
+  "factions": [
+    {
+      "name": "MarketTown",
+      "kind": "town",
+      "scale": "large",
+      "description": "Everyone who lives, trades or farms around the square.",
+      "goal": "Keep the market open and the town fed",
+      "members": [
+        {
+          "name": "Mira",
+          "role": "stallholder",
+          "loyalty": 6
+        },
+        {
+          "name": "Bruno",
+          "role": "tavern cook",
+          "loyalty": 7
+        },
+        {
+          "name": "Tilda",
+          "role": "farmer",
+          "loyalty": 5
+        }
+      ]
+    },
+    {
+      "name": "TradersGuild",
+      "kind": "guild",
+      "scale": "medium",
+      "parent": "MarketTown",
+      "description": "Stall and tavern keepers who set the town's prices together.",
+      "goal": "Full shelves and steady prices, bought cheap from the farms",
+      "members": [
+        {
+          "name": "Mira",
+          "role": "treasurer",
+          "loyalty": 8
+        },
+        {
+          "name": "Bruno",
+          "role": "member",
+          "loyalty": 5
+        }
+      ],
+      "relations": [
+        {
+          "with": "FarmersGrange",
+          "stance": "rival",
+          "reason": "they argue every week over what a crate of vegetables is worth"
+        }
+      ]
+    },
+    {
+      "name": "FarmersGrange",
+      "kind": "crew",
+      "scale": "small",
+      "parent": "MarketTown",
+      "description": "The few families who still work the fields outside town.",
+      "goal": "A fair price for every crate the fields produce",
+      "members": [
+        {
+          "name": "Tilda",
+          "role": "spokeswoman",
+          "loyalty": 8
+        }
+      ]
+    }
   ]
 }

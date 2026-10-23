@@ -102,6 +102,7 @@
     renderTownMap(data.map, data.current_location?.name, data.adjacent || []);
     renderActions(data);
     renderQuests(data.quests || []);
+    renderFactions(data.factions || []);
     renderClues(data.known_clues || []);
     renderSimulation(data.simulation || {});
     renderNpcRoster(data.characters || []);
@@ -669,6 +670,27 @@
         // 人情任务：附上「为什么」，而不只是「要什么」
         const why = q.objective && q.description ? ` — "${q.description}"` : "";
         return `${done}${q.name}: ${goal}${why}`;
+      })
+      .join(" · ");
+  }
+
+  function renderFactions(factions) {
+    const el = $("faction-text");
+    if (!el) return;
+    if (!factions.length) {
+      el.textContent = "(none)";
+      return;
+    }
+    // 自己的势力在前，其余按声望从高到低
+    const sorted = factions.slice().sort(
+      (a, b) => (b.member - a.member) || (b.standing - a.standing)
+    );
+    el.textContent = sorted
+      .map((f) => {
+        const where = `${f.kind}${f.parent ? " of " + f.parent : ""}`;
+        if (f.member) return `${f.name} (${where}) — you: ${f.role || "member"}`;
+        const sign = f.standing > 0 ? "+" : "";
+        return `${f.name} (${where}) — ${f.label} ${sign}${f.standing}`;
       })
       .join(" · ");
   }

@@ -40,7 +40,7 @@ class PromptBuilder:
             ]
         heart = self._get_heart_text(agent)
         if heart:
-            parts += ["=== Your Heart & Promises ===", heart, ""]
+            parts += ["=== Your Heart, Factions & Promises ===", heart, ""]
         parts += [
             "=== Nearby Graph (current place) ===",
             self._get_local_graph_text(agent),
@@ -108,6 +108,7 @@ Stories emerge from shared work, shortages, favours, and secrets.
 3. If someone is here, talking ("Gain information") can start small personal stories
 4. The goal must be one of the predefined goal terms (see below)
 5. When Temporary Actions are listed, prefer Interact with + that interact_action id over a bare Interact with
+6. Weigh your factions: serve their goals as far as your loyalty goes, help allies, and think twice around rivals — what you do to one member, their whole faction remembers
 
 === Available Goal Terms ===
 {self._format_goal_terms()}
@@ -124,7 +125,7 @@ Respond with a JSON object:
         return prompt
 
     def _get_heart_text(self, agent: "AgentProfile") -> str:
-        """深层渴望 / 恐惧 + 未了的人情：让选择有个人动机。"""
+        """深层渴望 / 恐惧 + 势力与在场者立场 + 未了的人情：让选择有个人动机。"""
         try:
             from inner_life import favors_text, load_inner_life
         except Exception:
@@ -136,6 +137,17 @@ Respond with a JSON object:
                 lines.append(f"You long for: {inner.desire}")
             if inner.fear:
                 lines.append(f"You fear: {inner.fear}")
+            try:
+                from factions import faction_situation_text
+                from routine import people_at_location
+
+                loc = self._person_location(agent.name)
+                here = people_at_location(self.world, loc, exclude=agent.name) if loc else []
+                ftext = faction_situation_text(self.world, agent.name, here)
+                if ftext:
+                    lines.append(ftext)
+            except Exception:
+                pass
             favors = favors_text(self.world, agent.name)
             if favors:
                 lines.append("Open favors (keeping or breaking a promise changes how people feel about you):")

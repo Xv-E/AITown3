@@ -17,13 +17,42 @@ logger = logging.getLogger(__name__)
 
 
 def _entity_label_for_name(world: "Neo4jWorld", name: str) -> Optional[str]:
-    for label in ("Person", "Location", "Item", "Quest", "Fact", "Rumor"):
+    for label in ("Person", "Location", "Item", "Quest", "Fact", "Rumor", "Faction"):
         try:
             if world.get_entity_by_name(name, label=label):
                 return label
         except Exception:
             continue
     return None
+
+
+def _build_factions(world: "Neo4jWorld", factions) -> None:
+    """Faction 节点 + MEMBER_OF{role,loyalty} + PART_OF + FACTION_REL{stance,reason} + STANDING{value}。"""
+    for f in factions or []:
+        world.add_entity(
+            f.name,
+            entity_type="Faction",
+            kind=f.kind,
+            scale=f.scale,
+            description=f.description,
+            goal=f.goal,
+            values=f.values,
+        )
+    for f in factions or []:
+        if f.parent:
+            world.link_entities(f.name, "Faction", f.parent, "Faction", "PART_OF")
+        for m in f.members:
+            world.link_entities(
+                m["name"], "Person", f.name, "Faction", "MEMBER_OF",
+                role=m["role"], loyalty=float(m["loyalty"]),
+            )
+        for r in f.relations:
+            world.link_entities(
+                f.name, "Faction", r["with"], "Faction", "FACTION_REL",
+                stance=r["stance"], reason=r["reason"],
+            )
+        for person, value in f.standing.items():
+            world.link_entities(person, "Person", f.name, "Faction", "STANDING", value=float(value))
 
 
 def build_from_blueprint(
@@ -198,14 +227,15 @@ def build_from_blueprint(
             if label:
                 world.link_entities(quest.name, "Quest", target, label, "INVOLVES")
 
+    # Factions（先于 Fact：内情可挂在势力上）
+    _build_factions(world, bp.factions)
+
     # Facts
     for fact in bp.facts:
-        world.add_entity(
-            fact.name,
-            entity_type="Fact",
-            text=fact.text,
-            secret_level=fact.secret_level,
-        )
+        fact_props: Dict[str, Any] = {"text": fact.text, "secret_level": fact.secret_level}
+        if getattr(fact, "faction", None):
+            fact_props["faction"] = fact.faction
+        world.add_entity(fact.name, entity_type="Fact", **fact_props)
         for person in fact.known_by:
             if world.get_entity_by_name(person, label="Person"):
                 world.link_entities(person, "Person", fact.name, "Fact", "KNOWS_FACT")
@@ -271,6 +301,7 @@ def build_from_blueprint(
             "rumors": len(bp.rumors),
             "adjacencies": len(bp.adjacencies),
             "social": len(bp.social),
+            "factions": len(bp.factions),
         },
         "blueprint": bp.to_dict(),
     }

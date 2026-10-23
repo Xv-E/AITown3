@@ -735,6 +735,12 @@ def get_play_state(world) -> Dict[str, Any]:
         quests = []
 
     known_clues = _player_known_clues(world, name)
+    try:
+        from factions import player_faction_summary
+
+        faction_rows = player_faction_summary(world, name)
+    except Exception:
+        faction_rows = []
 
     return {
         "found": True,
@@ -756,6 +762,7 @@ def get_play_state(world) -> Dict[str, Any]:
         ],
         "all_actions": actions_data.get("actions") or [],
         "quests": quests,
+        "factions": faction_rows,
         "map": list_locations_graph(world),
         "simulation": _play_simulation_snapshot(world),
         "characters": list_characters(world),

@@ -1815,6 +1815,16 @@ class GameLoop:
         ok, reason = registry.execute(self.world, action_name, **kwargs)
         target = args[-1] if args else None
         metadata: Dict[str, Any] = {}
+        if ok:
+            try:
+                from content import get_content
+                from factions import on_action
+
+                changes = on_action(self.world, get_content().capability_of(action_name), list(args))
+                if changes:
+                    metadata["faction_changes"] = changes
+            except Exception:
+                pass
         if ok and action_name == act("converse") and len(args) >= 3:
             try:
                 from dialogue_service import handle_talk_dialogue

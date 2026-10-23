@@ -106,6 +106,27 @@ Persons may carry optional fields that drive emotional dialogue and motivated re
 - Dialogue may also update the speaker's `mood`.
 - Social relations also accept `RIVALS_WITH` and `FAMILY_OF`.
 
+### Factions
+
+Worlds may declare factions of any size — a family, a gang, a guild, the town watch, the whole town:
+
+```json
+"factions": [
+  { "name": "Axemen", "kind": "gang", "scale": "small", "parent": "EmberCamp",
+    "goal": "Wood comes first — whoever hauls the logs eats first",
+    "members": [{ "name": "Rowan", "role": "boss", "loyalty": 9 }],
+    "relations": [{ "with": "BerryCircle", "stance": "rival", "reason": "who eats first" }],
+    "standing": { "Traveler": 0 } }
+]
+```
+
+- `kind`: family | gang | guild | crew | order | authority | town | other; `scale`: small | medium | large; `stance`: allied | friendly | neutral | rival | hostile.
+- Membership is inherited up `parent` (at half loyalty), so a town's feud reaches every family in it.
+- **Attitude**: when two people meet, shared factions, the stances between their factions, and the other person's standing with your factions give a score (loyal / friendly / neutral / wary / hostile). It goes into dialogue and NPC decision prompts, and counts toward whether a secret is confided.
+- **Standing ripples**: giving (+2), attacking (−6), talk outcomes and kept favors change the actor's standing with every faction of the target, and with that faction's allies (same way) and rivals / enemies (opposite way). Small factions react hardest; hurting your own faction counts 1.5×.
+- Facts may set `"faction"`: that faction's private business, shared with members, maybe with allies, never with rivals.
+- The play UI shows your standing with each faction; dossiers list memberships.
+
 ## Project layout
 
 ```

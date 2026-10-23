@@ -626,6 +626,16 @@
   ],
   "facts": [
     {
+      "name": "AxemenWoodpile",
+      "text": "The Axemen keep a hidden woodpile deep in the forest for their own cold nights.",
+      "secret_level": 2,
+      "known_by": [
+        "Rowan",
+        "Reed"
+      ],
+      "faction": "Axemen"
+    },
+    {
       "name": "FireMustNeverDie",
       "text": "If the campfire dies at night, the cold and dark will scatter the camp. Ash is responsible for watching it.",
       "secret_level": 0,
@@ -719,6 +729,103 @@
       "a": "Rowan",
       "rel": "FRIENDS_WITH",
       "b": "Ash"
+    }
+  ],
+  "factions": [
+    {
+      "name": "EmberCamp",
+      "kind": "town",
+      "scale": "large",
+      "description": "Everyone who lives by the eternal fire.",
+      "goal": "Keep the eternal fire burning and everyone fed",
+      "members": [
+        {
+          "name": "Rowan",
+          "role": "lumberjack",
+          "loyalty": 7
+        },
+        {
+          "name": "Sage",
+          "role": "gatherer",
+          "loyalty": 8
+        },
+        {
+          "name": "Ash",
+          "role": "firekeeper",
+          "loyalty": 9
+        },
+        {
+          "name": "Reed",
+          "role": "hauler",
+          "loyalty": 6
+        }
+      ]
+    },
+    {
+      "name": "Axemen",
+      "kind": "gang",
+      "scale": "small",
+      "parent": "EmberCamp",
+      "description": "The woodcutters. Rough, loyal to each other, quick to take offence.",
+      "goal": "Wood comes first — whoever hauls the logs eats first",
+      "members": [
+        {
+          "name": "Rowan",
+          "role": "boss",
+          "loyalty": 9
+        },
+        {
+          "name": "Reed",
+          "role": "runner",
+          "loyalty": 6
+        }
+      ],
+      "relations": [
+        {
+          "with": "BerryCircle",
+          "stance": "rival",
+          "reason": "they fight every night over who eats first at the fire"
+        }
+      ]
+    },
+    {
+      "name": "BerryCircle",
+      "kind": "crew",
+      "scale": "small",
+      "parent": "EmberCamp",
+      "description": "Gatherers and the fire's keeper, who share every meal equally.",
+      "goal": "Food is shared equally at the fire, no matter who worked hardest",
+      "members": [
+        {
+          "name": "Sage",
+          "role": "elder",
+          "loyalty": 8
+        },
+        {
+          "name": "Ash",
+          "role": "keeper",
+          "loyalty": 7
+        }
+      ]
+    },
+    {
+      "name": "OldCampKin",
+      "kind": "family",
+      "scale": "small",
+      "description": "The last two who walked out of the old camp's fire together.",
+      "goal": "Never lose anyone to fire again",
+      "members": [
+        {
+          "name": "Rowan",
+          "role": "guardian",
+          "loyalty": 8
+        },
+        {
+          "name": "Ash",
+          "role": "ward",
+          "loyalty": 9
+        }
+      ]
     }
   ]
 }

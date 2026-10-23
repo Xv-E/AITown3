@@ -16,6 +16,7 @@ import re
 from typing import Any, Dict, List, Optional
 
 from agent_profile import AgentProfile
+from factions import faction_block, pair_view, ripple
 from inner_life import (
     DIALOGUE_CRAFT,
     apply_mood,
@@ -388,19 +389,32 @@ def _is_player(world, name: str) -> bool:
 
 
 def _heart_blocks(world, me: str, other: str, knowledge=None) -> tuple[str, str]:
-    """(内心 + 关系块, 求助格式块)。玩家自己不生成求助任务。"""
+    """(内心 + 关系 + 势力块, 求助格式块)。玩家自己不生成求助任务。"""
     if world is None:
         return "", ""
+    view = None
+    try:
+        view = pair_view(world, me, other)
+    except Exception as e:
+        logger.debug("faction view failed: %s", e)
     try:
         inner = load_inner_life(world, me)
         rels = graph_relations(world, me, other)
-        trust = None
+        # 亲近度 = 个人信任（仅对玩家）+ 势力倾向
+        trust = view.score if view is not None and view.reasons else None
         if knowledge is not None and _is_player(world, other):
-            trust = int(getattr(knowledge, "trust_toward_player", 0) or 0)
+            trust = int(getattr(knowledge, "trust_toward_player", 0) or 0) + (trust or 0)
         heart = inner_life_block(inner, listener=other, rels=rels, trust=trust)
     except Exception as e:
         logger.debug("inner life block failed: %s", e)
         heart = ""
+    try:
+        fblock = faction_block(world, me, other, view=view) if view is not None else ""
+    except Exception as e:
+        logger.debug("faction block failed: %s", e)
+        fblock = ""
+    if fblock:
+        heart = f"{heart}\n{fblock}" if heart else fblock
     favor = ""
     try:
         if not _is_player(world, me):
@@ -1150,7 +1164,17 @@ def generate_talk_dialogue(
 
     delta = int(result.get("trust_delta") or 0)
     if world is not None and delta and result.get("source") == "llm":
-        new_trust = adjust_trust(world, speaker_b, delta)
+        # 个人信任只记「对玩家」；谈话结果同时传到 speaker_b 所在势力对 speaker_a 的声望
+        if _is_player(world, speaker_a):
+            new_trust = adjust_trust(world, speaker_b, delta)
+        else:
+            new_trust = knowledge.trust_toward_player
+        try:
+            notes = ripple(world, speaker_a, speaker_b, delta * 0.5, why=f"talk with {speaker_b}")
+            if notes:
+                result["faction_changes"] = notes
+        except Exception as e:
+            logger.debug("talk ripple failed: %s", e)
     else:
         new_trust = knowledge.trust_toward_player + (
             delta if result.get("source") == "llm" else 0

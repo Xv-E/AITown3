@@ -377,7 +377,7 @@ def apply_mood(world, name: str, mood: Any) -> Optional[str]:
 
 
 def settle_favors(world, memory=None) -> List[str]:
-    """完成已兑现的人情：记入双方记忆；帮忙的是玩家则信任 +1。返回备注。"""
+    """完成已兑现的人情：记入双方记忆；帮忙的是玩家则信任 +1；求助者的势力对帮忙者声望上升。"""
     notes: List[str] = []
     for f in sync_favor_quests(world):
         giver, helper, item = f.get("giver"), f.get("helper"), f.get("item")
@@ -395,6 +395,13 @@ def settle_favors(world, memory=None) -> List[str]:
                     from npc_knowledge import adjust_trust
 
                     adjust_trust(world, giver, 1)
+            except Exception:
+                pass
+            try:
+                from factions import ripple
+
+                # 兑现人情：求助者的家 / 帮派都会记住
+                notes.extend(ripple(world, helper, giver, 2.0, why=f"kept a promise to {giver}"))
             except Exception:
                 pass
         if memory is not None and giver:

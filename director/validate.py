@@ -322,6 +322,7 @@ def ensure_cast_quality(
                 text=f.text,
                 secret_level=f.secret_level,
                 known_by=known or ([player] if player else []),
+                faction=f.faction,
             )
         )
     cleaned_rumors = []
@@ -349,6 +350,7 @@ def ensure_cast_quality(
         rumors=cleaned_rumors,
         social=social,
         source=bp.source,
+        factions=list(bp.factions),
     )
 
 
@@ -545,6 +547,7 @@ def ensure_playable_mechanics(bp: EventBlueprint) -> EventBlueprint:
                 rumors=list(bp.rumors),
                 social=list(bp.social),
                 source=bp.source,
+                factions=list(bp.factions),
             ),
             door,
         )
@@ -637,6 +640,7 @@ def ensure_playable_mechanics(bp: EventBlueprint) -> EventBlueprint:
         rumors=list(bp.rumors),
         social=list(bp.social),
         source=bp.source,
+        factions=list(bp.factions),
     )
 
 

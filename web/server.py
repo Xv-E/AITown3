@@ -422,6 +422,20 @@ async def api_execute(req: ExecuteActionRequest):
                     reason = f"{reason} (favor kept: {'; '.join(settled)})"
             except Exception:
                 pass
+        faction_changes = []
+        if ok:
+            try:
+                import sys as _sys
+                agent_path = str(_AITOWN3 / "agent")
+                if agent_path not in _sys.path:
+                    _sys.path.insert(0, agent_path)
+                from factions import on_action
+
+                faction_changes = on_action(world, capability, positional)
+                if faction_changes:
+                    reason = f"{reason} (factions: {'; '.join(faction_changes)})"
+            except Exception:
+                pass
         interaction = None
         if ok and req.action == "interact":
             try:
@@ -443,6 +457,7 @@ async def api_execute(req: ExecuteActionRequest):
             "params": kwargs,
             "dialogue": dialogue,
             "interaction": interaction,
+            "faction_changes": faction_changes,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e

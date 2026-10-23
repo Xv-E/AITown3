@@ -538,6 +538,15 @@
   ],
   "facts": [
     {
+      "name": "ArchivistLetter",
+      "text": "The old archivist wrote that he was locked out of the archive the night of the theft, before anything went missing.",
+      "secret_level": 2,
+      "known_by": [
+        "InnkeeperMara"
+      ],
+      "faction": "ArchivistHouse"
+    },
+    {
       "name": "CourierBrief",
       "text": "You were hired to recover sealed records from the town archive. You do not yet know how the doors open. People at the Tavern often hear useful gossip.",
       "secret_level": 0,
@@ -661,6 +670,110 @@
       "a": "InnkeeperMara",
       "rel": "KNOWS",
       "b": "ScholarElise"
+    }
+  ],
+  "factions": [
+    {
+      "name": "Ashford",
+      "kind": "town",
+      "scale": "large",
+      "description": "The town around the market square and its sealed archive.",
+      "goal": "Get through the scandal of the theft without more trouble",
+      "members": [
+        {
+          "name": "InnkeeperMara",
+          "role": "innkeeper",
+          "loyalty": 6
+        },
+        {
+          "name": "BlacksmithTor",
+          "role": "smith",
+          "loyalty": 6
+        },
+        {
+          "name": "GuardRenn",
+          "role": "watchman",
+          "loyalty": 8
+        },
+        {
+          "name": "ScholarElise",
+          "role": "scholar",
+          "loyalty": 5
+        }
+      ]
+    },
+    {
+      "name": "TownWatch",
+      "kind": "authority",
+      "scale": "medium",
+      "parent": "Ashford",
+      "description": "The watch that guards the courtyard and the archive.",
+      "goal": "Keep order — and keep the sealed archive shut",
+      "members": [
+        {
+          "name": "GuardRenn",
+          "role": "sergeant",
+          "loyalty": 9
+        }
+      ],
+      "relations": [
+        {
+          "with": "ArchivistHouse",
+          "stance": "rival",
+          "reason": "the Watch blamed the old archivist for the theft"
+        },
+        {
+          "with": "CraftsGuild",
+          "stance": "rival",
+          "reason": "the Watch keeps fining the forge and the tavern"
+        }
+      ]
+    },
+    {
+      "name": "ArchivistHouse",
+      "kind": "family",
+      "scale": "small",
+      "description": "The old archivist's sister and his apprentice — all that is left of his house.",
+      "goal": "Clear the old archivist's name",
+      "members": [
+        {
+          "name": "InnkeeperMara",
+          "role": "head of the house",
+          "loyalty": 9
+        },
+        {
+          "name": "ScholarElise",
+          "role": "ward",
+          "loyalty": 8
+        }
+      ]
+    },
+    {
+      "name": "CraftsGuild",
+      "kind": "guild",
+      "scale": "medium",
+      "parent": "Ashford",
+      "description": "Smiths, brewers and innkeepers who stand together against the Watch.",
+      "goal": "Keep the trades free of the Watch's meddling",
+      "members": [
+        {
+          "name": "BlacksmithTor",
+          "role": "master smith",
+          "loyalty": 7
+        },
+        {
+          "name": "InnkeeperMara",
+          "role": "member",
+          "loyalty": 5
+        }
+      ],
+      "relations": [
+        {
+          "with": "ArchivistHouse",
+          "stance": "friendly",
+          "reason": "Tor and Mara have covered for each other for years"
+        }
+      ]
     }
   ]
 }

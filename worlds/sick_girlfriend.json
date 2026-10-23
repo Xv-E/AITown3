@@ -230,5 +230,51 @@
       "rel": "KNOWS",
       "b": "Lila"
     }
+  ],
+  "factions": [
+    {
+      "name": "Hearthvale",
+      "kind": "town",
+      "scale": "large",
+      "description": "The small village of the clinic and the forest edge.",
+      "goal": "Look after its own",
+      "members": [
+        {
+          "name": "DoctorRowan",
+          "role": "doctor",
+          "loyalty": 7
+        },
+        {
+          "name": "Lila",
+          "role": "villager",
+          "loyalty": 6
+        },
+        {
+          "name": "Traveler",
+          "role": "villager",
+          "loyalty": 6
+        }
+      ]
+    },
+    {
+      "name": "LilaHousehold",
+      "kind": "family",
+      "scale": "small",
+      "parent": "Hearthvale",
+      "description": "Lila and Traveler's home.",
+      "goal": "Get Lila well again",
+      "members": [
+        {
+          "name": "Traveler",
+          "role": "partner",
+          "loyalty": 10
+        },
+        {
+          "name": "Lila",
+          "role": "partner",
+          "loyalty": 10
+        }
+      ]
+    }
   ]
 }

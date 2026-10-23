@@ -227,5 +227,73 @@
     { "a": "Oren", "rel": "KNOWS", "b": "Kai" },
     { "a": "Oren", "rel": "KNOWS", "b": "Lia" },
     { "a": "Kai", "rel": "FRIENDS_WITH", "b": "Lia" }
+  ],
+  "factions": [
+    {
+      "name": "Settlers",
+      "kind": "town",
+      "scale": "large",
+      "description": "The three who staked out the village, and whoever joins them.",
+      "goal": "Turn the camp into a real village before winter",
+      "members": [
+        {
+          "name": "Oren",
+          "role": "leader",
+          "loyalty": 9
+        },
+        {
+          "name": "Kai",
+          "role": "woodcutter",
+          "loyalty": 7
+        },
+        {
+          "name": "Lia",
+          "role": "farmer",
+          "loyalty": 8
+        }
+      ]
+    },
+    {
+      "name": "OrenHousehold",
+      "kind": "family",
+      "scale": "small",
+      "parent": "Settlers",
+      "description": "Oren and the young man he has taken in like a son.",
+      "goal": "Build a home that will still stand in fifty years",
+      "members": [
+        {
+          "name": "Oren",
+          "role": "head",
+          "loyalty": 9
+        },
+        {
+          "name": "Kai",
+          "role": "ward",
+          "loyalty": 7
+        }
+      ],
+      "relations": [
+        {
+          "with": "Fieldfolk",
+          "stance": "rival",
+          "reason": "Oren wants every hand on the walls; Lia wants them in the field"
+        }
+      ]
+    },
+    {
+      "name": "Fieldfolk",
+      "kind": "crew",
+      "scale": "small",
+      "parent": "Settlers",
+      "description": "Those who believe the field comes before any wall.",
+      "goal": "Plant before building — no village survives an empty granary",
+      "members": [
+        {
+          "name": "Lia",
+          "role": "farmer",
+          "loyalty": 9
+        }
+      ]
+    }
   ]
 }

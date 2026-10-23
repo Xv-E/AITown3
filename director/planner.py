@@ -120,6 +120,13 @@ Rules:
   Facts are links in the backstory's chain of cause and effect, not game instructions.
 - 0-2 rumors with believed_by.
 - social: KNOWS between player and each NPC; FRIENDS_WITH/LIKES/RIVALS_WITH/FAMILY_OF to mirror bonds.
+- factions: 2-5 factions of DIFFERENT sizes that every NPC belongs to at least one of:
+  small ones (a family, a gang, a crew) and larger ones (a guild, the town watch, the whole town).
+  Small factions may set parent to a larger one. Each faction has a goal that can clash with others.
+  members: {name, role (e.g. mother, boss, apprentice), loyalty 0-10}; a person may belong to several.
+  relations: {with, stance: allied|friendly|neutral|rival|hostile, reason} — at least one rival or
+  hostile pair so loyalties pull against each other. The player usually starts in none (standing 0).
+  A fact may set "faction" when it is that faction's private business.
 - For talk_info: at least one fact known_by an NPC but NOT the player.
 - For use_on_person: target person.accepts_from must list the tool item name.
 - background/desire/fear/secret/bond history/fact text <= 35 words; other strings <= 12 words.
@@ -138,8 +145,15 @@ JSON shape:
   }],
   "facts":[{name,text,secret_level,known_by}],
   "rumors":[{name,text,about,believed_by}],
-  "social":[{a,rel,b}]
+  "social":[{a,rel,b}],
+  "factions":[{
+    "name","kind":"family|gang|guild|crew|order|authority|town|other",
+    "scale":"small|medium|large","description","goal","parent",
+    "members":[{"name","role","loyalty"}],
+    "relations":[{"with","stance","reason"}]
+  }]
 }
+facts[].faction (optional): name of the faction this fact privately belongs to
 rel: KNOWS|FRIENDS_WITH|LIKES|RIVALS_WITH|FAMILY_OF
 """
 
@@ -772,6 +786,8 @@ def _apply_cast_patch(
         out["rumors"] = [x for x in patch["rumors"] if isinstance(x, dict)]
     if isinstance(patch.get("social"), list):
         out["social"] = list(patch["social"])
+    if isinstance(patch.get("factions"), list):
+        out["factions"] = [x for x in patch["factions"] if isinstance(x, dict) and x.get("name")]
     return out
 
 
@@ -815,7 +831,7 @@ def _stage_cast(
         ],
     }
     user = (
-        "Flesh out cast profiles, facts, rumors, and social links.\n"
+        "Flesh out cast profiles, facts, rumors, social links, and factions.\n"
         "Keep every person name/role. Do not invent new people.\n\n"
         f"Draft intent:\n{prompt.strip()}\n\n"
         f"World context:\n{json.dumps(compact, ensure_ascii=False, indent=2)}\n"
@@ -825,7 +841,7 @@ def _stage_cast(
     return _invoke_json(
         system=CAST_SYSTEM,
         user=user,
-        max_tokens=1600,
+        max_tokens=2200,
         stage="cast",
     )
 

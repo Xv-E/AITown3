@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from typing import Any, Dict, List, Optional, Tuple
 
 
@@ -304,6 +304,7 @@ class FactSpec:
     text: str
     secret_level: int = 0
     known_by: List[str] = field(default_factory=list)
+    faction: Optional[str] = None  # 属于某势力的内情：只与自己人 / 盟友分享
 
     def normalized(self) -> "FactSpec":
         return FactSpec(
@@ -311,6 +312,7 @@ class FactSpec:
             text=(self.text or "").strip(),
             secret_level=int(self.secret_level or 0),
             known_by=[_clean_name(x) for x in (self.known_by or []) if x],
+            faction=_clean_name(self.faction) if self.faction else None,
         )
 
 
@@ -328,6 +330,107 @@ class RumorSpec:
             about=_clean_name(self.about) if self.about else None,
             believed_by=[_clean_name(x) for x in (self.believed_by or []) if x],
         )
+
+
+FACTION_KINDS = ("family", "gang", "guild", "crew", "order", "authority", "town", "other")
+FACTION_SCALES = ("small", "medium", "large")
+FACTION_STANCES = ("allied", "friendly", "neutral", "rival", "hostile")
+
+
+def _clamp(v: Any, lo: float, hi: float, default: float) -> float:
+    try:
+        return max(lo, min(hi, float(v)))
+    except (TypeError, ValueError):
+        return default
+
+
+@dataclass
+class FactionSpec:
+    """势力：家庭 / 帮派 / 行会 / 城镇……大小不一，可嵌套（parent）。"""
+
+    name: str
+    kind: str = "other"
+    scale: str = ""
+    description: str = ""
+    goal: str = ""
+    values: str = ""
+    parent: Optional[str] = None
+    # [{name, role, loyalty 0..10}]
+    members: List[Dict[str, Any]] = field(default_factory=list)
+    # [{with, stance: allied|friendly|neutral|rival|hostile, reason}]
+    relations: List[Dict[str, Any]] = field(default_factory=list)
+    # 开局声望：{人名: -10..10}（多数人默认 0）
+    standing: Dict[str, float] = field(default_factory=dict)
+
+    def normalized(self) -> "FactionSpec":
+        kind = (self.kind or "other").strip().lower()
+        if kind not in FACTION_KINDS:
+            kind = "other"
+        scale = (self.scale or "").strip().lower()
+        if scale not in FACTION_SCALES:
+            scale = {"family": "small", "gang": "small", "crew": "small", "town": "large"}.get(kind, "medium")
+        members: List[Dict[str, Any]] = []
+        for m in self.members or []:
+            if isinstance(m, str):
+                m = {"name": m}
+            if not isinstance(m, dict) or not m.get("name"):
+                continue
+            members.append({
+                "name": _clean_name(str(m["name"])),
+                "role": str(m.get("role") or "member").strip() or "member",
+                "loyalty": _clamp(m.get("loyalty", 6), 0, 10, 6),
+            })
+        relations: List[Dict[str, Any]] = []
+        for r in self.relations or []:
+            if not isinstance(r, dict) or not (r.get("with") or r.get("faction")):
+                continue
+            stance = str(r.get("stance") or "neutral").strip().lower()
+            if stance not in FACTION_STANCES:
+                stance = "neutral"
+            relations.append({
+                "with": _clean_name(str(r.get("with") or r.get("faction"))),
+                "stance": stance,
+                "reason": str(r.get("reason") or "").strip(),
+            })
+        standing = {
+            _clean_name(str(k)): _clamp(v, -10, 10, 0)
+            for k, v in (self.standing or {}).items() if k
+        } if isinstance(self.standing, dict) else {}
+        return FactionSpec(
+            name=_clean_name(self.name, "Faction"),
+            kind=kind,
+            scale=scale,
+            description=(self.description or "").strip(),
+            goal=(self.goal or "").strip(),
+            values=(self.values or "").strip(),
+            parent=_clean_name(self.parent) if self.parent else None,
+            members=members,
+            relations=relations,
+            standing=standing,
+        )
+
+
+def _normalize_factions(raw: List[FactionSpec], person_names: set) -> List[FactionSpec]:
+    """去重；成员 / 声望只留存在的人，关系 / 上级只留存在的势力。"""
+    out: List[FactionSpec] = []
+    seen: set = set()
+    for f in raw or []:
+        n = f.normalized()
+        if n.name in seen:
+            continue
+        seen.add(n.name)
+        out.append(n)
+    names = {f.name for f in out}
+    fixed: List[FactionSpec] = []
+    for f in out:
+        fixed.append(replace(
+            f,
+            parent=f.parent if f.parent in names and f.parent != f.name else None,
+            members=[m for m in f.members if m["name"] in person_names],
+            relations=[r for r in f.relations if r["with"] in names and r["with"] != f.name],
+            standing={k: v for k, v in f.standing.items() if k in person_names},
+        ))
+    return fixed
 
 
 # (person_a, relation, person_or_item_b)  relation in KNOWS|FRIENDS_WITH|LIKES|RIVALS_WITH|FAMILY_OF
@@ -574,6 +677,7 @@ def ensure_story_consistency(bp: "EventBlueprint") -> "EventBlueprint":
         rumors=rumors,
         social=list(bp.social),
         source=bp.source,
+        factions=list(bp.factions),
     )
 
 
@@ -609,6 +713,7 @@ class EventBlueprint:
     rumors: List[RumorSpec] = field(default_factory=list)
     social: List[SocialLink] = field(default_factory=list)
     source: str = "mock"  # mock | llm | world | api
+    factions: List[FactionSpec] = field(default_factory=list)
 
     def normalized(self) -> "EventBlueprint":
         locs = [x.normalized() for x in self.locations]
@@ -739,6 +844,12 @@ class EventBlueprint:
             if a_n in person_names and (b_n in person_names or b_n in item_names_set):
                 social.append((a_n, rel_u, b_n))
 
+        factions = _normalize_factions(self.factions, person_names)
+        faction_names = {f.name for f in factions}
+        facts = [
+            replace(f, faction=f.faction if f.faction in faction_names else None) for f in facts
+        ]
+
         bp = EventBlueprint(
             title=(self.title or "Untitled Event").strip(),
             premise=(self.premise or "").strip(),
@@ -751,6 +862,7 @@ class EventBlueprint:
             rumors=rumors,
             social=social,
             source=self.source,
+            factions=factions,
         )
         # 故事一致性：悬空 involves / 文案中的剧情物件等
         return ensure_story_consistency(bp)
@@ -777,6 +889,7 @@ class EventBlueprint:
             "facts": [asdict(x) for x in bp.facts],
             "rumors": [asdict(x) for x in bp.rumors],
             "social": [{"a": a, "rel": r, "b": b} for a, r, b in bp.social],
+            "factions": [asdict(x) for x in bp.factions],
             "counts": {
                 "locations": len(bp.locations),
                 "persons": len(bp.persons),
@@ -784,6 +897,7 @@ class EventBlueprint:
                 "quests": len(bp.quests),
                 "facts": len(bp.facts),
                 "rumors": len(bp.rumors),
+                "factions": len(bp.factions),
             },
         }
 
@@ -883,6 +997,7 @@ class EventBlueprint:
                 text=str(x.get("text", "")),
                 secret_level=int(x.get("secret_level", 0) or 0),
                 known_by=list(x.get("known_by") or []),
+                faction=x.get("faction") or None,
             )
             for x in (data.get("facts") or [])
             if isinstance(x, dict)
@@ -927,4 +1042,20 @@ class EventBlueprint:
             rumors=rumors,
             social=social,
             source=str(data.get("source") or source),
+            factions=[
+                FactionSpec(
+                    name=str(x.get("name", "")),
+                    kind=str(x.get("kind") or "other"),
+                    scale=str(x.get("scale") or ""),
+                    description=str(x.get("description") or ""),
+                    goal=str(x.get("goal") or ""),
+                    values=str(x.get("values") or ""),
+                    parent=x.get("parent") or None,
+                    members=list(x.get("members") or []),
+                    relations=list(x.get("relations") or []),
+                    standing=dict(x.get("standing") or {}) if isinstance(x.get("standing"), dict) else {},
+                )
+                for x in (data.get("factions") or [])
+                if isinstance(x, dict) and x.get("name")
+            ],
         ).normalized()
