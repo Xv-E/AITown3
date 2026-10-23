@@ -369,6 +369,8 @@ class FactionSpec:
     territory: Dict[str, float] = field(default_factory=dict)
     # 由剧情来的特性：[{id, why}]，id 取自 agent/faction_sim.TRAITS
     traits: List[Dict[str, str]] = field(default_factory=list)
+    # 首领每天发给每个成员的工钱（街头经济，单位：cash 张数）
+    wage: int = 0
 
     def normalized(self) -> "FactionSpec":
         kind = (self.kind or "other").strip().lower()
@@ -428,6 +430,7 @@ class FactionSpec:
             } if isinstance(self.trial, dict) else {},
             territory=_clean_territory(self.territory),
             traits=_clean_traits(self.traits),
+            wage=max(0, int(_clamp(self.wage, 0, 100, 0))),
         )
 
 
@@ -1106,6 +1109,7 @@ class EventBlueprint:
                     trial=dict(x.get("trial") or {}) if isinstance(x.get("trial"), dict) else {},
                     territory=x.get("territory") or {},
                     traits=list(x.get("traits") or []),
+                    wage=x.get("wage") or 0,
                 )
                 for x in (data.get("factions") or [])
                 if isinstance(x, dict) and x.get("name")

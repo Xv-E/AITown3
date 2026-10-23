@@ -1,0 +1,3059 @@
+{
+  "id": "triad_streets",
+  "title": "Neon Streets of Sam Shui",
+  "premise": "A crowded harbour district at night. Two triads — the old Silver Dragons on the rooftops and the young Black Tigers in their garage — fight street by street for the right to collect protection money. Every dollar changes hands: hawkers sell noodles and fish balls, buy their stock at the wharf, pay whoever holds their street, and the gangsters spend it again at the same stalls and bars. A newcomer has just stepped off the night ferry with four dollars.",
+  "locations": [
+    {
+      "name": "TempleStreet",
+      "description": "The night market spine: hawker lamps, fortune tellers, crowds until 2 a.m. Every side wants it.",
+      "tags": "hub,market,social",
+      "map": [
+        0,
+        0
+      ],
+      "grid": [
+        24,
+        13
+      ]
+    },
+    {
+      "name": "FishMarket",
+      "description": "Wet market of tanks and ice. Big Ma's curry fish ball cart steams at the corner.",
+      "tags": "market,food",
+      "map": [
+        -3,
+        0
+      ],
+      "grid": [
+        20,
+        12
+      ]
+    },
+    {
+      "name": "Wharf",
+      "description": "Godowns and cranes. Ho's wholesale crates come off the boats here every day.",
+      "tags": "work,trade",
+      "map": [
+        -6,
+        0
+      ],
+      "grid": [
+        22,
+        12
+      ]
+    },
+    {
+      "name": "FerryPier",
+      "description": "The night ferry lands newcomers with cardboard suitcases and nowhere to sleep.",
+      "tags": "arrival",
+      "map": [
+        -6,
+        3
+      ],
+      "grid": [
+        16,
+        10
+      ]
+    },
+    {
+      "name": "Tenements",
+      "description": "Six storeys of subdivided flats, washing on bamboo poles. Dragon Leung owns the building.",
+      "tags": "home",
+      "map": [
+        -3,
+        3
+      ],
+      "grid": [
+        20,
+        12
+      ]
+    },
+    {
+      "name": "Rooftops",
+      "description": "A rooftop shrine and mahjong table above the tenements: the Silver Dragons' hall.",
+      "tags": "hideout",
+      "map": [
+        -3,
+        6
+      ],
+      "grid": [
+        16,
+        10
+      ]
+    },
+    {
+      "name": "NoodleAlley",
+      "description": "A narrow lane of plastic stools around Mrs Lau's noodle stall.",
+      "tags": "food,social",
+      "map": [
+        0,
+        3
+      ],
+      "grid": [
+        18,
+        10
+      ]
+    },
+    {
+      "name": "TeaHouseRow",
+      "description": "Uncle Wing's cha chaan teng and its neighbours: milk tea, newspapers, gossip.",
+      "tags": "food,social",
+      "map": [
+        3,
+        3
+      ],
+      "grid": [
+        20,
+        12
+      ]
+    },
+    {
+      "name": "NeonStrip",
+      "description": "Karaoke signs and the Lucky Bar. Money, beer and trouble after dark.",
+      "tags": "nightlife,social",
+      "map": [
+        3,
+        0
+      ],
+      "grid": [
+        22,
+        12
+      ]
+    },
+    {
+      "name": "MahjongHall",
+      "description": "Auntie Fong's mahjong parlour; the clack of tiles never stops.",
+      "tags": "nightlife",
+      "map": [
+        6,
+        0
+      ],
+      "grid": [
+        18,
+        10
+      ]
+    },
+    {
+      "name": "BackAlley",
+      "description": "Bins, steam vents and blind corners where arguments get settled.",
+      "tags": "danger",
+      "map": [
+        6,
+        3
+      ],
+      "grid": [
+        16,
+        10
+      ]
+    },
+    {
+      "name": "GarageYard",
+      "description": "A car-repair yard behind roll-down shutters: the Black Tigers' den.",
+      "tags": "hideout",
+      "map": [
+        6,
+        6
+      ],
+      "grid": [
+        20,
+        12
+      ]
+    },
+    {
+      "name": "TinHauTemple",
+      "description": "Incense coils and the sea goddess's altar. Nobody fights in front of her — usually.",
+      "tags": "temple,neutral",
+      "map": [
+        0,
+        6
+      ],
+      "grid": [
+        18,
+        10
+      ]
+    },
+    {
+      "name": "PoliceStation",
+      "description": "A tired district station with one sergeant who knows everyone.",
+      "tags": "police",
+      "map": [
+        3,
+        6
+      ],
+      "grid": [
+        18,
+        10
+      ]
+    },
+    {
+      "name": "HerbalLane",
+      "description": "Dried roots and bitter brews. Mr Chow patches up whoever limps in.",
+      "tags": "medicine",
+      "map": [
+        3,
+        9
+      ],
+      "grid": [
+        16,
+        10
+      ]
+    },
+    {
+      "name": "BuildingSite",
+      "description": "Scaffolding for a new tower nobody owns yet. Day labour, no questions.",
+      "tags": "work",
+      "map": [
+        0,
+        9
+      ],
+      "grid": [
+        20,
+        12
+      ]
+    }
+  ],
+  "adjacencies": [
+    {
+      "a": "Wharf",
+      "b": "FishMarket"
+    },
+    {
+      "a": "Wharf",
+      "b": "FerryPier"
+    },
+    {
+      "a": "FerryPier",
+      "b": "Tenements"
+    },
+    {
+      "a": "FishMarket",
+      "b": "TempleStreet"
+    },
+    {
+      "a": "FishMarket",
+      "b": "Tenements"
+    },
+    {
+      "a": "TempleStreet",
+      "b": "NeonStrip"
+    },
+    {
+      "a": "TempleStreet",
+      "b": "NoodleAlley"
+    },
+    {
+      "a": "NeonStrip",
+      "b": "MahjongHall"
+    },
+    {
+      "a": "NeonStrip",
+      "b": "TeaHouseRow"
+    },
+    {
+      "a": "MahjongHall",
+      "b": "BackAlley"
+    },
+    {
+      "a": "Tenements",
+      "b": "NoodleAlley"
+    },
+    {
+      "a": "NoodleAlley",
+      "b": "TeaHouseRow"
+    },
+    {
+      "a": "TeaHouseRow",
+      "b": "BackAlley"
+    },
+    {
+      "a": "Tenements",
+      "b": "Rooftops"
+    },
+    {
+      "a": "NoodleAlley",
+      "b": "TinHauTemple"
+    },
+    {
+      "a": "TeaHouseRow",
+      "b": "PoliceStation"
+    },
+    {
+      "a": "BackAlley",
+      "b": "GarageYard"
+    },
+    {
+      "a": "TinHauTemple",
+      "b": "PoliceStation"
+    },
+    {
+      "a": "PoliceStation",
+      "b": "HerbalLane"
+    },
+    {
+      "a": "GarageYard",
+      "b": "HerbalLane"
+    },
+    {
+      "a": "TinHauTemple",
+      "b": "BuildingSite"
+    },
+    {
+      "a": "BuildingSite",
+      "b": "HerbalLane"
+    }
+  ],
+  "persons": [
+    {
+      "name": "AhLok",
+      "located_at": "FerryPier",
+      "role": "player",
+      "personality": "hungry, quick, stubborn",
+      "background": "Came over on the night ferry with four dollars and a cousin's address that turned out to be a pawnshop.",
+      "goal": "Find a place on these streets before the money runs out",
+      "values": "survival,loyalty",
+      "mood": "wary",
+      "hp": 100,
+      "power_level": 10,
+      "speech_style": "quick and cheeky",
+      "secret_policy": "open",
+      "trust_toward_player": 0,
+      "desire": "",
+      "fear": "",
+      "secret": "",
+      "bonds": {}
+    },
+    {
+      "name": "DragonLeung",
+      "located_at": "Rooftops",
+      "role": "npc",
+      "personality": "patient, charming, ruthless when crossed",
+      "background": "Built the Silver Dragons from three boys and a borrowed cleaver; now owns the Tenements and half the lane.",
+      "goal": "Take back TeaHouseRow before the Tigers dig in",
+      "values": "brotherhood,face,order",
+      "mood": "calm",
+      "hp": 100,
+      "power_level": 14,
+      "speech_style": "soft-spoken, never repeats himself",
+      "secret_policy": "guarded",
+      "trust_toward_player": 0,
+      "desire": "To leave the district to someone strong enough to keep it — and retire to a flat with a sea view.",
+      "fear": "Dying the way his own big brother did: alone in an alley, forgotten by the next week.",
+      "secret": "His doctor told him his heart will not last five more years; he has told no one, not even Bones.",
+      "bonds": {
+        "Bones": "his oldest brother-in-arms; they burned incense together at Tin Hau thirty years ago",
+        "AhKit": "sees a successor in him, and a weakness: the boy loves his mother more than the gang",
+        "TigerSze": "they were boxing-gym friends once, before the garage fire"
+      },
+      "routine": [
+        {
+          "start": 2,
+          "end": 10,
+          "location": "Rooftops",
+          "activity": "sleep",
+          "action": "sleep"
+        },
+        {
+          "start": 10,
+          "end": 11,
+          "location": "Rooftops",
+          "activity": "morning tea at the shrine",
+          "goal": "Go to location"
+        },
+        {
+          "start": 11,
+          "end": 11.5,
+          "location": "NoodleAlley",
+          "activity": "buy a bowl of noodles at LauNoodleStall",
+          "goal": "Use item on",
+          "target_entity": "LauNoodleStall",
+          "item_kind": "cash",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 11.5,
+          "end": 12,
+          "location": "NoodleAlley",
+          "activity": "a bowl of noodles",
+          "goal": "Use item",
+          "item_kind": "food",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 12,
+          "end": 18,
+          "location": "Rooftops",
+          "activity": "hold court with his brothers",
+          "goal": "Go to location",
+          "social": true
+        },
+        {
+          "start": 18,
+          "end": 18.5,
+          "location": "FishMarket",
+          "activity": "buy fish balls at MaFishballCart",
+          "goal": "Use item on",
+          "target_entity": "MaFishballCart",
+          "item_kind": "cash",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 18.5,
+          "end": 19,
+          "location": "FishMarket",
+          "activity": "fish balls",
+          "goal": "Use item",
+          "item_kind": "food",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 19,
+          "end": 2,
+          "location": "Rooftops",
+          "activity": "count the night's money and plan",
+          "goal": "Go to location",
+          "social": true
+        }
+      ]
+    },
+    {
+      "name": "Bones",
+      "located_at": "Rooftops",
+      "role": "npc",
+      "personality": "silent, loyal, frightening",
+      "background": "Thirty years with the Dragons; his younger brother was cut in BackAlley two winters ago.",
+      "goal": "Keep the Dragons' streets paying",
+      "values": "loyalty,revenge",
+      "mood": "grim",
+      "hp": 100,
+      "power_level": 16,
+      "speech_style": "few words, all of them final",
+      "secret_policy": "guarded",
+      "trust_toward_player": 0,
+      "desire": "To see the man who cut his brother on his knees.",
+      "fear": "That Leung will choose peace with the Tigers and call it wisdom.",
+      "secret": "He was in BackAlley the night the Tigers' garage burned, and he has never said why.",
+      "bonds": {
+        "DragonLeung": "would die for him, and has nearly done so twice",
+        "MadDogWai": "the Tiger he believes held the knife that cut his brother"
+      },
+      "routine": [
+        {
+          "start": 0,
+          "end": 9,
+          "location": "Rooftops",
+          "activity": "sleep",
+          "action": "sleep"
+        },
+        {
+          "start": 9,
+          "end": 11,
+          "location": "Tenements",
+          "activity": "walk the building and be seen",
+          "goal": "Go to location",
+          "social": true
+        },
+        {
+          "start": 11,
+          "end": 11.5,
+          "location": "FishMarket",
+          "activity": "buy fish balls at MaFishballCart",
+          "goal": "Use item on",
+          "target_entity": "MaFishballCart",
+          "item_kind": "cash",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 11.5,
+          "end": 12,
+          "location": "FishMarket",
+          "activity": "fish balls",
+          "goal": "Use item",
+          "item_kind": "food",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 12,
+          "end": 13,
+          "location": "FishMarket",
+          "activity": "collect protection money",
+          "action": "collect_dues",
+          "once": true
+        },
+        {
+          "start": 13,
+          "end": 18,
+          "location": "Rooftops",
+          "activity": "guard the hall",
+          "goal": "Go to location"
+        },
+        {
+          "start": 18,
+          "end": 19,
+          "location": "NoodleAlley",
+          "activity": "collect protection money",
+          "action": "collect_dues",
+          "once": true
+        },
+        {
+          "start": 19,
+          "end": 19.5,
+          "location": "NoodleAlley",
+          "activity": "buy noodles at LauNoodleStall",
+          "goal": "Use item on",
+          "target_entity": "LauNoodleStall",
+          "item_kind": "cash",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 19.5,
+          "end": 20,
+          "location": "NoodleAlley",
+          "activity": "noodles",
+          "goal": "Use item",
+          "item_kind": "food",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 20,
+          "end": 24,
+          "location": "TempleStreet",
+          "activity": "watch the night market",
+          "goal": "Go to location",
+          "social": true
+        }
+      ]
+    },
+    {
+      "name": "AhKit",
+      "located_at": "Tenements",
+      "role": "npc",
+      "personality": "proud, restless, softer than he lets on",
+      "background": "Grew up on Mrs Lau's noodles and joined the Dragons at sixteen to make sure nobody pushed her around.",
+      "goal": "Prove to Leung he can run a street of his own",
+      "values": "family,face",
+      "mood": "restless",
+      "hp": 100,
+      "power_level": 11,
+      "speech_style": "street slang, loud when nervous",
+      "secret_policy": "share_gossip",
+      "trust_toward_player": 2,
+      "desire": "To be the big brother of NoodleAlley, so his mother never pays anyone but him.",
+      "fear": "That his mother will see what he really does on his rounds.",
+      "secret": "He collects protection from his own mother, and pays her back in secret from his wages.",
+      "bonds": {
+        "MrsLau": "his mother; everything he does is supposed to be for her",
+        "AhFai": "best friend since primary school, now a Black Tiger; they still share cigarettes on the pier",
+        "DragonLeung": "the father he chose; he would do anything for a nod from him"
+      },
+      "routine": [
+        {
+          "start": 7,
+          "end": 8,
+          "location": "Tenements",
+          "activity": "wake up at his mother's flat",
+          "goal": "Go to location"
+        },
+        {
+          "start": 8,
+          "end": 9,
+          "location": "NoodleAlley",
+          "activity": "help his mother set up the stall",
+          "goal": "Go to location",
+          "social": true
+        },
+        {
+          "start": 9,
+          "end": 9.5,
+          "location": "NoodleAlley",
+          "activity": "buy breakfast noodles at LauNoodleStall",
+          "goal": "Use item on",
+          "target_entity": "LauNoodleStall",
+          "item_kind": "cash",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 9.5,
+          "end": 10,
+          "location": "NoodleAlley",
+          "activity": "breakfast noodles",
+          "goal": "Use item",
+          "item_kind": "food",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 10,
+          "end": 11,
+          "location": "NoodleAlley",
+          "activity": "collect protection money",
+          "action": "collect_dues",
+          "once": true
+        },
+        {
+          "start": 11,
+          "end": 12,
+          "location": "FishMarket",
+          "activity": "collect protection money",
+          "action": "collect_dues",
+          "once": true
+        },
+        {
+          "start": 12,
+          "end": 17,
+          "location": "Rooftops",
+          "activity": "hang around the hall",
+          "goal": "Go to location",
+          "social": true
+        },
+        {
+          "start": 17,
+          "end": 18,
+          "location": "TeaHouseRow",
+          "activity": "collect protection money",
+          "action": "collect_dues",
+          "once": true
+        },
+        {
+          "start": 18,
+          "end": 18.5,
+          "location": "TeaHouseRow",
+          "activity": "buy milk tea and a bun at GoldenTeaHouse",
+          "goal": "Use item on",
+          "target_entity": "GoldenTeaHouse",
+          "item_kind": "cash",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 18.5,
+          "end": 19,
+          "location": "TeaHouseRow",
+          "activity": "milk tea and a bun",
+          "goal": "Use item",
+          "item_kind": "food",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 19,
+          "end": 19.5,
+          "location": "NeonStrip",
+          "activity": "buy a beer at LuckyBar",
+          "goal": "Use item on",
+          "target_entity": "LuckyBar",
+          "item_kind": "cash",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 19.5,
+          "end": 20,
+          "location": "NeonStrip",
+          "activity": "a beer",
+          "goal": "Use item",
+          "item_kind": "food",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 20,
+          "end": 23,
+          "location": "NeonStrip",
+          "activity": "drink and show his face",
+          "goal": "Go to location",
+          "social": true
+        },
+        {
+          "start": 23,
+          "end": 7,
+          "location": "Tenements",
+          "activity": "sleep",
+          "action": "sleep"
+        }
+      ]
+    },
+    {
+      "name": "TigerSze",
+      "located_at": "GarageYard",
+      "role": "npc",
+      "personality": "loud, generous, quick to violence",
+      "background": "A former boxer who turned a repair yard into the Black Tigers' den; still blames the Dragons for the fire.",
+      "goal": "Push the Dragons out of TeaHouseRow and NoodleAlley",
+      "values": "strength,revenge,generosity",
+      "mood": "restless",
+      "hp": 100,
+      "power_level": 15,
+      "speech_style": "booming, laughs before he hits",
+      "secret_policy": "guarded",
+      "trust_toward_player": 0,
+      "desire": "To rebuild the garage that burned, bigger, with his name over the gate.",
+      "fear": "Looking weak in front of his boys.",
+      "secret": "The fire started from his own wiring; he blamed the Dragons because his boys needed an enemy.",
+      "bonds": {
+        "DragonLeung": "the old friend he turned into an enemy with a lie",
+        "MadDogWai": "his attack dog; he worries he cannot hold the leash much longer",
+        "AhFai": "a cousin's son he promised to keep alive"
+      },
+      "routine": [
+        {
+          "start": 2,
+          "end": 10,
+          "location": "GarageYard",
+          "activity": "sleep",
+          "action": "sleep"
+        },
+        {
+          "start": 10,
+          "end": 11,
+          "location": "GarageYard",
+          "activity": "train with the heavy bag",
+          "goal": "Go to location"
+        },
+        {
+          "start": 11,
+          "end": 11.5,
+          "location": "TeaHouseRow",
+          "activity": "buy milk tea at GoldenTeaHouse",
+          "goal": "Use item on",
+          "target_entity": "GoldenTeaHouse",
+          "item_kind": "cash",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 11.5,
+          "end": 12,
+          "location": "TeaHouseRow",
+          "activity": "milk tea",
+          "goal": "Use item",
+          "item_kind": "food",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 12,
+          "end": 18,
+          "location": "GarageYard",
+          "activity": "hold court",
+          "goal": "Go to location",
+          "social": true
+        },
+        {
+          "start": 18,
+          "end": 18.5,
+          "location": "MahjongHall",
+          "activity": "buy a drink at the tables at FongMahjongParlour",
+          "goal": "Use item on",
+          "target_entity": "FongMahjongParlour",
+          "item_kind": "cash",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 18.5,
+          "end": 19,
+          "location": "MahjongHall",
+          "activity": "a drink at the tables",
+          "goal": "Use item",
+          "item_kind": "food",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 19,
+          "end": 22,
+          "location": "MahjongHall",
+          "activity": "play mahjong for high stakes",
+          "goal": "Go to location",
+          "social": true
+        },
+        {
+          "start": 22,
+          "end": 2,
+          "location": "NeonStrip",
+          "activity": "own the night",
+          "goal": "Go to location",
+          "social": true
+        }
+      ]
+    },
+    {
+      "name": "MadDogWai",
+      "located_at": "GarageYard",
+      "role": "npc",
+      "personality": "reckless, funny, cruel when drunk",
+      "background": "Earned his name biting a man's ear off in a dispute over a parking space.",
+      "goal": "Make the Dragons pay for every dollar on TeaHouseRow",
+      "values": "fear,reputation",
+      "mood": "wired",
+      "hp": 100,
+      "power_level": 14,
+      "speech_style": "fast, swearing, grinning",
+      "secret_policy": "lie",
+      "trust_toward_player": -1,
+      "desire": "To be feared on every street in the district, not just this one.",
+      "fear": "Ending up like his father: a nobody who swept the ferry deck.",
+      "secret": "He did not cut Bones' brother; he took the credit because it made people afraid of him.",
+      "bonds": {
+        "Bones": "enjoys being hated by him",
+        "TigerSze": "the only man he listens to — mostly"
+      },
+      "routine": [
+        {
+          "start": 0,
+          "end": 10,
+          "location": "GarageYard",
+          "activity": "sleep",
+          "action": "sleep"
+        },
+        {
+          "start": 10,
+          "end": 12,
+          "location": "BackAlley",
+          "activity": "hang around the alley",
+          "goal": "Go to location",
+          "social": true
+        },
+        {
+          "start": 12,
+          "end": 13,
+          "location": "NeonStrip",
+          "activity": "collect protection money",
+          "action": "collect_dues",
+          "once": true
+        },
+        {
+          "start": 13,
+          "end": 13.5,
+          "location": "NeonStrip",
+          "activity": "buy a beer at LuckyBar",
+          "goal": "Use item on",
+          "target_entity": "LuckyBar",
+          "item_kind": "cash",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 13.5,
+          "end": 14,
+          "location": "NeonStrip",
+          "activity": "a beer",
+          "goal": "Use item",
+          "item_kind": "food",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 14,
+          "end": 17,
+          "location": "BackAlley",
+          "activity": "look for trouble",
+          "goal": "Go to location",
+          "social": true
+        },
+        {
+          "start": 17,
+          "end": 18,
+          "location": "TeaHouseRow",
+          "activity": "collect protection money",
+          "action": "collect_dues",
+          "once": true
+        },
+        {
+          "start": 18,
+          "end": 19,
+          "location": "NoodleAlley",
+          "activity": "collect protection money",
+          "action": "collect_dues",
+          "once": true
+        },
+        {
+          "start": 19,
+          "end": 19.5,
+          "location": "NoodleAlley",
+          "activity": "buy noodles at LauNoodleStall",
+          "goal": "Use item on",
+          "target_entity": "LauNoodleStall",
+          "item_kind": "cash",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 19.5,
+          "end": 20,
+          "location": "NoodleAlley",
+          "activity": "noodles",
+          "goal": "Use item",
+          "item_kind": "food",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 20,
+          "end": 24,
+          "location": "NeonStrip",
+          "activity": "drink with the boys",
+          "goal": "Go to location",
+          "social": true
+        }
+      ]
+    },
+    {
+      "name": "AhFai",
+      "located_at": "Tenements",
+      "role": "npc",
+      "personality": "anxious, kind, easily led",
+      "background": "Joined the Black Tigers because his cousin's family owed Sze; still lives in Leung's building.",
+      "goal": "Earn enough to get his little sister into a proper school",
+      "values": "family,friendship",
+      "mood": "uneasy",
+      "hp": 100,
+      "power_level": 8,
+      "speech_style": "polite, stammers when lying",
+      "secret_policy": "share_gossip",
+      "trust_toward_player": 3,
+      "desire": "To get out of the life before it gets him or his sister.",
+      "fear": "Being told to hurt Ah Kit.",
+      "secret": "He warns Ah Kit whenever the Tigers plan to move on NoodleAlley.",
+      "bonds": {
+        "AhKit": "best friend since primary school; the one person he trusts on the other side",
+        "TigerSze": "owes him for his family's debt, and hates it"
+      },
+      "routine": [
+        {
+          "start": 8,
+          "end": 9,
+          "location": "Tenements",
+          "activity": "get up quietly",
+          "goal": "Go to location"
+        },
+        {
+          "start": 9,
+          "end": 9.5,
+          "location": "FishMarket",
+          "activity": "buy fish balls at MaFishballCart",
+          "goal": "Use item on",
+          "target_entity": "MaFishballCart",
+          "item_kind": "cash",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 9.5,
+          "end": 10,
+          "location": "FishMarket",
+          "activity": "fish balls",
+          "goal": "Use item",
+          "item_kind": "food",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 10,
+          "end": 12,
+          "location": "BuildingSite",
+          "activity": "carry bricks for day wages",
+          "goal": "Go to location"
+        },
+        {
+          "start": 12,
+          "end": 13,
+          "location": "MahjongHall",
+          "activity": "collect protection money",
+          "action": "collect_dues",
+          "once": true
+        },
+        {
+          "start": 13,
+          "end": 18,
+          "location": "GarageYard",
+          "activity": "run errands for the Tigers",
+          "goal": "Go to location",
+          "social": true
+        },
+        {
+          "start": 18,
+          "end": 18.5,
+          "location": "TeaHouseRow",
+          "activity": "buy milk tea at GoldenTeaHouse",
+          "goal": "Use item on",
+          "target_entity": "GoldenTeaHouse",
+          "item_kind": "cash",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 18.5,
+          "end": 19,
+          "location": "TeaHouseRow",
+          "activity": "milk tea",
+          "goal": "Use item",
+          "item_kind": "food",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 19,
+          "end": 22,
+          "location": "FerryPier",
+          "activity": "smoke on the pier",
+          "goal": "Go to location",
+          "social": true
+        },
+        {
+          "start": 22,
+          "end": 8,
+          "location": "Tenements",
+          "activity": "sleep",
+          "action": "sleep"
+        }
+      ]
+    },
+    {
+      "name": "MrsLau",
+      "located_at": "Tenements",
+      "role": "npc",
+      "personality": "tough, warm, sharp-tongued",
+      "background": "Has sold noodles in the same lane for twenty-two years and buried a husband who owed the wrong people.",
+      "goal": "Keep the stall open and her son alive",
+      "values": "family,hard work",
+      "mood": "tired",
+      "hp": 100,
+      "power_level": 6,
+      "speech_style": "scolding and affectionate in the same breath",
+      "secret_policy": "share_gossip",
+      "trust_toward_player": 3,
+      "works_at": "NoodleAlley",
+      "desire": "To see Ah Kit married, with a job she can tell the neighbours about.",
+      "fear": "A phone call at night about her son.",
+      "secret": "She knows exactly what Ah Kit does on his rounds, and pretends not to, because the truth would end them.",
+      "bonds": {
+        "AhKit": "her only son; she cooks his noodles first every morning",
+        "UncleWing": "the old friend who lent her the money for the stall after her husband died"
+      },
+      "routine": [
+        {
+          "start": 6,
+          "end": 7,
+          "location": "Tenements",
+          "activity": "wake before dawn",
+          "goal": "Go to location"
+        },
+        {
+          "start": 7,
+          "end": 14,
+          "location": "NoodleAlley",
+          "activity": "cook noodles",
+          "goal": "Go to location",
+          "social": true
+        },
+        {
+          "start": 14,
+          "end": 14.5,
+          "location": "TeaHouseRow",
+          "activity": "buy milk tea at GoldenTeaHouse",
+          "goal": "Use item on",
+          "target_entity": "GoldenTeaHouse",
+          "item_kind": "cash",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 14.5,
+          "end": 15,
+          "location": "TeaHouseRow",
+          "activity": "milk tea",
+          "goal": "Use item",
+          "item_kind": "food",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 15,
+          "end": 21,
+          "location": "NoodleAlley",
+          "activity": "cook noodles",
+          "goal": "Go to location",
+          "social": true
+        },
+        {
+          "start": 21,
+          "end": 22,
+          "location": "TinHauTemple",
+          "activity": "light incense for her son",
+          "goal": "Go to location",
+          "social": true
+        },
+        {
+          "start": 22,
+          "end": 6,
+          "location": "Tenements",
+          "activity": "sleep",
+          "action": "sleep"
+        }
+      ]
+    },
+    {
+      "name": "UncleWing",
+      "located_at": "Tenements",
+      "role": "npc",
+      "personality": "dignified, cautious, stubborn",
+      "background": "Runs the Golden Tea House his father opened; chairman of the street merchants for eleven years.",
+      "goal": "Unite the merchants so no gang can squeeze them one by one",
+      "values": "dignity,community",
+      "mood": "worried",
+      "hp": 100,
+      "power_level": 6,
+      "speech_style": "formal, old-fashioned",
+      "secret_policy": "guarded",
+      "trust_toward_player": 2,
+      "works_at": "TeaHouseRow",
+      "desire": "To hand the tea house to his granddaughter without a single debt to any gang.",
+      "fear": "That the merchants will break and each pay alone.",
+      "secret": "He has written down every dollar paid to both gangs for three years, in a ledger under the till.",
+      "bonds": {
+        "MrsLau": "like a sister; he still worries about her boy",
+        "SergeantTam": "an old classmate he no longer trusts"
+      },
+      "routine": [
+        {
+          "start": 6,
+          "end": 12,
+          "location": "TeaHouseRow",
+          "activity": "open the tea house",
+          "goal": "Go to location",
+          "social": true
+        },
+        {
+          "start": 12,
+          "end": 12.5,
+          "location": "NoodleAlley",
+          "activity": "buy noodles at LauNoodleStall",
+          "goal": "Use item on",
+          "target_entity": "LauNoodleStall",
+          "item_kind": "cash",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 12.5,
+          "end": 13,
+          "location": "NoodleAlley",
+          "activity": "noodles",
+          "goal": "Use item",
+          "item_kind": "food",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 13,
+          "end": 20,
+          "location": "TeaHouseRow",
+          "activity": "run the tea house",
+          "goal": "Go to location",
+          "social": true
+        },
+        {
+          "start": 20,
+          "end": 21,
+          "location": "TinHauTemple",
+          "activity": "pray for the street",
+          "goal": "Go to location",
+          "social": true
+        },
+        {
+          "start": 21,
+          "end": 6,
+          "location": "Tenements",
+          "activity": "sleep",
+          "action": "sleep"
+        }
+      ]
+    },
+    {
+      "name": "MissChoi",
+      "located_at": "Tenements",
+      "role": "npc",
+      "personality": "glamorous, calculating, lonely",
+      "background": "Bought the Lucky Bar with money nobody asks about; the Tigers drink free, so she pays more.",
+      "goal": "Keep the bar full and both gangs drinking",
+      "values": "independence,money",
+      "mood": "guarded",
+      "hp": 100,
+      "power_level": 7,
+      "speech_style": "flirtatious, never gives a straight answer",
+      "secret_policy": "lie",
+      "trust_toward_player": 0,
+      "works_at": "NeonStrip",
+      "desire": "To own the whole NeonStrip and answer to nobody.",
+      "fear": "Going back to being nobody's girl from the ferry.",
+      "secret": "She sells what she hears in the bar to Sergeant Tam.",
+      "bonds": {
+        "TigerSze": "his tab is three months unpaid, and she smiles about it",
+        "SergeantTam": "her buyer for secrets; neither of them likes the arrangement"
+      },
+      "routine": [
+        {
+          "start": 4,
+          "end": 12,
+          "location": "Tenements",
+          "activity": "sleep",
+          "action": "sleep"
+        },
+        {
+          "start": 12,
+          "end": 12.5,
+          "location": "FishMarket",
+          "activity": "buy fish balls at MaFishballCart",
+          "goal": "Use item on",
+          "target_entity": "MaFishballCart",
+          "item_kind": "cash",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 12.5,
+          "end": 13,
+          "location": "FishMarket",
+          "activity": "fish balls",
+          "goal": "Use item",
+          "item_kind": "food",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 13,
+          "end": 4,
+          "location": "NeonStrip",
+          "activity": "run the Lucky Bar",
+          "goal": "Go to location",
+          "social": true
+        }
+      ]
+    },
+    {
+      "name": "AuntieFong",
+      "located_at": "Tenements",
+      "role": "npc",
+      "personality": "nosy, superstitious, generous",
+      "background": "Has run the mahjong parlour since the old days; knows every gambler's debts.",
+      "goal": "Keep the tables clacking",
+      "values": "luck,gossip",
+      "mood": "cheerful",
+      "hp": 100,
+      "power_level": 5,
+      "speech_style": "chatty, full of proverbs",
+      "secret_policy": "share_gossip",
+      "trust_toward_player": 3,
+      "works_at": "MahjongHall",
+      "desire": "To win the district raffle once before she dies.",
+      "fear": "Bad luck: a broken mirror, a crow, a Tiger with a cleaver.",
+      "secret": "She lets Ah Fai lose on purpose and keeps his debts off the books.",
+      "bonds": {
+        "AhFai": "a good boy in a bad crowd; she slips him buns",
+        "MrsLau": "rivals at gossip, friends at funerals"
+      },
+      "routine": [
+        {
+          "start": 8,
+          "end": 8.5,
+          "location": "TeaHouseRow",
+          "activity": "buy breakfast tea at GoldenTeaHouse",
+          "goal": "Use item on",
+          "target_entity": "GoldenTeaHouse",
+          "item_kind": "cash",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 8.5,
+          "end": 9,
+          "location": "TeaHouseRow",
+          "activity": "breakfast tea",
+          "goal": "Use item",
+          "item_kind": "food",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 9,
+          "end": 23,
+          "location": "MahjongHall",
+          "activity": "run the parlour",
+          "goal": "Go to location",
+          "social": true
+        },
+        {
+          "start": 23,
+          "end": 8,
+          "location": "Tenements",
+          "activity": "sleep",
+          "action": "sleep"
+        }
+      ]
+    },
+    {
+      "name": "MrChow",
+      "located_at": "HerbalLane",
+      "role": "npc",
+      "personality": "gentle, curious, morally flexible",
+      "background": "A failed medical student who treats knife wounds without asking questions.",
+      "goal": "Keep the shop open and patients alive, whoever they are",
+      "values": "healing,neutrality",
+      "mood": "calm",
+      "hp": 100,
+      "power_level": 5,
+      "speech_style": "slow, precise, a little dry",
+      "secret_policy": "open",
+      "trust_toward_player": 3,
+      "works_at": "HerbalLane",
+      "desire": "To be called 'doctor' again by someone who means it.",
+      "fear": "Treating a wound he cannot close.",
+      "secret": "He stitched up the man who cut Bones' brother — and it was not Mad Dog Wai.",
+      "bonds": {
+        "SergeantTam": "the sergeant brings him the ones the hospital would ask about"
+      },
+      "routine": [
+        {
+          "start": 6,
+          "end": 7,
+          "location": "TinHauTemple",
+          "activity": "morning walk to the temple",
+          "goal": "Go to location"
+        },
+        {
+          "start": 7,
+          "end": 12,
+          "location": "HerbalLane",
+          "activity": "brew remedies",
+          "goal": "Go to location",
+          "social": true
+        },
+        {
+          "start": 12,
+          "end": 12.5,
+          "location": "TeaHouseRow",
+          "activity": "buy milk tea at GoldenTeaHouse",
+          "goal": "Use item on",
+          "target_entity": "GoldenTeaHouse",
+          "item_kind": "cash",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 12.5,
+          "end": 13,
+          "location": "TeaHouseRow",
+          "activity": "milk tea",
+          "goal": "Use item",
+          "item_kind": "food",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 13,
+          "end": 20,
+          "location": "HerbalLane",
+          "activity": "see patients",
+          "goal": "Go to location",
+          "social": true
+        },
+        {
+          "start": 20,
+          "end": 6,
+          "location": "HerbalLane",
+          "activity": "sleep",
+          "action": "sleep"
+        }
+      ]
+    },
+    {
+      "name": "BigMa",
+      "located_at": "Tenements",
+      "role": "npc",
+      "personality": "loud, cheerful, fearless",
+      "background": "Pushes her fish ball cart through the wet market at dawn; the Tigers smashed it last winter.",
+      "goal": "Earn enough to buy a real shopfront",
+      "values": "hard work,neighbourliness",
+      "mood": "cheerful",
+      "hp": 100,
+      "power_level": 7,
+      "speech_style": "loud, teasing",
+      "secret_policy": "open",
+      "trust_toward_player": 4,
+      "works_at": "FishMarket",
+      "desire": "A shopfront with her name painted in gold.",
+      "fear": "The sound of a cart tipping over.",
+      "secret": "She still has the cleaver one of the Tigers dropped that night, wrapped in newspaper.",
+      "bonds": {
+        "MadDogWai": "the one who tipped her cart; she spits when he passes",
+        "MrsLau": "fellow hawker; they share ice and complaints"
+      },
+      "routine": [
+        {
+          "start": 6,
+          "end": 19,
+          "location": "FishMarket",
+          "activity": "sell fish balls",
+          "goal": "Go to location",
+          "social": true
+        },
+        {
+          "start": 19,
+          "end": 19.5,
+          "location": "NoodleAlley",
+          "activity": "buy noodles at LauNoodleStall",
+          "goal": "Use item on",
+          "target_entity": "LauNoodleStall",
+          "item_kind": "cash",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 19.5,
+          "end": 20,
+          "location": "NoodleAlley",
+          "activity": "noodles",
+          "goal": "Use item",
+          "item_kind": "food",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 20,
+          "end": 6,
+          "location": "Tenements",
+          "activity": "sleep",
+          "action": "sleep"
+        }
+      ]
+    },
+    {
+      "name": "DockerHo",
+      "located_at": "FerryPier",
+      "role": "npc",
+      "personality": "practical, greedy, fair in his own way",
+      "background": "Moves every crate that feeds the district's stalls; pays both gangs and complains to neither.",
+      "goal": "Keep the boats unloading and the prices up",
+      "values": "money,reliability",
+      "mood": "busy",
+      "hp": 100,
+      "power_level": 9,
+      "speech_style": "brusque, counts while talking",
+      "secret_policy": "guarded",
+      "trust_toward_player": 0,
+      "works_at": "Wharf",
+      "desire": "To own a boat of his own instead of renting space on other men's.",
+      "fear": "A strike, a storm, or a gang war that stops the boats.",
+      "secret": "He smuggles for whichever gang pays more, and right now that is neither.",
+      "bonds": {
+        "AhYan": "his porter; he pays her less than she is worth and knows it"
+      },
+      "routine": [
+        {
+          "start": 6,
+          "end": 18,
+          "location": "Wharf",
+          "activity": "run the wholesale crates",
+          "goal": "Go to location",
+          "social": true
+        },
+        {
+          "start": 18,
+          "end": 18.5,
+          "location": "FishMarket",
+          "activity": "buy fish balls at MaFishballCart",
+          "goal": "Use item on",
+          "target_entity": "MaFishballCart",
+          "item_kind": "cash",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 18.5,
+          "end": 19,
+          "location": "FishMarket",
+          "activity": "fish balls",
+          "goal": "Use item",
+          "item_kind": "food",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 19,
+          "end": 19.5,
+          "location": "NeonStrip",
+          "activity": "buy a beer at LuckyBar",
+          "goal": "Use item on",
+          "target_entity": "LuckyBar",
+          "item_kind": "cash",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 19.5,
+          "end": 20,
+          "location": "NeonStrip",
+          "activity": "a beer",
+          "goal": "Use item",
+          "item_kind": "food",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 20,
+          "end": 21,
+          "location": "NeonStrip",
+          "activity": "talk prices over a beer",
+          "goal": "Go to location",
+          "social": true
+        },
+        {
+          "start": 21,
+          "end": 6,
+          "location": "FerryPier",
+          "activity": "sleep",
+          "action": "sleep"
+        }
+      ]
+    },
+    {
+      "name": "AhYan",
+      "located_at": "Tenements",
+      "role": "npc",
+      "personality": "strong, quiet, observant",
+      "background": "Carries crates at the wharf for a dollar a day; sends half of it home on the ferry.",
+      "goal": "Save enough to bring her mother over",
+      "values": "family,hard work",
+      "mood": "tired",
+      "hp": 100,
+      "power_level": 9,
+      "speech_style": "short, plain words",
+      "secret_policy": "share_gossip",
+      "trust_toward_player": 3,
+      "works_at": "Wharf",
+      "desire": "To bring her mother over on the ferry before winter.",
+      "fear": "Being sent back.",
+      "secret": "She has seen what Ho's crates carry at night.",
+      "bonds": {
+        "DockerHo": "her boss; fair enough, never generous",
+        "AhFai": "they talk on the pier at night; she is the only one who knows he wants out"
+      },
+      "routine": [
+        {
+          "start": 6,
+          "end": 6.5,
+          "location": "FishMarket",
+          "activity": "buy fish balls at MaFishballCart",
+          "goal": "Use item on",
+          "target_entity": "MaFishballCart",
+          "item_kind": "cash",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 6.5,
+          "end": 7,
+          "location": "FishMarket",
+          "activity": "fish balls",
+          "goal": "Use item",
+          "item_kind": "food",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 7,
+          "end": 17,
+          "location": "Wharf",
+          "activity": "carry crates",
+          "goal": "Go to location",
+          "social": true
+        },
+        {
+          "start": 17,
+          "end": 18,
+          "location": "BuildingSite",
+          "activity": "pick up extra day work",
+          "goal": "Go to location"
+        },
+        {
+          "start": 18,
+          "end": 18.5,
+          "location": "NoodleAlley",
+          "activity": "buy noodles at LauNoodleStall",
+          "goal": "Use item on",
+          "target_entity": "LauNoodleStall",
+          "item_kind": "cash",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 18.5,
+          "end": 19,
+          "location": "NoodleAlley",
+          "activity": "noodles",
+          "goal": "Use item",
+          "item_kind": "food",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 19,
+          "end": 22,
+          "location": "TempleStreet",
+          "activity": "walk the night market",
+          "goal": "Go to location",
+          "social": true
+        },
+        {
+          "start": 22,
+          "end": 6,
+          "location": "Tenements",
+          "activity": "sleep",
+          "action": "sleep"
+        }
+      ]
+    },
+    {
+      "name": "SergeantTam",
+      "located_at": "PoliceStation",
+      "role": "npc",
+      "personality": "weary, shrewd, compromised",
+      "background": "Twenty years on the district; knows which fights to stop and which to look away from.",
+      "goal": "Keep the bodies off the streets until his pension",
+      "values": "order,survival",
+      "mood": "tired",
+      "hp": 100,
+      "power_level": 12,
+      "speech_style": "dry, cynical, kind by accident",
+      "secret_policy": "guarded",
+      "trust_toward_player": 0,
+      "works_at": "PoliceStation",
+      "desire": "Three more years, then a pension and a fishing rod.",
+      "fear": "A war he cannot look away from.",
+      "secret": "He takes a red packet from both gangs every month and keeps the peace by selling it.",
+      "bonds": {
+        "UncleWing": "an old classmate who no longer looks him in the eye",
+        "MissChoi": "she sells him secrets; he protects her bar"
+      },
+      "routine": [
+        {
+          "start": 7,
+          "end": 7.5,
+          "location": "TeaHouseRow",
+          "activity": "buy milk tea at GoldenTeaHouse",
+          "goal": "Use item on",
+          "target_entity": "GoldenTeaHouse",
+          "item_kind": "cash",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 7.5,
+          "end": 8,
+          "location": "TeaHouseRow",
+          "activity": "milk tea",
+          "goal": "Use item",
+          "item_kind": "food",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 8,
+          "end": 12,
+          "location": "PoliceStation",
+          "activity": "paperwork",
+          "goal": "Go to location"
+        },
+        {
+          "start": 12,
+          "end": 13,
+          "location": "NoodleAlley",
+          "activity": "patrol the lane",
+          "goal": "Go to location",
+          "social": true
+        },
+        {
+          "start": 13,
+          "end": 14,
+          "location": "TempleStreet",
+          "activity": "patrol the market",
+          "goal": "Go to location",
+          "social": true
+        },
+        {
+          "start": 14,
+          "end": 15,
+          "location": "NeonStrip",
+          "activity": "patrol the strip",
+          "goal": "Go to location",
+          "social": true
+        },
+        {
+          "start": 15,
+          "end": 18,
+          "location": "PoliceStation",
+          "activity": "paperwork",
+          "goal": "Go to location"
+        },
+        {
+          "start": 18,
+          "end": 18.5,
+          "location": "FishMarket",
+          "activity": "buy fish balls at MaFishballCart",
+          "goal": "Use item on",
+          "target_entity": "MaFishballCart",
+          "item_kind": "cash",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 18.5,
+          "end": 19,
+          "location": "FishMarket",
+          "activity": "fish balls",
+          "goal": "Use item",
+          "item_kind": "food",
+          "once": true,
+          "social": true
+        },
+        {
+          "start": 19,
+          "end": 21,
+          "location": "TempleStreet",
+          "activity": "night patrol",
+          "goal": "Go to location",
+          "social": true
+        },
+        {
+          "start": 21,
+          "end": 7,
+          "location": "PoliceStation",
+          "activity": "sleep",
+          "action": "sleep"
+        }
+      ]
+    }
+  ],
+  "items": [
+    {
+      "name": "LauNoodleStall",
+      "archetype": "noodle_stall",
+      "located_at": "NoodleAlley",
+      "description": "Mrs Lau's noodle stall. One dollar a bowl of wonton noodles.",
+      "script": {
+        "initial_state": {
+          "owner": "MrsLau",
+          "protection_fee": 2
+        }
+      }
+    },
+    {
+      "name": "MaFishballCart",
+      "archetype": "fishball_cart",
+      "located_at": "FishMarket",
+      "description": "Big Ma's curry fish ball cart. One dollar a stick.",
+      "script": {
+        "initial_state": {
+          "owner": "BigMa",
+          "protection_fee": 2
+        }
+      }
+    },
+    {
+      "name": "GoldenTeaHouse",
+      "archetype": "tea_house",
+      "located_at": "TeaHouseRow",
+      "description": "Uncle Wing's Golden Tea House. Milk tea and a bun for a dollar.",
+      "script": {
+        "initial_state": {
+          "owner": "UncleWing",
+          "protection_fee": 3
+        }
+      }
+    },
+    {
+      "name": "LuckyBar",
+      "archetype": "bar_counter",
+      "located_at": "NeonStrip",
+      "description": "Miss Choi's Lucky Bar. A dollar a bottle.",
+      "script": {
+        "initial_state": {
+          "owner": "MissChoi",
+          "protection_fee": 4
+        }
+      }
+    },
+    {
+      "name": "FongMahjongParlour",
+      "archetype": "bar_counter",
+      "located_at": "MahjongHall",
+      "description": "Auntie Fong's mahjong parlour; a dollar buys a drink and a seat at the tables.",
+      "script": {
+        "initial_state": {
+          "owner": "AuntieFong",
+          "protection_fee": 4
+        }
+      }
+    },
+    {
+      "name": "ChowHerbalShop",
+      "archetype": "herbal_counter",
+      "located_at": "HerbalLane",
+      "description": "Mr Chow's herbal shop. A dollar for a brew that mends bruises.",
+      "script": {
+        "initial_state": {
+          "owner": "MrChow",
+          "protection_fee": 2
+        }
+      }
+    },
+    {
+      "name": "HoWholesale",
+      "archetype": "wholesale",
+      "located_at": "Wharf",
+      "description": "Ho's wholesale crates. A dollar buys a crate of supplies for any shop.",
+      "script": {
+        "initial_state": {
+          "owner": "DockerHo",
+          "protection_fee": 4
+        }
+      }
+    },
+    {
+      "name": "TenementRentBook",
+      "archetype": "rent_book",
+      "located_at": "Tenements",
+      "description": "Dragon Leung's rent book. A dollar a day per flat.",
+      "script": {
+        "initial_state": {
+          "landlord": "DragonLeung",
+          "rent": 1,
+          "tenants": [
+            "MrsLau",
+            "UncleWing",
+            "MissChoi",
+            "AuntieFong",
+            "BigMa",
+            "AhYan",
+            "AhFai"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Cash1",
+      "archetype": "cash",
+      "held_by": "AhLok"
+    },
+    {
+      "name": "Cash2",
+      "archetype": "cash",
+      "held_by": "AhLok"
+    },
+    {
+      "name": "Cash3",
+      "archetype": "cash",
+      "held_by": "AhLok"
+    },
+    {
+      "name": "Cash4",
+      "archetype": "cash",
+      "held_by": "AhLok"
+    },
+    {
+      "name": "Cash5",
+      "archetype": "cash",
+      "held_by": "DragonLeung"
+    },
+    {
+      "name": "Cash6",
+      "archetype": "cash",
+      "held_by": "DragonLeung"
+    },
+    {
+      "name": "Cash7",
+      "archetype": "cash",
+      "held_by": "DragonLeung"
+    },
+    {
+      "name": "Cash8",
+      "archetype": "cash",
+      "held_by": "DragonLeung"
+    },
+    {
+      "name": "Cash9",
+      "archetype": "cash",
+      "held_by": "DragonLeung"
+    },
+    {
+      "name": "Cash10",
+      "archetype": "cash",
+      "held_by": "DragonLeung"
+    },
+    {
+      "name": "Cash11",
+      "archetype": "cash",
+      "held_by": "DragonLeung"
+    },
+    {
+      "name": "Cash12",
+      "archetype": "cash",
+      "held_by": "DragonLeung"
+    },
+    {
+      "name": "Cash13",
+      "archetype": "cash",
+      "held_by": "DragonLeung"
+    },
+    {
+      "name": "Cash14",
+      "archetype": "cash",
+      "held_by": "DragonLeung"
+    },
+    {
+      "name": "Cash15",
+      "archetype": "cash",
+      "held_by": "DragonLeung"
+    },
+    {
+      "name": "Cash16",
+      "archetype": "cash",
+      "held_by": "DragonLeung"
+    },
+    {
+      "name": "Cash17",
+      "archetype": "cash",
+      "held_by": "DragonLeung"
+    },
+    {
+      "name": "Cash18",
+      "archetype": "cash",
+      "held_by": "DragonLeung"
+    },
+    {
+      "name": "Cash19",
+      "archetype": "cash",
+      "held_by": "Bones"
+    },
+    {
+      "name": "Cash20",
+      "archetype": "cash",
+      "held_by": "Bones"
+    },
+    {
+      "name": "Cash21",
+      "archetype": "cash",
+      "held_by": "Bones"
+    },
+    {
+      "name": "Cash22",
+      "archetype": "cash",
+      "held_by": "Bones"
+    },
+    {
+      "name": "Cash23",
+      "archetype": "cash",
+      "held_by": "AhKit"
+    },
+    {
+      "name": "Cash24",
+      "archetype": "cash",
+      "held_by": "AhKit"
+    },
+    {
+      "name": "Cash25",
+      "archetype": "cash",
+      "held_by": "AhKit"
+    },
+    {
+      "name": "Cash26",
+      "archetype": "cash",
+      "held_by": "TigerSze"
+    },
+    {
+      "name": "Cash27",
+      "archetype": "cash",
+      "held_by": "TigerSze"
+    },
+    {
+      "name": "Cash28",
+      "archetype": "cash",
+      "held_by": "TigerSze"
+    },
+    {
+      "name": "Cash29",
+      "archetype": "cash",
+      "held_by": "TigerSze"
+    },
+    {
+      "name": "Cash30",
+      "archetype": "cash",
+      "held_by": "TigerSze"
+    },
+    {
+      "name": "Cash31",
+      "archetype": "cash",
+      "held_by": "TigerSze"
+    },
+    {
+      "name": "Cash32",
+      "archetype": "cash",
+      "held_by": "TigerSze"
+    },
+    {
+      "name": "Cash33",
+      "archetype": "cash",
+      "held_by": "TigerSze"
+    },
+    {
+      "name": "Cash34",
+      "archetype": "cash",
+      "held_by": "TigerSze"
+    },
+    {
+      "name": "Cash35",
+      "archetype": "cash",
+      "held_by": "TigerSze"
+    },
+    {
+      "name": "Cash36",
+      "archetype": "cash",
+      "held_by": "TigerSze"
+    },
+    {
+      "name": "Cash37",
+      "archetype": "cash",
+      "held_by": "TigerSze"
+    },
+    {
+      "name": "Cash38",
+      "archetype": "cash",
+      "held_by": "TigerSze"
+    },
+    {
+      "name": "Cash39",
+      "archetype": "cash",
+      "held_by": "TigerSze"
+    },
+    {
+      "name": "Cash40",
+      "archetype": "cash",
+      "held_by": "MadDogWai"
+    },
+    {
+      "name": "Cash41",
+      "archetype": "cash",
+      "held_by": "MadDogWai"
+    },
+    {
+      "name": "Cash42",
+      "archetype": "cash",
+      "held_by": "MadDogWai"
+    },
+    {
+      "name": "Cash43",
+      "archetype": "cash",
+      "held_by": "AhFai"
+    },
+    {
+      "name": "Cash44",
+      "archetype": "cash",
+      "held_by": "AhFai"
+    },
+    {
+      "name": "Cash45",
+      "archetype": "cash",
+      "held_by": "MrsLau"
+    },
+    {
+      "name": "Cash46",
+      "archetype": "cash",
+      "held_by": "MrsLau"
+    },
+    {
+      "name": "Cash47",
+      "archetype": "cash",
+      "held_by": "MrsLau"
+    },
+    {
+      "name": "Cash48",
+      "archetype": "cash",
+      "held_by": "MrsLau"
+    },
+    {
+      "name": "Cash49",
+      "archetype": "cash",
+      "held_by": "MrsLau"
+    },
+    {
+      "name": "Cash50",
+      "archetype": "cash",
+      "held_by": "MrsLau"
+    },
+    {
+      "name": "Cash51",
+      "archetype": "cash",
+      "held_by": "UncleWing"
+    },
+    {
+      "name": "Cash52",
+      "archetype": "cash",
+      "held_by": "UncleWing"
+    },
+    {
+      "name": "Cash53",
+      "archetype": "cash",
+      "held_by": "UncleWing"
+    },
+    {
+      "name": "Cash54",
+      "archetype": "cash",
+      "held_by": "UncleWing"
+    },
+    {
+      "name": "Cash55",
+      "archetype": "cash",
+      "held_by": "UncleWing"
+    },
+    {
+      "name": "Cash56",
+      "archetype": "cash",
+      "held_by": "UncleWing"
+    },
+    {
+      "name": "Cash57",
+      "archetype": "cash",
+      "held_by": "UncleWing"
+    },
+    {
+      "name": "Cash58",
+      "archetype": "cash",
+      "held_by": "UncleWing"
+    },
+    {
+      "name": "Cash59",
+      "archetype": "cash",
+      "held_by": "MissChoi"
+    },
+    {
+      "name": "Cash60",
+      "archetype": "cash",
+      "held_by": "MissChoi"
+    },
+    {
+      "name": "Cash61",
+      "archetype": "cash",
+      "held_by": "MissChoi"
+    },
+    {
+      "name": "Cash62",
+      "archetype": "cash",
+      "held_by": "MissChoi"
+    },
+    {
+      "name": "Cash63",
+      "archetype": "cash",
+      "held_by": "MissChoi"
+    },
+    {
+      "name": "Cash64",
+      "archetype": "cash",
+      "held_by": "MissChoi"
+    },
+    {
+      "name": "Cash65",
+      "archetype": "cash",
+      "held_by": "MissChoi"
+    },
+    {
+      "name": "Cash66",
+      "archetype": "cash",
+      "held_by": "MissChoi"
+    },
+    {
+      "name": "Cash67",
+      "archetype": "cash",
+      "held_by": "MissChoi"
+    },
+    {
+      "name": "Cash68",
+      "archetype": "cash",
+      "held_by": "MissChoi"
+    },
+    {
+      "name": "Cash69",
+      "archetype": "cash",
+      "held_by": "AuntieFong"
+    },
+    {
+      "name": "Cash70",
+      "archetype": "cash",
+      "held_by": "AuntieFong"
+    },
+    {
+      "name": "Cash71",
+      "archetype": "cash",
+      "held_by": "AuntieFong"
+    },
+    {
+      "name": "Cash72",
+      "archetype": "cash",
+      "held_by": "AuntieFong"
+    },
+    {
+      "name": "Cash73",
+      "archetype": "cash",
+      "held_by": "AuntieFong"
+    },
+    {
+      "name": "Cash74",
+      "archetype": "cash",
+      "held_by": "AuntieFong"
+    },
+    {
+      "name": "Cash75",
+      "archetype": "cash",
+      "held_by": "AuntieFong"
+    },
+    {
+      "name": "Cash76",
+      "archetype": "cash",
+      "held_by": "AuntieFong"
+    },
+    {
+      "name": "Cash77",
+      "archetype": "cash",
+      "held_by": "MrChow"
+    },
+    {
+      "name": "Cash78",
+      "archetype": "cash",
+      "held_by": "MrChow"
+    },
+    {
+      "name": "Cash79",
+      "archetype": "cash",
+      "held_by": "MrChow"
+    },
+    {
+      "name": "Cash80",
+      "archetype": "cash",
+      "held_by": "MrChow"
+    },
+    {
+      "name": "Cash81",
+      "archetype": "cash",
+      "held_by": "MrChow"
+    },
+    {
+      "name": "Cash82",
+      "archetype": "cash",
+      "held_by": "MrChow"
+    },
+    {
+      "name": "Cash83",
+      "archetype": "cash",
+      "held_by": "BigMa"
+    },
+    {
+      "name": "Cash84",
+      "archetype": "cash",
+      "held_by": "BigMa"
+    },
+    {
+      "name": "Cash85",
+      "archetype": "cash",
+      "held_by": "BigMa"
+    },
+    {
+      "name": "Cash86",
+      "archetype": "cash",
+      "held_by": "BigMa"
+    },
+    {
+      "name": "Cash87",
+      "archetype": "cash",
+      "held_by": "BigMa"
+    },
+    {
+      "name": "Cash88",
+      "archetype": "cash",
+      "held_by": "DockerHo"
+    },
+    {
+      "name": "Cash89",
+      "archetype": "cash",
+      "held_by": "DockerHo"
+    },
+    {
+      "name": "Cash90",
+      "archetype": "cash",
+      "held_by": "DockerHo"
+    },
+    {
+      "name": "Cash91",
+      "archetype": "cash",
+      "held_by": "DockerHo"
+    },
+    {
+      "name": "Cash92",
+      "archetype": "cash",
+      "held_by": "DockerHo"
+    },
+    {
+      "name": "Cash93",
+      "archetype": "cash",
+      "held_by": "DockerHo"
+    },
+    {
+      "name": "Cash94",
+      "archetype": "cash",
+      "held_by": "DockerHo"
+    },
+    {
+      "name": "Cash95",
+      "archetype": "cash",
+      "held_by": "DockerHo"
+    },
+    {
+      "name": "Cash96",
+      "archetype": "cash",
+      "held_by": "DockerHo"
+    },
+    {
+      "name": "Cash97",
+      "archetype": "cash",
+      "held_by": "DockerHo"
+    },
+    {
+      "name": "Cash98",
+      "archetype": "cash",
+      "held_by": "DockerHo"
+    },
+    {
+      "name": "Cash99",
+      "archetype": "cash",
+      "held_by": "DockerHo"
+    },
+    {
+      "name": "Cash100",
+      "archetype": "cash",
+      "held_by": "AhYan"
+    },
+    {
+      "name": "Cash101",
+      "archetype": "cash",
+      "held_by": "AhYan"
+    },
+    {
+      "name": "Cash102",
+      "archetype": "cash",
+      "held_by": "SergeantTam"
+    },
+    {
+      "name": "Cash103",
+      "archetype": "cash",
+      "held_by": "SergeantTam"
+    },
+    {
+      "name": "Cash104",
+      "archetype": "cash",
+      "held_by": "SergeantTam"
+    },
+    {
+      "name": "Cash105",
+      "archetype": "cash",
+      "held_by": "SergeantTam"
+    },
+    {
+      "name": "Cash106",
+      "archetype": "cash",
+      "held_by": "SergeantTam"
+    },
+    {
+      "name": "Cash107",
+      "archetype": "cash",
+      "held_by": "SergeantTam"
+    },
+    {
+      "name": "Cash108",
+      "archetype": "cash",
+      "held_by": "SergeantTam"
+    },
+    {
+      "name": "Cash109",
+      "archetype": "cash",
+      "held_by": "SergeantTam"
+    }
+  ],
+  "quests": [
+    {
+      "name": "AStreetToCallHome",
+      "description": "Four dollars won't last. The Dragons, the Tigers, the merchants and the wharf all want something from a newcomer.",
+      "stage": "arrived",
+      "state": "active",
+      "objective": "Find a way to eat every day on these streets: work the wharf, join a side, or play them against each other.",
+      "involves": [
+        "AhLok",
+        "DragonLeung",
+        "TigerSze",
+        "UncleWing",
+        "DockerHo"
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "name": "TamsRedPackets",
+      "text": "Sergeant Tam takes a red packet from both gangs every month to look the other way.",
+      "secret_level": 3,
+      "known_by": [
+        "SergeantTam",
+        "DragonLeung",
+        "TigerSze"
+      ],
+      "faction": "DistrictPolice"
+    },
+    {
+      "name": "WingsLedger",
+      "text": "Uncle Wing keeps a ledger of every dollar the merchants have paid both gangs for three years.",
+      "secret_level": 2,
+      "known_by": [
+        "UncleWing",
+        "MrsLau"
+      ],
+      "faction": "StreetMerchants"
+    },
+    {
+      "name": "GarageWiring",
+      "text": "The Black Tigers' garage fire started from bad wiring, not from the Dragons.",
+      "secret_level": 3,
+      "known_by": [
+        "TigerSze"
+      ],
+      "faction": "BlackTigers"
+    },
+    {
+      "name": "LeungsHeart",
+      "text": "Dragon Leung's heart is failing; he is looking for a successor.",
+      "secret_level": 3,
+      "known_by": [
+        "DragonLeung"
+      ],
+      "faction": "SilverDragons"
+    },
+    {
+      "name": "HowProtectionWorks",
+      "text": "Whoever holds a street collects protection from its shops every day; three days behind and they smash the place.",
+      "secret_level": 0,
+      "known_by": [
+        "DragonLeung",
+        "Bones",
+        "AhKit",
+        "TigerSze",
+        "MadDogWai",
+        "AhFai",
+        "MrsLau",
+        "UncleWing",
+        "MissChoi",
+        "AuntieFong",
+        "MrChow",
+        "BigMa",
+        "DockerHo",
+        "AhYan",
+        "SergeantTam",
+        "AhLok"
+      ]
+    },
+    {
+      "name": "WharfWork",
+      "text": "Ho at the wharf pays porters a dollar a day; the DockCrew takes anyone Ah Yan vouches for.",
+      "secret_level": 0,
+      "known_by": [
+        "DockerHo",
+        "AhYan",
+        "BigMa",
+        "AhLok"
+      ]
+    }
+  ],
+  "rumors": [
+    {
+      "name": "WaiCutBones",
+      "text": "Everyone says Mad Dog Wai cut Bones' brother in BackAlley.",
+      "about": "",
+      "believed_by": [
+        "Bones",
+        "BigMa",
+        "AhKit"
+      ]
+    },
+    {
+      "name": "NewcomersOnFerry",
+      "text": "People say a crew from upriver is coming in on the night ferry, looking for a street of their own.",
+      "about": "",
+      "believed_by": [
+        "DockerHo",
+        "AhYan",
+        "AuntieFong"
+      ]
+    }
+  ],
+  "social": [
+    {
+      "a": "AhKit",
+      "rel": "FRIENDS_WITH",
+      "b": "AhFai"
+    },
+    {
+      "a": "MrsLau",
+      "rel": "FAMILY_OF",
+      "b": "AhKit"
+    },
+    {
+      "a": "Bones",
+      "rel": "RIVALS_WITH",
+      "b": "MadDogWai"
+    },
+    {
+      "a": "UncleWing",
+      "rel": "FRIENDS_WITH",
+      "b": "MrsLau"
+    },
+    {
+      "a": "AhYan",
+      "rel": "FRIENDS_WITH",
+      "b": "AhFai"
+    },
+    {
+      "a": "DragonLeung",
+      "rel": "KNOWS",
+      "b": "TigerSze"
+    },
+    {
+      "a": "BigMa",
+      "rel": "FRIENDS_WITH",
+      "b": "MrsLau"
+    },
+    {
+      "a": "AuntieFong",
+      "rel": "LIKES",
+      "b": "AhFai"
+    },
+    {
+      "a": "SergeantTam",
+      "rel": "KNOWS",
+      "b": "DragonLeung"
+    },
+    {
+      "a": "SergeantTam",
+      "rel": "KNOWS",
+      "b": "Bones"
+    },
+    {
+      "a": "SergeantTam",
+      "rel": "KNOWS",
+      "b": "AhKit"
+    },
+    {
+      "a": "SergeantTam",
+      "rel": "KNOWS",
+      "b": "TigerSze"
+    },
+    {
+      "a": "SergeantTam",
+      "rel": "KNOWS",
+      "b": "MadDogWai"
+    },
+    {
+      "a": "SergeantTam",
+      "rel": "KNOWS",
+      "b": "AhFai"
+    },
+    {
+      "a": "SergeantTam",
+      "rel": "KNOWS",
+      "b": "MrsLau"
+    },
+    {
+      "a": "SergeantTam",
+      "rel": "KNOWS",
+      "b": "UncleWing"
+    },
+    {
+      "a": "SergeantTam",
+      "rel": "KNOWS",
+      "b": "MissChoi"
+    },
+    {
+      "a": "SergeantTam",
+      "rel": "KNOWS",
+      "b": "AuntieFong"
+    },
+    {
+      "a": "SergeantTam",
+      "rel": "KNOWS",
+      "b": "MrChow"
+    },
+    {
+      "a": "SergeantTam",
+      "rel": "KNOWS",
+      "b": "BigMa"
+    },
+    {
+      "a": "SergeantTam",
+      "rel": "KNOWS",
+      "b": "DockerHo"
+    },
+    {
+      "a": "SergeantTam",
+      "rel": "KNOWS",
+      "b": "AhYan"
+    },
+    {
+      "a": "UncleWing",
+      "rel": "KNOWS",
+      "b": "DragonLeung"
+    },
+    {
+      "a": "UncleWing",
+      "rel": "KNOWS",
+      "b": "Bones"
+    },
+    {
+      "a": "UncleWing",
+      "rel": "KNOWS",
+      "b": "AhKit"
+    },
+    {
+      "a": "UncleWing",
+      "rel": "KNOWS",
+      "b": "TigerSze"
+    },
+    {
+      "a": "UncleWing",
+      "rel": "KNOWS",
+      "b": "MadDogWai"
+    },
+    {
+      "a": "UncleWing",
+      "rel": "KNOWS",
+      "b": "AhFai"
+    },
+    {
+      "a": "UncleWing",
+      "rel": "KNOWS",
+      "b": "MrsLau"
+    },
+    {
+      "a": "UncleWing",
+      "rel": "KNOWS",
+      "b": "MissChoi"
+    },
+    {
+      "a": "UncleWing",
+      "rel": "KNOWS",
+      "b": "AuntieFong"
+    },
+    {
+      "a": "UncleWing",
+      "rel": "KNOWS",
+      "b": "MrChow"
+    },
+    {
+      "a": "UncleWing",
+      "rel": "KNOWS",
+      "b": "BigMa"
+    },
+    {
+      "a": "UncleWing",
+      "rel": "KNOWS",
+      "b": "DockerHo"
+    },
+    {
+      "a": "UncleWing",
+      "rel": "KNOWS",
+      "b": "AhYan"
+    },
+    {
+      "a": "UncleWing",
+      "rel": "KNOWS",
+      "b": "SergeantTam"
+    }
+  ],
+  "factions": [
+    {
+      "name": "SamShui",
+      "kind": "town",
+      "scale": "large",
+      "description": "The district: everyone who lives, sells or fights between the wharf and the temple.",
+      "goal": "Keep the night market open and the trouble off the main street",
+      "join_policy": "open",
+      "join_standing": 0,
+      "members": [
+        {
+          "name": "DragonLeung",
+          "role": "resident",
+          "loyalty": 6
+        },
+        {
+          "name": "Bones",
+          "role": "resident",
+          "loyalty": 6
+        },
+        {
+          "name": "AhKit",
+          "role": "resident",
+          "loyalty": 6
+        },
+        {
+          "name": "TigerSze",
+          "role": "resident",
+          "loyalty": 6
+        },
+        {
+          "name": "MadDogWai",
+          "role": "resident",
+          "loyalty": 6
+        },
+        {
+          "name": "AhFai",
+          "role": "resident",
+          "loyalty": 6
+        },
+        {
+          "name": "MrsLau",
+          "role": "resident",
+          "loyalty": 6
+        },
+        {
+          "name": "UncleWing",
+          "role": "resident",
+          "loyalty": 6
+        },
+        {
+          "name": "MissChoi",
+          "role": "resident",
+          "loyalty": 6
+        },
+        {
+          "name": "AuntieFong",
+          "role": "resident",
+          "loyalty": 6
+        },
+        {
+          "name": "MrChow",
+          "role": "resident",
+          "loyalty": 6
+        },
+        {
+          "name": "BigMa",
+          "role": "resident",
+          "loyalty": 6
+        },
+        {
+          "name": "DockerHo",
+          "role": "resident",
+          "loyalty": 6
+        },
+        {
+          "name": "AhYan",
+          "role": "resident",
+          "loyalty": 6
+        },
+        {
+          "name": "SergeantTam",
+          "role": "resident",
+          "loyalty": 6
+        }
+      ],
+      "territory": {
+        "TinHauTemple": 4,
+        "TempleStreet": 3
+      },
+      "traits": [
+        {
+          "id": "welcoming",
+          "why": "the ferry lands someone new every night, and the district has always taken them in"
+        }
+      ]
+    },
+    {
+      "name": "SilverDragons",
+      "kind": "gang",
+      "scale": "small",
+      "description": "An old triad of sworn brothers on the rooftops above the tenements.",
+      "goal": "Hold NoodleAlley and the Tenements; take back TeaHouseRow",
+      "wage": 1,
+      "join_policy": "trial",
+      "join_standing": 2,
+      "trial": {
+        "item": "cash",
+        "text": "Hand Dragon Leung a red packet with your own money in it, and bow."
+      },
+      "members": [
+        {
+          "name": "DragonLeung",
+          "role": "boss",
+          "loyalty": 9
+        },
+        {
+          "name": "Bones",
+          "role": "enforcer",
+          "loyalty": 9
+        },
+        {
+          "name": "AhKit",
+          "role": "runner",
+          "loyalty": 6
+        }
+      ],
+      "territory": {
+        "Rooftops": 7,
+        "Tenements": 5,
+        "NoodleAlley": 4,
+        "FishMarket": 3,
+        "TeaHouseRow": 2
+      },
+      "relations": [
+        {
+          "with": "BlackTigers",
+          "stance": "hostile",
+          "reason": "the garage fire, and the night Bones' brother was cut in BackAlley"
+        }
+      ],
+      "traits": [
+        {
+          "id": "zealous",
+          "why": "sworn brothers who burned incense together at Tin Hau"
+        },
+        {
+          "id": "expansionist",
+          "why": "Leung wants the whole district secured before his heart gives out"
+        }
+      ]
+    },
+    {
+      "name": "BlackTigers",
+      "kind": "gang",
+      "scale": "small",
+      "description": "A younger, louder gang out of a car-repair yard, built on boxing gyms and grudges.",
+      "goal": "Drive the Dragons out of TeaHouseRow and NoodleAlley",
+      "wage": 1,
+      "join_policy": "trial",
+      "join_standing": 2,
+      "trial": {
+        "item": "beer",
+        "text": "Bring Tiger Sze a cold beer and drink it with him in front of the boys."
+      },
+      "members": [
+        {
+          "name": "TigerSze",
+          "role": "boss",
+          "loyalty": 9
+        },
+        {
+          "name": "MadDogWai",
+          "role": "enforcer",
+          "loyalty": 8
+        },
+        {
+          "name": "AhFai",
+          "role": "runner",
+          "loyalty": 4
+        }
+      ],
+      "territory": {
+        "GarageYard": 7,
+        "BackAlley": 5,
+        "NeonStrip": 4,
+        "MahjongHall": 4,
+        "TeaHouseRow": 3,
+        "NoodleAlley": 2
+      },
+      "traits": [
+        {
+          "id": "militant",
+          "why": "Sze came up through the boxing gyms and settles everything with fists"
+        },
+        {
+          "id": "vengeful",
+          "why": "they still blame the Dragons for the garage fire"
+        }
+      ]
+    },
+    {
+      "name": "DistrictPolice",
+      "kind": "authority",
+      "scale": "medium",
+      "description": "One tired sergeant and a station that closes at nine.",
+      "goal": "Keep the peace, or at least keep it quiet",
+      "join_policy": "closed",
+      "members": [
+        {
+          "name": "SergeantTam",
+          "role": "sergeant",
+          "loyalty": 7
+        }
+      ],
+      "territory": {
+        "PoliceStation": 8,
+        "HerbalLane": 3
+      },
+      "relations": [
+        {
+          "with": "SilverDragons",
+          "stance": "rival",
+          "reason": "Leung's lawyer had Tam's best case thrown out"
+        },
+        {
+          "with": "BlackTigers",
+          "stance": "rival",
+          "reason": "Sze's boys broke a constable's arm last year"
+        }
+      ],
+      "traits": [
+        {
+          "id": "secretive",
+          "why": "Tam takes red packets from both gangs and tells no one"
+        }
+      ]
+    },
+    {
+      "name": "StreetMerchants",
+      "kind": "guild",
+      "scale": "medium",
+      "parent": "SamShui",
+      "description": "The hawkers and shopkeepers who pay everybody and are owed by nobody.",
+      "goal": "Stop paying two gangs for the same street",
+      "join_policy": "sponsor",
+      "join_standing": 3,
+      "members": [
+        {
+          "name": "UncleWing",
+          "role": "chairman",
+          "loyalty": 8
+        },
+        {
+          "name": "MrsLau",
+          "role": "member",
+          "loyalty": 7
+        },
+        {
+          "name": "BigMa",
+          "role": "member",
+          "loyalty": 7
+        },
+        {
+          "name": "AuntieFong",
+          "role": "member",
+          "loyalty": 6
+        },
+        {
+          "name": "MrChow",
+          "role": "member",
+          "loyalty": 5
+        },
+        {
+          "name": "MissChoi",
+          "role": "member",
+          "loyalty": 4
+        },
+        {
+          "name": "DockerHo",
+          "role": "member",
+          "loyalty": 5
+        }
+      ],
+      "territory": {
+        "TempleStreet": 4
+      },
+      "relations": [
+        {
+          "with": "BlackTigers",
+          "stance": "rival",
+          "reason": "the Tigers smashed Big Ma's cart last winter"
+        },
+        {
+          "with": "DistrictPolice",
+          "stance": "friendly",
+          "reason": "the sergeant at least eats at their stalls"
+        }
+      ],
+      "traits": [
+        {
+          "id": "mercantile",
+          "why": "they hold together by trading favours and credit"
+        },
+        {
+          "id": "pacifist",
+          "why": "Uncle Wing has buried enough young men from this street"
+        }
+      ]
+    },
+    {
+      "name": "DockCrew",
+      "kind": "crew",
+      "scale": "small",
+      "parent": "SamShui",
+      "description": "Ho's porters at the wharf: a dollar a day, paid at sunset.",
+      "goal": "Keep the crates moving",
+      "join_policy": "sponsor",
+      "join_standing": 2,
+      "wage": 1,
+      "members": [
+        {
+          "name": "DockerHo",
+          "role": "boss",
+          "loyalty": 8
+        },
+        {
+          "name": "AhYan",
+          "role": "porter",
+          "loyalty": 6
+        }
+      ],
+      "territory": {
+        "Wharf": 5
+      },
+      "relations": [
+        {
+          "with": "StreetMerchants",
+          "stance": "friendly",
+          "reason": "every stall depends on Ho's crates"
+        }
+      ]
+    },
+    {
+      "name": "LauFamily",
+      "kind": "family",
+      "scale": "small",
+      "join_policy": "closed",
+      "description": "Mrs Lau and her son, in a two-room flat in Leung's building.",
+      "goal": "Stay together",
+      "members": [
+        {
+          "name": "MrsLau",
+          "role": "mother",
+          "loyalty": 10
+        },
+        {
+          "name": "AhKit",
+          "role": "son",
+          "loyalty": 8
+        }
+      ],
+      "territory": {}
+    }
+  ]
+}

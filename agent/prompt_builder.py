@@ -148,6 +148,14 @@ Respond with a JSON object:
                     lines.append(ftext)
             except Exception:
                 pass
+            try:
+                from economy import economy_text
+
+                money = economy_text(self.world, agent.name)
+                if money:
+                    lines.append(money)
+            except Exception:
+                pass
             favors = favors_text(self.world, agent.name)
             if favors:
                 lines.append("Open favors (keeping or breaking a promise changes how people feel about you):")

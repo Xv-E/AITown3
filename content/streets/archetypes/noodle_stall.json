@@ -1,0 +1,39 @@
+{
+  "archetype": "noodle_stall",
+  "item_kind": "noodle_stall",
+  "portable": false,
+  "value": 0,
+  "footprint": [
+    2,
+    1
+  ],
+  "description": "A noodle stall with a steaming pot. One dollar a bowl.",
+  "accepts_from": [
+    "kind:cash",
+    "kind:supplies"
+  ],
+  "script": {
+    "lore": "Pay a dollar for a bowl of noodles; the money goes straight into the owner's apron. When it runs out, its owner restocks with supplies bought at the wharf.",
+    "initial_state": {
+      "stock": 6,
+      "takings": 0,
+      "owner": "",
+      "protection_fee": 0
+    },
+    "alerts": [
+      {
+        "when": {
+          "prop_lte": [
+            "stock",
+            0
+          ]
+        },
+        "signal": "urgent",
+        "message": "Sold out — buy supplies at the wharf and restock.",
+        "use_on": true,
+        "prefer_kind": "supplies",
+        "audience": "works_at"
+      }
+    ]
+  }
+}

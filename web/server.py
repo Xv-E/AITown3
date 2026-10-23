@@ -492,6 +492,11 @@ async def api_execute(req: ExecuteActionRequest):
                 faction_changes = on_action(world, capability, positional, memory=get_web_memory())
                 if faction_changes:
                     reason = f"{reason} (factions: {'; '.join(faction_changes)})"
+                from economy import on_action as economy_action
+
+                money = economy_action(world, req.action, positional, memory=get_web_memory())
+                if money:
+                    reason = f"{reason} ({'; '.join(money)})"
             except Exception:
                 pass
         interaction = None

@@ -183,10 +183,12 @@ class TestTension(SimTestCase):
 
 class TestLoyalty(SimTestCase):
     def test_home_ground_vs_away(self):
+        self.g.where["Reed"] = "River"
         self.tick()
         self.assertAlmostEqual(self.g.members[("Rowan", "Axemen")]["loyalty"], 9.15)
-        # Rowan 在森林，不在 EmberCamp 的地盘上
-        self.assertAlmostEqual(self.g.members[("Rowan", "EmberCamp")]["loyalty"], 6.9)
+        self.assertAlmostEqual(self.g.members[("Reed", "Axemen")]["loyalty"], 5.9)
+        # 城镇（和家）的归属不靠地盘：Rowan 不在 EmberCamp 的地盘上也不变心
+        self.assertAlmostEqual(self.g.members[("Rowan", "EmberCamp")]["loyalty"], 7.0)
 
 
 class TestEmergence(SimTestCase):

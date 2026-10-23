@@ -748,6 +748,12 @@ def get_play_state(world) -> Dict[str, Any]:
         faction_chronicle = chronicle(world, 8)
     except Exception:
         faction_chronicle = []
+    try:
+        from economy import street_summary
+
+        economy = street_summary(world, name)
+    except Exception:
+        economy = {}
 
     return {
         "found": True,
@@ -771,6 +777,7 @@ def get_play_state(world) -> Dict[str, Any]:
         "quests": quests,
         "factions": faction_rows,
         "faction_chronicle": faction_chronicle,
+        "economy": economy,
         "map": list_locations_graph(world),
         "simulation": _play_simulation_snapshot(world),
         "characters": list_characters(world),

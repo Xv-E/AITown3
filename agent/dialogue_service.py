@@ -415,6 +415,14 @@ def _heart_blocks(world, me: str, other: str, knowledge=None) -> tuple[str, str]
         fblock = ""
     if fblock:
         heart = f"{heart}\n{fblock}" if heart else fblock
+    try:
+        from economy import economy_text
+
+        money = economy_text(world, me)
+    except Exception:
+        money = ""
+    if money:
+        heart = f"{heart}\n{money}" if heart else money
     favor = ""
     try:
         if not _is_player(world, me):

@@ -1827,6 +1827,12 @@ class GameLoop:
                 )
                 if changes:
                     metadata["faction_changes"] = changes
+                from economy import on_action as economy_action
+
+                money = economy_action(self.world, action_name, list(args), memory=self.memory)
+                if money:
+                    metadata["economy"] = money
+                    reason = f"{reason} ({'; '.join(money)})"
             except Exception:
                 pass
         if ok and action_name == act("converse") and len(args) >= 3:

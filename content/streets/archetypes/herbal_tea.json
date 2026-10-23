@@ -1,0 +1,8 @@
+{
+  "archetype": "herbal_tea",
+  "name": "HerbalTea",
+  "item_kind": "potion",
+  "portable": true,
+  "value": 25,
+  "description": "A bitter herbal brew that mends bruises and cuts."
+}

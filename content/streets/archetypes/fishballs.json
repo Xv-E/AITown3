@@ -1,0 +1,8 @@
+{
+  "archetype": "fishballs",
+  "name": "Fishballs",
+  "item_kind": "food",
+  "portable": true,
+  "value": 8,
+  "description": "A skewer of curry fish balls."
+}

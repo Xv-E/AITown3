@@ -104,6 +104,7 @@
     renderQuests(data.quests || []);
     renderFactions(data.factions || []);
     renderChronicle(data.faction_chronicle || []);
+    renderStreets(data.economy || {});
     renderClues(data.known_clues || []);
     renderSimulation(data.simulation || {});
     renderNpcRoster(data.characters || []);
@@ -641,7 +642,7 @@
       ? exitBits.join("")
       : `<span class="empty">No adjacent exits</span>`;
 
-    $("inv-text").textContent = (data.inventory || []).join(", ") || "(empty)";
+    $("inv-text").textContent = groupInventory(data.inventory || []) || "(empty)";
 
     // bind clicks
     $("people-grid").querySelectorAll(".entity-tile").forEach((el) => {
@@ -727,6 +728,33 @@
     el.querySelectorAll(".faction-btn").forEach((btn) => {
       btn.addEventListener("click", () => factionOp(btn.dataset.faction, btn.dataset.op));
     });
+  }
+
+  // Cash12、Cash13… 合并成 “Cash ×2”
+  function groupInventory(items) {
+    const counts = new Map();
+    for (const it of items) {
+      const key = String(it).replace(/\d+$/, "") || String(it);
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+    return [...counts.entries()].map(([k, n]) => (n > 1 ? `${k} ×${n}` : k)).join(", ");
+  }
+
+  // 街头经济：口袋里的钱、每家生意交给谁、欠多少
+  function renderStreets(econ) {
+    const row = $("streets-row");
+    if (!row) return;
+    if (!econ || econ.cash === undefined) {
+      row.hidden = true;
+      return;
+    }
+    row.hidden = false;
+    const shops = (econ.businesses || []).map((b) => {
+      const who = b.protected_by.length ? `pays ${b.protected_by.join(", ")}, owes $${b.dues}` : "nobody's protection";
+      return `${b.name} @${b.location} (${b.owner}; stock ${b.stock}; ${who})`;
+    });
+    $("streets-text").textContent =
+      `You: $${econ.cash} · Money on the streets: $${econ.money_supply} · ` + (shops.join(" · ") || "no businesses");
   }
 
   function renderChronicle(events) {

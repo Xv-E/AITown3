@@ -30,6 +30,8 @@ def _join_props(f) -> Dict[str, Any]:
     props: Dict[str, Any] = {"status": "active"}
     if getattr(f, "traits", None):
         props["traits"] = json.dumps(list(f.traits), ensure_ascii=False)
+    if getattr(f, "wage", 0):
+        props["wage"] = int(f.wage)
     if getattr(f, "join_policy", ""):
         props["join_policy"] = f.join_policy
     if getattr(f, "join_standing", None) is not None:

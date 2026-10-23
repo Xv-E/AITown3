@@ -85,6 +85,7 @@ VS Code / Cursor: launch configs under `.vscode/launch.json` (`AITown3: Web 服�
 | `sick_girlfriend` | Lila's Blue Herb — clinic → forest herb |
 | `town_daily_life` | Campfire Camp — wood, berries, keep the fire |
 | `two_npc_talk` | Two-NPC Dialogue Template |
+| `triad_streets` | Neon Streets of Sam Shui — two triads fight street by street over protection money (16 places, 15 NPCs, street economy) |
 
 Add a new world by placing a JSON file in `worlds/` (filename stem = world id).
 
@@ -182,6 +183,28 @@ Each faction has a joining rule (`join_policy`, `join_standing`, `trial`; defaul
 - Leaving costs −3 standing.
 - NPCs who are members are told the real rules when they talk to you, so they don't promise what the game won't allow.
 - API: `POST /api/factions/{name}/join` (`{"via": "Rowan"}` optional), `POST /api/factions/{name}/leave`. The play UI shows a join / leave button per faction, with the reason in the tooltip when it is disabled.
+
+## Street economy (`content/streets`, `agent/economy.py`)
+
+Money is `cash` items: one note is one dollar. Money never appears or disappears; every transaction moves notes from one pocket to another.
+
+| flow | how |
+|------|-----|
+| buy food / drink | use a note on a shop (`noodle_stall`, `fishball_cart`, `tea_house`, `bar_counter`, `herbal_counter`): stock −1, the note goes to the shop's `owner`, you get the food |
+| restock | a sold-out shop alerts its owner (`works_at`), who buys `supplies` at the `wholesale` (the note goes to the wholesaler) and uses them on the shop (+4 stock). Boats refill the wholesale daily. |
+| protection | every shop with a `protection_fee` owes that much per day to the **gang that holds its ground** (`(:Faction)-[:EXTORTS {dues}]->(:Item)`). A gang member runs `collect_dues` there to take what is owed; the boss takes half. |
+| wages | factions with `wage` (gangs, the dock crew): the leader pays each member every day |
+| rent | a `rent_book` item: each tenant pays the landlord every day; arrears are tracked |
+
+How it ties into factions and the story:
+
+- Each payment strengthens the collecting gang's hold on that place (+0.5). Collecting from an unprotected shop starts a new racket there (+1).
+- **Muscling in**: collecting on a rival's ground takes the rival's money, costs −3 standing with them, adds tension between the gangs, and is written into the chronicle.
+- A police member (`authority` faction) on the spot stops the collection and remembers who tried.
+- **Three days behind**: the gang smashes the shop (stock 0, owner hurt and afraid). This adds tension with the owner's guild and goes into the chronicle.
+- NPC dialogue and decisions see their cash, what they owe or are owed, and their shop's stock. Routines buy and eat (`"goal": "Use item on", "item_kind": "cash"`, then `"Use item", "item_kind": "food"`) and collect (`"action": "collect_dues"`).
+- The play UI shows your cash, the money supply, and every shop's owner, protector, dues and stock. Cash is grouped in the inventory (`Cash ×4`).
+- `ECONOMY_SIM=0` turns the daily economy off.
 
 ## Project layout
 

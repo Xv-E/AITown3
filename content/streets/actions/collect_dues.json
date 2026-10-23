@@ -1,0 +1,14 @@
+{
+  "name": "collect_dues",
+  "description": "Collect the protection money owed to your gang by every business here (muscling in on another gang's turf takes their cut — and starts trouble)",
+  "duration": 1.0,
+  "params": [
+    { "name": "c", "type": "Person", "source": "self" }
+  ],
+  "requires": [
+    { "op": "prop_gte", "entity": "@c", "label": "Person", "prop": "hp", "value": 1, "message": "@c is dead" },
+    { "op": "count", "kind": "cash", "gte": 1, "message": "There is no money on these streets" }
+  ],
+  "effects": [],
+  "narrative": "@c makes the rounds, hand out."
+}

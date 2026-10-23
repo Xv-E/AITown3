@@ -33,6 +33,15 @@ def tick_world_systems(world: "Neo4jWorld", dt: float, sim_time: float, *, memor
     except Exception:
         fac = {}
     report["factions"] = fac.get("events") or []
+    # 街头经济：保护费累计；每天结算拖欠、工钱、房租
+    try:
+        from economy import maybe_tick as economy_tick
+
+        econ = economy_tick(world, sim_time, memory=memory) or {}
+    except Exception:
+        econ = {}
+    report["factions"] += econ.get("events") or []
+    report["economy"] = econ.get("notes") or []
     report["events"].extend(
         {"type": "announce", "text": ev["text"], "source": "factions"} for ev in report["factions"] if ev.get("text")
     )

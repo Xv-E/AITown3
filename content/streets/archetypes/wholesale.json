@@ -1,0 +1,31 @@
+{
+  "archetype": "wholesale",
+  "item_kind": "wholesale",
+  "portable": false,
+  "value": 0,
+  "footprint": [
+    3,
+    2
+  ],
+  "description": "A wholesaler's stack of crates. One dollar buys a crate of supplies for a shop.",
+  "accepts_from": [
+    "kind:cash"
+  ],
+  "script": {
+    "lore": "Shopkeepers buy supplies here for a dollar a crate; the money goes to the wholesaler. Boats bring new crates every day.",
+    "initial_state": {
+      "stock": 8,
+      "takings": 0,
+      "owner": "",
+      "protection_fee": 0
+    },
+    "on_tick": [
+      {
+        "op": "add_prop",
+        "prop": "stock",
+        "delta_per_sec": 0.03,
+        "max": 12
+      }
+    ]
+  }
+}

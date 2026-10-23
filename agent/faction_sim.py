@@ -546,9 +546,15 @@ def _nested_pairs(world) -> set:
     return {frozenset((r["a"], r["b"])) for r in rows if r.get("a") and r.get("b")}
 
 
+# 家与城镇的归属不靠地盘：离开它们的地方不会让人变心
+GROUNDLESS_KINDS = ("town", "family")
+
+
 def _tick_loyalty(world, control: Dict[str, Optional[str]], lost_by: Dict[str, List[str]]) -> None:
     stances = _stance_map(world)
     leaders: Dict[str, Optional[str]] = {}
+    kinds = {f["name"]: f["kind"] for f in active_factions(world)}
+    holds = {r["faction"] for r in control_rows(world) if float(r["strength"]) >= CONTROL_MIN}
     for r in presence_rows(world):
         if r.get("is_player"):
             continue
@@ -557,7 +563,7 @@ def _tick_loyalty(world, control: Dict[str, Optional[str]], lost_by: Dict[str, L
         ctl = control.get(loc) if loc else None
         if ctl == f:
             delta += 0.15
-        else:
+        elif kinds.get(f) not in GROUNDLESS_KINDS and f in holds:
             # 远离自家地盘，心慢慢就散了
             delta -= 0.1
             if ctl and (stances.get(frozenset((f, ctl))) or {}).get("stance") == "hostile":
@@ -619,7 +625,7 @@ def _try_emerge(world, now: float, control: Dict[str, Optional[str]], rng: rando
     direct: Dict[str, set] = {}
     where: Dict[str, str] = {}
     for r in rows:
-        if kinds.get(r["faction"], {}).get("kind") == "town":
+        if kinds.get(r["faction"], {}).get("kind") in GROUNDLESS_KINDS:
             continue
         p = r["person"]
         best_loyalty[p] = max(best_loyalty.get(p, 0.0), float(r["loyalty"]))
