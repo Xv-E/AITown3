@@ -65,6 +65,8 @@ RECENT_TALK_WINDOW = 25.0
 BRAINS = ("llm", "routine")
 # 卡住：日程 / 店里要做的事连着做不成几次就挂委托、再多就临时请大模型想办法
 REQUEST_AFTER = 2
+# 模拟秒：失败过的目标过这么久（一个游戏小时）再拿出来试
+RETRY_GOAL_AFTER = 12.5
 STUCK_LIMIT = 3
 # 背景 NPC 临时用大模型想事情多久（模拟秒；两个游戏小时）
 ESCALATE_FOR = 25.0
@@ -146,6 +148,8 @@ class AgentState:
     decision_cooldown_until: float = 0.0
     status: str = "idle"  # idle | acting | deciding | planning | failed
     tried_goal_keys: List[str] = field(default_factory=list)
+    # 每个试过（失败）的目标是什么时候失败的：过了 RETRY_GOAL_AFTER 就可以再试
+    tried_goal_at: Dict[str, float] = field(default_factory=dict)
     replan_reason: Optional[str] = None
     mission_complete: bool = False
     mission_complete_reason: str = ""
@@ -413,6 +417,16 @@ class GameLoop:
         if picked is not None and _goal_key(picked.goal_data) == _goal_key(wanted):
             state.stuck_count, state.stuck_on = 0, ""
             return
+        try:
+            from goal_feasibility import assess_goal
+
+            done = assess_goal(self.world, state.agent.name, wanted, engines=self.plan_engines)
+            if getattr(done, "already_satisfied", False) is True:
+                # 已经有了（手上就有条鱼）：不算卡住，不用挂委托
+                state.stuck_count, state.stuck_on = 0, ""
+                return
+        except Exception:  # noqa: BLE001
+            pass
         what = _goal_text(wanted)
         state.stuck_count = state.stuck_count + 1 if state.stuck_on == what else 1
         state.stuck_on = what
@@ -628,6 +642,8 @@ class GameLoop:
                 continue
             if state.pending_action or self._engaged(state) or self._leader(state):
                 continue
+            if self.__dict__.get("_combat_until", {}).get(state.agent.name, -1.0) > self.sim_time:
+                continue  # 正在打 / 逃：战斗反应说了算
             in_plan = bool(state.current_plan and state.plan_index < len(state.current_plan))
             # 第一轮里下一步预检失败（status=failed）的计划也要在这一轮重规划
             if in_plan and not self._wants_interrupt(state) and state.status != "failed":
@@ -779,6 +795,19 @@ class GameLoop:
             return result
 
         agent.refresh_from_world()
+
+        # 战斗：挨打了 / 敌人就在眼前 → 先打或先逃（规则反应，不等大模型）
+        if (
+            not instant
+            and not self._is_player(state)
+            and not self._is_dead(state)
+            and self._may_auto_plan(state, include_player=include_player)
+            and self._combat_step(state)
+        ):
+            result["phase"] = "combat"
+            result["goal"] = state.last_goal
+            result["status"] = state.status
+            return result
 
         # 硬中断：死亡 / 极低 HP — 可取消进行中动作（不 apply）
         if self._hard_interrupt(state):
@@ -1024,8 +1053,30 @@ class GameLoop:
         if apply and state.pending_action:
             self._complete_pending(state)
             return
+        if state.pending_action is not None and state.pending_action.path:
+            # 路走到一半不走了：停在走到的地方（不退回出发点）
+            from spatial import stop_walk_here
+
+            try:
+                stop_walk_here(self.world, state.agent.name, self.sim_time)
+            except Exception as e:  # noqa: BLE001
+                if self.verbose:
+                    print(f"[WARN] stop walk {state.agent.name}: {e}")
         state.pending_action = None
         state.sim_busy_until = 0.0
+
+    def _walk_started(self, state: AgentState) -> None:
+        """动作前要走路：记下路线和出发时刻，别处（死了、被打断）才知道他走到哪了。"""
+        pending = state.pending_action
+        if pending is None or not pending.path or pending.walk_seconds <= 0:
+            return
+        from spatial import start_walk
+
+        try:
+            start_walk(self.world, state.agent.name, list(pending.path), pending.started_at, pending.walk_seconds)
+        except Exception as e:  # noqa: BLE001
+            if self.verbose:
+                print(f"[WARN] start walk {state.agent.name}: {e}")
 
     def _start_next_step(
         self,
@@ -1076,12 +1127,23 @@ class GameLoop:
         state.sim_busy_until = pending.completes_at
         state.status = "acting"
         state.waiting_for = None
+        self._walk_started(state)
         if partner is not None:
             # 对方站着等我走过去，说完（或超时）就放开
             partner.engaged_by = state.agent.name
             partner.engaged_until = pending.completes_at + ENGAGE_MARGIN
         if not instant:
             self._prefetch_talk(state, action_name, list(args))
+        if action_name != act("idle") and not self._is_player(state) and not instant:
+            # 做事时说一句短话（代替头顶显示目标）
+            try:
+                from mutter import say_action
+
+                say_action(self, state.agent.name, action_name, list(args),
+                           goal=str((state.last_goal or {}).get("goal") or ""))
+            except Exception as e:  # noqa: BLE001
+                if self.verbose:
+                    print(f"[WARN] action line {state.agent.name}: {e}")
         if action_name != act("idle"):
             self._log(
                 state,
@@ -1116,9 +1178,10 @@ class GameLoop:
             state.status = "idle"
             if pending.path:
                 # 只是走过去（跟着队长）：走到了就站在那里
-                from spatial import set_person_cell
+                from spatial import end_walk, set_person_cell
 
                 set_person_cell(self.world, state.agent.name, tuple(pending.path[-1]))
+                end_walk(self.world, state.agent.name)
             return None
         agent = state.agent
         action_name, args = pending.name, pending.args
@@ -1155,11 +1218,13 @@ class GameLoop:
         if action_result.success:
             self._feelings_after(agent, action_name, args)
             self._list_new_goods(state)
-        if pending.path and (action_result.success or not pending.travel):
-            # 走到了（赶路失败的人还留在原区域，不挪）
-            from spatial import set_person_cell
+        if pending.path:
+            from spatial import end_walk, set_person_cell
 
-            set_person_cell(self.world, agent.name, tuple(pending.path[-1]))
+            if action_result.success or not pending.travel:
+                # 走到了（赶路失败的人还留在原区域，不挪）
+                set_person_cell(self.world, agent.name, tuple(pending.path[-1]))
+            end_walk(self.world, agent.name)
         self._observe(state, places=True)
 
         state.last_action_result = action_result
@@ -1260,6 +1325,7 @@ class GameLoop:
             state.status = "idle"
             state.decision_cooldown_until = self.sim_time + self.decision_cooldown
             state.tried_goal_keys.clear()
+            state.tried_goal_at.clear()
             state.replan_reason = None
             self._sync_quest_ui(state)
         elif action_result.success:
@@ -1941,6 +2007,59 @@ class GameLoop:
             if state is not None:
                 self._log(state, "event", f"Put {', '.join(items)} up for sale")
 
+    def _combat_step(self, state: AgentState) -> bool:
+        """打、追、逃（见 combat.react）。接手了这个人这一拍就返回 True。
+
+        正在做别的事：只有在动手之后又挨了打才打断；正在打 / 逃：让它做完这一下。
+        """
+        from combat import react
+
+        name = state.agent.name
+        checks = self.__dict__.setdefault("_combat_checks", {})
+        until = self.__dict__.setdefault("_combat_until", {})
+        pending = state.pending_action
+        in_combat = (state.last_goal or {}).get("source") == "combat"
+        if pending is not None:
+            if in_combat:
+                return False
+            rows = self.world.run_query(
+                "MATCH (p:Person {name: $n}) RETURN p.attacked_at AS t", n=name
+            ) or []
+            hit_at = rows[0].get("t") if rows else None
+            if hit_at is None or float(hit_at) < pending.started_at:
+                return False
+        else:
+            if in_combat and state.current_plan and state.plan_index < len(state.current_plan):
+                return False  # 战斗计划还有下一步（先走过去再打）：照常推进
+            if self.sim_time < checks.get(name, -1.0):
+                return False
+        checks[name] = self.sim_time + 1.0  # 环顾四周不用每拍都做
+        try:
+            choice = react(self.world, name, at=self.sim_time)
+        except Exception as e:  # noqa: BLE001
+            if self.verbose:
+                print(f"[WARN] combat react {name}: {e}")
+            return False
+        if not choice:
+            return False
+        if pending is not None:
+            self._cancel_pending(state, apply=False)
+        attack = choice["kind"] == "attack"
+        target = choice.get("target") if attack else choice.get("to")
+        state.current_plan, state.plan_index = list(choice["plan"]), 0
+        state.last_goal = {
+            "goal": "Defeat enemy" if attack else "Flee",
+            "target_entity": target,
+            "reason": choice.get("why") or "",
+            "source": "combat",
+        }
+        until[name] = self.sim_time + 3.0
+        text = (f"Fights {target} ({choice.get('why')})" if attack
+                else f"Flees from {choice.get('from')} to {target}")
+        self._log(state, "event", text, reason=choice.get("why") or "")
+        self._start_next_step(state)
+        return True
+
     def _relations_step(self) -> None:
         """每两个游戏小时：好感回落、矛盾消退，够亲近的人自然结盟。"""
         from relations import DECAY_EVERY, decay
@@ -1952,6 +2071,13 @@ class GameLoop:
         if self.sim_time < due:
             return
         self._next_relations_at = self.sim_time + DECAY_EVERY
+        try:
+            from combat import regen
+
+            regen(self.world, at=self.sim_time)  # 没在打仗的人慢慢回血
+        except Exception as e:  # noqa: BLE001
+            if self.verbose:
+                print(f"[WARN] regen: {e}")
         try:
             decay(self.world, at=self.sim_time)
         except Exception as e:  # noqa: BLE001
@@ -2080,6 +2206,7 @@ class GameLoop:
             completes_at=self.sim_time + secs, path=list(path), hold=True, walk_seconds=secs,
         )
         state.sim_busy_until = state.pending_action.completes_at
+        self._walk_started(state)
 
     def heard(self, name: str, other: str, lines: List[Any]) -> bool:
         """name 刚和 other 说完话：推一个「要不要因此改主意」的触发器（带上说了什么）。"""
@@ -2109,6 +2236,18 @@ class GameLoop:
         prio = PLAYER_TALK_PRIORITY if from_player else TALK_PRIORITY
         self._push_triggers(state, [Trigger("event", "conversation", text[:600], prio, self.sim_time, {"with": other})])
         return True
+
+    def said_to(self, name: str, other: str, limit: int = 4) -> List[str]:
+        """name 在之前的对话里对 other 说过的话（最近 limit 句，旧的在前）。"""
+        out: List[str] = []
+        for c in reversed(self.conversations):
+            if {c.get("a"), c.get("b")} != {name, other}:
+                continue
+            mine = [str(ln.get("text") or "") for ln in c.get("lines") or [] if ln.get("speaker") == name]
+            out = mine + out
+            if len(out) >= limit:
+                break
+        return out[-limit:]
 
     def recent_talk(self, name: str) -> str:
         """决策用：最近和谁说过什么（逐句原话）。"""
@@ -2447,6 +2586,12 @@ class GameLoop:
         state.candidate_goals = list(candidates)
         state.decision_steps = []
 
+        # 刚失败过的目标先不选；过了一阵（东西长回来了、拿到工具了）再试，别永远拉黑
+        expired = [k for k in state.tried_goal_keys
+                   if self.sim_time - state.tried_goal_at.get(k, self.sim_time) >= RETRY_GOAL_AFTER]
+        for k in expired:
+            state.tried_goal_keys.remove(k)
+            state.tried_goal_at.pop(k, None)
         exclude = list(state.tried_goal_keys)
         llm_goal = None
         if candidates:
@@ -2726,6 +2871,7 @@ class GameLoop:
                 return
             if key and key not in state.tried_goal_keys:
                 state.tried_goal_keys.append(key)
+                state.tried_goal_at[key] = self.sim_time
 
         # 2) 换次优候选 / 重新决策
         state.decision_cooldown_until = 0.0  # 允许立即决策

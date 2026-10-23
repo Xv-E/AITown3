@@ -1,7 +1,7 @@
 {
   "name": "attack",
   "capability": "attack",
-  "description": "Attack someone at the same location; their HP drops by your power level",
+  "description": "Attack someone at the same location: damage = your power + your best weapon - their armour; at 0 HP they die and drop everything",
   "duration": 1.5,
   "params": [
     { "name": "attacker", "type": "Person", "source": "self" },
@@ -16,10 +16,7 @@
     { "op": "person_at", "person": "@target", "location": "@l" }
   ],
   "effects": [
-    { "op": "add_prop", "entity": "@target", "label": "Person", "prop": "hp",
-      "delta": "@attacker.power_level", "scale": -1, "min": 0 },
-    { "op": "set_prop", "entity": "@target", "label": "Person", "prop": "dead", "value": true,
-      "when": [ { "op": "prop_lte", "entity": "@target", "label": "Person", "prop": "hp", "value": 0 } ] }
+    { "op": "strike", "attacker": "@attacker", "target": "@target" }
   ],
   "pddl_preconditions": ["(alive ?attacker)", "(alive ?target)", "(at ?attacker ?l)", "(at ?target ?l)"],
   "pddl_effects": ["(decrease (hp ?target) (power_level ?attacker))"]

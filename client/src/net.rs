@@ -188,6 +188,16 @@ impl NetBridge {
         self.send(NetRequestKind::LoadGame { slot: slot.to_string() });
     }
 
+    /// Template worlds the server can build (worlds/*.json).
+    pub fn fetch_worlds(&self) {
+        self.send(NetRequestKind::FetchWorlds);
+    }
+
+    /// Clear the current world (NPC progress and memories too) and build a template world.
+    pub fn load_world(&self, id: &str) {
+        self.send(NetRequestKind::LoadWorld { id: id.to_string() });
+    }
+
     pub fn fetch_director(&self) {
         self.send(NetRequestKind::FetchDirector);
     }
@@ -257,6 +267,10 @@ enum NetRequestKind {
         kind: String,
     },
     FetchSaves,
+    FetchWorlds,
+    LoadWorld {
+        id: String,
+    },
     FetchCrafting,
     FetchRequests,
     Social {
@@ -321,6 +335,7 @@ enum NetResponse {
     Did(String, Result<(bool, String), String>),
     Saved(Result<String, String>),
     Loaded(Result<String, String>),
+    Worlds(Result<Vec<WorldInfo>, String>),
     Draft(Result<DraftSummary, String>),
     Applied(Result<String, String>),
 }
@@ -448,6 +463,17 @@ fn handle_request(request: NetRequest) -> NetResponse {
         NetRequestKind::LoadGame { slot } => NetResponse::Loaded(
             http_json(server, "POST", &format!("/api/saves/{slot}/load"), Some("{}".to_string()))
                 .map(|v| v.get("message").and_then(Value::as_str).unwrap_or("Loaded.").to_string()),
+        ),
+        NetRequestKind::FetchWorlds => NetResponse::Worlds(
+            http_json(server, "GET", "/api/worlds", None).and_then(|v| {
+                serde_json::from_value::<Vec<WorldInfo>>(v.get("worlds").cloned().unwrap_or(Value::Array(Vec::new())))
+                    .map_err(|err| format!("Bad worlds JSON: {err}"))
+            }),
+        ),
+        // Same outcome as loading a save: a new world, NPCs paused.
+        NetRequestKind::LoadWorld { id } => NetResponse::Loaded(
+            http_json(server, "POST", &format!("/api/worlds/{}/load", url_encode(&id)), Some("{}".to_string()))
+                .map(|v| v.get("message").and_then(Value::as_str).unwrap_or("World loaded.").to_string()),
         ),
         NetRequestKind::FetchDirector => NetResponse::Director(
             http_json(server, "GET", "/api/director", None).and_then(|v| {
@@ -744,6 +770,8 @@ pub fn receive_network_messages(
             }
             NetResponse::Blueprints(Ok(list)) => ui.open_build_menu(list),
             NetResponse::Saves(Ok(list)) => ui.open_save_menu(list),
+            NetResponse::Worlds(Ok(list)) => ui.open_worlds_menu(list),
+            NetResponse::Worlds(Err(err)) => ui.toast(format!("Can't list worlds: {err}")),
             NetResponse::Crafting(Ok(list)) => ui.open_craft_menu(list),
             NetResponse::Requests(Ok(list)) => ui.open_requests_menu(list),
             NetResponse::Requests(Err(err)) => ui.toast(format!("Can't load requests: {err}")),
@@ -1188,6 +1216,9 @@ pub struct Actor {
     pub x: Option<i32>,
     #[serde(default)]
     pub y: Option<i32>,
+    /// Why this person treats the player as an enemy ("" = they don't).
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub hostile: String,
 }
 
 impl Actor {
@@ -1226,6 +1257,9 @@ pub struct Thing {
     /// A gathering spot's remaining supply (it regrows in fractions; shown whole).
     #[serde(default, deserialize_with = "lenient_opt_i32")]
     pub stock: Option<i32>,
+    /// Whose it is ("" = nobody's: finders keepers). Taking someone else's is stealing.
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub owner: String,
 }
 
 #[derive(Deserialize, Clone, Default)]
@@ -1320,6 +1354,9 @@ pub struct Mutter {
     /// Mood icon key (happy, angry, sad, scared, tired, love, surprised, thinking, hurt, secret).
     #[serde(default, deserialize_with = "lenient_string")]
     pub icon: String,
+    /// "action": what they say as they start doing something; "" = a mutter to themselves.
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub kind: String,
     /// Something that matters (a secret slipping out); `overheard` when the player was close enough.
     #[serde(default)]
     pub important: bool,
@@ -1950,6 +1987,17 @@ pub struct SaveInfo {
     pub clock: String,
     #[serde(default, deserialize_with = "lenient_string")]
     pub player: String,
+}
+
+/// One template world (what the Worlds menu shows).
+#[derive(Deserialize, Clone, Default)]
+pub struct WorldInfo {
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub id: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub title: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub premise: String,
 }
 
 /// Percent-encode a query-string value (UTF-8, so Chinese searches work too).

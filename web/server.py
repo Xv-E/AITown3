@@ -238,6 +238,30 @@ def _note_player_action(me: str, action: str, target: str) -> None:
         pass
 
 
+def _player_consequences(world, action: str, params: Dict[str, str], capability: Optional[str], message: str) -> str:
+    """玩家做完任何动作：偷窃被看见、打人的后果、东西归属（见 agent/ownership.py、agent/combat.py）。"""
+    try:
+        from relations import consequences
+
+        actor = next(iter(params.values()), "")
+        out = consequences(world, actor, action, params, at=get_world_simulator().sim_time) or {}
+        if capability == "attack" and params.get("target"):
+            from combat import stats
+
+            st = stats(world, params["target"])
+            message = f"{message} — {params['target']} " + ("is dead" if not st.get("alive") else f"has {st.get('hp')} HP left")
+        if out.get("theft"):
+            seen = out.get("witnesses") or []
+            message = f"{message} — you stole from {out['victim']}" + (
+                f"; seen by {', '.join(seen)}" if seen else "; nobody saw"
+            )
+        elif out.get("crime"):
+            message = f"{message} — an unprovoked attack: witnesses will remember"
+    except Exception as e:  # noqa: BLE001
+        print(f"[WARN] consequences of {action}: {e}")
+    return message
+
+
 def _after_player_action(world, me: str, action: str, params: Dict[str, str]) -> None:
     """玩家做完采集 / 制造 / 交易：关系系统在这里记一笔（见 relations.py），任务线足迹也记一笔。"""
     _note_player_action(me, action, params.get("i") or params.get("node") or "")
@@ -495,6 +519,8 @@ async def api_execute(req: ExecuteActionRequest):
         ok, reason = reg.execute(world, req.action, **kwargs)
         dialogue = None
         capability = get_content().capability_of(req.action)
+        if ok:
+            reason = _player_consequences(world, req.action, kwargs, capability, reason)
         # 按能力签名的参数位置取值（内容包可自由命名参数）
         positional = [kwargs.get(p.name, "") for p in reg.get(req.action).parameters] if ok else []
         if ok and positional:

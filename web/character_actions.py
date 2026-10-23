@@ -738,6 +738,10 @@ def world_view(world, viewer: Optional[str]) -> Dict[str, Any]:
     shapes = region_shapes(world, areas)
     regions = []
     items: List[Dict[str, Any]] = []
+    owners = {
+        r["i"]: r["p"]
+        for r in world.run_query("MATCH (p:Person)-[:OWNS]->(i:Item) RETURN i.name AS i, p.name AS p") or []
+    }
     for name, (ax, ay, aw, ah) in sorted(areas.items()):
         info = get_location_info(world, name) or {}
         mid = terrain.anchor(name) if terrain else None
@@ -762,6 +766,7 @@ def world_view(world, viewer: Optional[str]) -> Dict[str, Any]:
             if it.get("stock") is not None:
                 entry["stock"] = int(float(it.get("stock") or 0))
             entry.update(region=name, x=ax + int(it["x"]), y=ay + int(it["y"]))
+            entry["owner"] = owners.get(it["name"], "")  # 谁的东西（"" = 没主，谁捡归谁）
             if _is_interactable_item(it) and viewer:
                 entry["actions"] = _with_item_actions(world, viewer, it)["actions"]
             if viewer and str(it.get("item_kind") or "").lower() in node_kinds:
@@ -769,19 +774,26 @@ def world_view(world, viewer: Optional[str]) -> Dict[str, Any]:
                 entry["actions"] = list(entry.get("actions") or []) + gather_options(world, viewer, it["name"])
             items.append(entry)
     persons = []
+    from combat import hostility
+
     for c in list_characters(world):
         cell = person_cell(world, c["name"])
-        persons.append({**c, "x": cell[0] if cell else None, "y": cell[1] if cell else None})
+        # 这个人为什么把看的人当敌人（"" = 不是敌人）
+        hostile = hostility(world, c["name"], viewer) if viewer and viewer != c["name"] else ""
+        persons.append({**c, "x": cell[0] if cell else None, "y": cell[1] if cell else None, "hostile": hostile})
     if terrain is not None:
         width, height = terrain.width, terrain.height
         # 整张地形的格子种类：'.' 室外地 ',' 室内地板 '+' 门洞 '#' 墙 '%' 篱笆 '~' 水 ' ' 荒野
         tiles = terrain.kind_rows()
+        decor = list(terrain.decor)
     else:
         width = max((x + w for x, _, w, _ in areas.values()), default=0)
         height = max((y + h for _, y, _, h in areas.values()), default=0)
         tiles = []
+        decor = []
+    # decor：装饰层（土路、石板、麦田……只管好看），和 tiles 一样每行一串
     return {"width": width, "height": height, "regions": regions, "items": items, "persons": persons,
-            "tiles": tiles}
+            "tiles": tiles, "decor": decor}
 
 
 def get_play_state(world) -> Dict[str, Any]:

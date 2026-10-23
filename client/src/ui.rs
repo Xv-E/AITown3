@@ -7,7 +7,7 @@ use std::{
 };
 
 use crate::adapter::thought_line;
-use crate::net::{trim_line, Blueprint, MindData, RecipeView, RequestView, SaveInfo, TradeView, DirectorData, DraftSummary, History, HistoryEntry, NetBridge, WorldSnapshot};
+use crate::net::{trim_line, Blueprint, MindData, RecipeView, RequestView, SaveInfo, WorldInfo, TradeGood, TradeView, DirectorData, DraftSummary, History, HistoryEntry, NetBridge, WorldSnapshot};
 use crate::scene::{cell_at, cell_center, Interactive, PlayerAvatar, TargetKind, WalkGrid, ZoneGrid, TILE};
 
 const TOAST_DURATION: Duration = Duration::from_secs(4);
@@ -260,19 +260,44 @@ impl UiState {
         if !view.trader {
             menu.add(format!("{npc} doesn't trade."), Command::Close);
         }
-        for g in &view.sells {
-            let label = format!("Buy {}  -  {} coins{}", g.label, g.price, if g.affordable { "" } else { " (can't afford)" });
+        for (g, n) in group_goods(&view.sells) {
+            let label = format!("Buy {}{}  -  {} coins{}", g.label, count(n), g.price, if g.affordable { "" } else { " (can't afford)" });
             menu.add(label, Command::Do { action: "buy".into(), target: g.name.clone(), other: npc.clone() });
         }
         if view.trader {
-            for g in &view.buys {
-                let label = format!("Sell {}  -  {} coins{}", g.label, g.price, if g.affordable { "" } else { " (they can't pay)" });
+            for (g, n) in group_goods(&view.buys) {
+                let label = format!("Sell {}{}  -  {} coins{}", g.label, count(n), g.price, if g.affordable { "" } else { " (they can't pay)" });
                 menu.add(label, Command::Do { action: "sell".into(), target: g.name.clone(), other: npc.clone() });
             }
         }
         menu.add("Close", Command::Close);
         self.open_menu(menu, None);
         self.trading_with = Some(npc);
+    }
+
+    /// Pick a template world; loading it (after a confirmation) clears the current one.
+    pub fn open_worlds_menu(&mut self, worlds: Vec<WorldInfo>) {
+        let mut menu = Menu::new(
+            "Switch world",
+            "Loading a template clears the current world, NPC progress and memories - save first to keep them",
+        );
+        for w in worlds {
+            let title = if w.title.is_empty() { w.id.clone() } else { w.title.clone() };
+            let mut confirm = Menu::new(
+                format!("Load {title}?"),
+                "This clears the current world, NPC progress and memories.",
+            );
+            confirm.add("Yes, load it", Command::LoadWorld(w.id.clone()));
+            confirm.add("Back", Command::Back);
+            let label = if w.premise.is_empty() {
+                title
+            } else {
+                format!("{title}  -  {}", trim_line(&w.premise, 70))
+            };
+            menu.add(label, Command::Submenu(Box::new(confirm)));
+        }
+        menu.add("Close", Command::Close);
+        self.open_menu(menu, None);
     }
 
     /// Save into one of the slots, or load any save (autosave included) after a confirmation.
@@ -420,6 +445,7 @@ enum Command {
     },
     SaveGame(String),
     LoadGame(String),
+    LoadWorld(String),
     Submenu(Box<Menu>),
     Back,
     Close,
@@ -477,6 +503,12 @@ fn target_menu(world: &WorldSnapshot, target: &Interactive) -> Menu {
                     subtitle.push_str("  ·  trader");
                 }
             }
+            // Hostility comes with the seamless-world snapshot (the person entry there).
+            if let Some(p) = world.world.persons.iter().find(|p| &p.name == name) {
+                if !p.hostile.is_empty() {
+                    subtitle.push_str(&format!("  ·  HOSTILE ({})", p.hostile));
+                }
+            }
             let mut menu = Menu::new(name.clone(), subtitle);
             if alive {
                 menu.add("Talk", Command::Talk { person: name.clone() });
@@ -491,20 +523,21 @@ fn target_menu(world: &WorldSnapshot, target: &Interactive) -> Menu {
                 if !actor.is_some_and(|a| a.allies.iter().any(|x| x == me)) {
                     menu.add("Propose an alliance", Command::Ally { person: name.clone() });
                 }
-                for item in &held {
-                    menu.add(
-                        format!("Give {item}"),
-                        act("give", &[("giver", me), ("i", item), ("receiver", name), ("l", here)]),
-                    );
+                if !held.is_empty() {
+                    let mut give = Menu::new(format!("Give to {name}"), "What do you hand over?");
+                    for group in group_items(&held) {
+                        give.add(
+                            group.label(),
+                            act("give", &[("giver", me), ("i", &group.first), ("receiver", name), ("l", here)]),
+                        );
+                    }
+                    give.add("Back", Command::Back);
+                    menu.add("Give...", Command::Submenu(Box::new(give)));
                 }
             }
-            for item in world.recommended_tools(name) {
-                if held.contains(item) {
-                    menu.add(
-                        format!("Use {item} on {name}  *"),
-                        use_on(me, item, name, here),
-                    );
-                }
+            let useful: Vec<&String> = held.iter().filter(|t| world.recommended_tools(name).contains(t)).collect();
+            for group in group_items(useful) {
+                menu.add(format!("Use {} on {name}  *", group.base), use_on(me, &group.first, name, here));
             }
             if alive {
                 menu.add("Attack", act("attack", &[("attacker", me), ("target", name), ("l", here)]));
@@ -533,9 +566,17 @@ fn target_menu(world: &WorldSnapshot, target: &Interactive) -> Menu {
             if thing.locked {
                 subtitle = format!("{subtitle} (locked)").trim().to_string();
             }
+            let theirs = !thing.owner.is_empty() && thing.owner != me;
+            if theirs {
+                subtitle = format!("{subtitle}  ·  {}'s", thing.owner).trim().to_string();
+            } else if thing.owner == me {
+                subtitle = format!("{subtitle}  ·  yours").trim().to_string();
+            }
             let mut menu = Menu::new(name, subtitle);
             if thing.can_pick_up() {
-                menu.add("Pick up", act("pick_up", &[("c", me), ("i", name), ("l", here)]));
+                // Someone else's: taking it is stealing (anyone who sees it will remember).
+                let label = if theirs { format!("Steal ({}'s)", thing.owner) } else { "Pick up".to_string() };
+                menu.add(label, act("pick_up", &[("c", me), ("i", name), ("l", here)]));
             }
             // The object's own actions: what you can do now, and why the rest can't be done.
             for action in &thing.actions {
@@ -560,12 +601,20 @@ fn target_menu(world: &WorldSnapshot, target: &Interactive) -> Menu {
                     );
                 }
             }
+            // Tools that are known to work on it go straight in the card; anything else you
+            // carry is one "Use something else..." entry, not a line per item.
             let recommended = world.recommended_tools(name);
-            let mut tools: Vec<&String> = held.iter().filter(|t| recommended.contains(t)).collect();
-            tools.extend(held.iter().filter(|t| !recommended.contains(t)));
-            for tool in tools {
-                let mark = if recommended.contains(tool) { "  *" } else { "" };
-                menu.add(format!("Use {tool} on {name}{mark}"), use_on(me, tool, name, here));
+            let (useful, other): (Vec<&String>, Vec<&String>) = held.iter().partition(|t| recommended.contains(t));
+            for group in group_items(useful) {
+                menu.add(format!("Use {} on {name}  *", group.base), use_on(me, &group.first, name, here));
+            }
+            if !other.is_empty() {
+                let mut sub = Menu::new(format!("Use on {name}"), "Try something you carry");
+                for group in group_items(other) {
+                    sub.add(group.label(), use_on(me, &group.first, name, here));
+                }
+                sub.add("Back", Command::Back);
+                menu.add("Use something else on it...", Command::Submenu(Box::new(sub)));
             }
             let text = if thing.description.is_empty() {
                 "Nothing special about it.".to_string()
@@ -585,6 +634,54 @@ fn target_menu(world: &WorldSnapshot, target: &Interactive) -> Menu {
     }
 }
 
+/// Several of the same thing ("Berry1", "Berry2", "Berry3"): one menu line, the first one stands in.
+struct ItemGroup {
+    base: String,
+    count: usize,
+    first: String,
+}
+
+impl ItemGroup {
+    fn label(&self) -> String {
+        format!("{}{}", self.base, count(self.count))
+    }
+}
+
+fn count(n: usize) -> String {
+    if n > 1 { format!(" x{n}") } else { String::new() }
+}
+
+/// The name without its running number: "Berry3" / "Berry_3" / "Berry 3" -> "Berry".
+fn item_base(name: &str) -> &str {
+    let trimmed = name.trim_end_matches(|c: char| c.is_ascii_digit());
+    let trimmed = trimmed.trim_end_matches(['_', ' ', '-', '#']);
+    if trimmed.is_empty() { name } else { trimmed }
+}
+
+fn group_items<'a>(names: impl IntoIterator<Item = &'a String>) -> Vec<ItemGroup> {
+    let mut out: Vec<ItemGroup> = Vec::new();
+    for name in names {
+        let base = item_base(name);
+        match out.iter_mut().find(|g| g.base == base) {
+            Some(g) => g.count += 1,
+            None => out.push(ItemGroup { base: base.to_string(), count: 1, first: name.clone() }),
+        }
+    }
+    out
+}
+
+/// Goods with the same label and price are one line in the shop.
+fn group_goods(goods: &[TradeGood]) -> Vec<(&TradeGood, usize)> {
+    let mut out: Vec<(&TradeGood, usize)> = Vec::new();
+    for g in goods {
+        match out.iter_mut().find(|(o, _)| o.label == g.label && o.price == g.price) {
+            Some((_, n)) => *n += 1,
+            None => out.push((g, 1)),
+        }
+    }
+    out
+}
+
 fn use_on(me: &str, tool: &str, target: &str, here: &str) -> Command {
     act(
         "use_on",
@@ -597,12 +694,12 @@ fn inventory_menu(world: &WorldSnapshot) -> Menu {
     let mut menu = Menu::new("Inventory", format!("{} item(s)", held.len()));
     let me = world.player.name.as_str();
     let here = world.current_location.name.as_str();
-    for item in &held {
-        let mut sub = Menu::new(item.clone(), "In your bag");
-        sub.add("Use", act("use_item", &[("c", me), ("i", item)]));
-        sub.add("Drop", act("drop", &[("c", me), ("i", item), ("l", here)]));
+    for group in group_items(&held) {
+        let mut sub = Menu::new(group.label(), "In your bag");
+        sub.add("Use one", act("use_item", &[("c", me), ("i", &group.first)]));
+        sub.add("Drop one", act("drop", &[("c", me), ("i", &group.first), ("l", here)]));
         sub.add("Back", Command::Back);
-        menu.add(item.clone(), Command::Submenu(Box::new(sub)));
+        menu.add(group.label(), Command::Submenu(Box::new(sub)));
     }
     if held.is_empty() {
         menu.add("(empty)", Command::Close);
@@ -1105,6 +1202,14 @@ fn choose_menu_option(index: usize, world: &WorldSnapshot, ui: &mut UiState, net
             if ensure_online(world, ui) {
                 net.load_game(&slot);
                 ui.toast(format!("Loading {slot}..."));
+            }
+        }
+        Command::LoadWorld(id) => {
+            ui.menu = None;
+            ui.cancel_travel();
+            if ensure_online(world, ui) {
+                net.load_world(&id);
+                ui.toast(format!("Building world {id}..."));
             }
         }
         Command::Back => ui.menu = menu.parent.take().map(|parent| *parent),
@@ -1703,6 +1808,7 @@ pub enum UiAction {
     Craft,
     Requests,
     SaveMenu,
+    Worlds,
     Build,
     Map,
     History,
@@ -1812,6 +1918,11 @@ fn run_ui_action(action: UiAction, world: &WorldSnapshot, nearby: &NearbyInterac
         UiAction::SaveMenu => {
             if ensure_online(world, ui) {
                 net.fetch_saves();
+            }
+        }
+        UiAction::Worlds => {
+            if ensure_online(world, ui) {
+                net.fetch_worlds();
             }
         }
         UiAction::Build => {
@@ -2009,6 +2120,7 @@ pub fn update_toolbar(
         }
         button(p, "+1 hour", UiAction::AdvanceTime, 15.0, false, false);
         button(p, "Save / Load", UiAction::SaveMenu, 15.0, false, false);
+        button(p, "Worlds", UiAction::Worlds, 15.0, false, false);
     });
 }
 
@@ -3120,5 +3232,26 @@ fn party_text(world: &WorldSnapshot) -> String {
         String::new()
     } else {
         format!("  ·  party: {}", party.join(", "))
+    }
+}
+
+#[cfg(test)]
+mod menu_tests {
+    use super::*;
+
+    #[test]
+    fn similar_items_are_one_line() {
+        let held: Vec<String> = ["Berry1", "Berry2", "Wood_1", "Key", "Berry3"].iter().map(|s| s.to_string()).collect();
+        let groups = group_items(&held);
+        let labels: Vec<String> = groups.iter().map(ItemGroup::label).collect();
+        assert_eq!(labels, vec!["Berry x3", "Wood", "Key"]);
+        assert_eq!(groups[0].first, "Berry1", "the first one stands in for the group");
+    }
+
+    #[test]
+    fn names_that_are_only_digits_keep_their_name() {
+        assert_eq!(item_base("42"), "42");
+        assert_eq!(item_base("Lantern"), "Lantern");
+        assert_eq!(item_base("Fish 12"), "Fish");
     }
 }

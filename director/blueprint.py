@@ -113,6 +113,9 @@ class PersonSpec:
     # 钱（数值）；trader = 会买卖东西的商人
     coins: int = 0
     trader: bool = False
+    # 阵营（"monster" / "bandit" 之类的阵营见人就打）；guard = 看见犯罪会出手的守卫
+    faction: str = ""
+    guard: bool = False
     # 商店：卖哪几类东西、每类备几件（缺了他会自己去采集 / 制造 / 收购）
     sells: List[str] = field(default_factory=list)
     shop_stock: int = 1
@@ -171,6 +174,8 @@ class PersonSpec:
             brain="routine" if str(self.brain or "").strip().lower() in ("routine", "npc") else "llm",
             coins=max(0, int(self.coins or 0)),
             trader=bool(self.trader),
+            faction=str(self.faction or "").strip().lower(),
+            guard=bool(self.guard),
             sells=[str(k).strip().lower() for k in (self.sells or []) if str(k).strip()],
             shop_stock=max(1, int(self.shop_stock or 1)),
             secret=(self.secret or "").strip(),
@@ -656,6 +661,8 @@ class EventBlueprint:
                     brain=getattr(p, "brain", "llm"),
                     coins=getattr(p, "coins", 0),
                     trader=getattr(p, "trader", False),
+                    faction=getattr(p, "faction", ""),
+                    guard=getattr(p, "guard", False),
                     sells=list(getattr(p, "sells", []) or []),
                     shop_stock=getattr(p, "shop_stock", 1),
                     secret=getattr(p, "secret", ""),
@@ -832,6 +839,8 @@ class EventBlueprint:
                 brain=str(x.get("brain") or "llm"),
                 coins=int(x.get("coins", 0) or 0),
                 trader=bool(x.get("trader", False)),
+                faction=str(x.get("faction", "") or ""),
+                guard=bool(x.get("guard", False)),
                 sells=list(x.get("sells") or []),
                 shop_stock=int(x.get("shop_stock", 1) or 1),
                 secret=str(x.get("secret") or ""),

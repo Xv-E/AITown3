@@ -16,10 +16,13 @@ grid_w × grid_h）为准，物品的格子坐标存在 Item.x / Item.y（左上
 from __future__ import annotations
 
 import math
+import random
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Set, Tuple
 
-from terrain_gen import DOOR, Place, Terrain, extend, from_ascii, generate, links_present
+from terrain_gen import (
+    DOOR, Place, Terrain, connect, edit_cells, extend, from_ascii, generate, links_present, separate,
+)
 
 if TYPE_CHECKING:
     from neo4j_world import Neo4jWorld
@@ -354,7 +357,7 @@ def save_terrain(world: "Neo4jWorld", terrain: Terrain) -> None:
 
 
 def save_authored_terrain(world: "Neo4jWorld", raw: Dict[str, Any]) -> Optional[Terrain]:
-    """world JSON 里手画的地形（"terrain": {"rows": [...], "legend": {...}}）。"""
+    """world JSON 里手画的地形（"terrain": {"rows": [...], "legend": {...}, "decor": [...]}）。"""
     rows = [str(r) for r in raw.get("rows") or []]
     legend = {str(k): str(v) for k, v in (raw.get("legend") or {}).items() if len(str(k)) == 1}
     if not rows or not legend:
@@ -365,7 +368,10 @@ def save_authored_terrain(world: "Neo4jWorld", raw: Dict[str, Any]) -> Optional[
     ) or []
     indoor = {r["n"] for r in info if r.get("indoor") or _tag_set(r.get("tags")) & INDOOR_TAGS}
     parents = {r["n"]: r["parent"] for r in info if r.get("parent")}
-    terrain = from_ascii(rows, legend, indoor, parents)
+    # 门（物品）所在的那边算门洞的主人，门才摆得进门洞
+    sides = {frozenset((d["here"], d["other"])): d["here"] for d in door_pairs(world).values()}
+    decor = [str(r) for r in raw.get("decor") or []]
+    terrain = from_ascii(rows, legend, indoor, parents, decor=decor, door_side=sides)
     save_terrain(world, terrain)
     return terrain
 
@@ -480,10 +486,11 @@ def layout_regions(world: "Neo4jWorld") -> Dict[str, Area]:
         world.run_query("MATCH (p:Person) REMOVE p.x, p.y")
     missing = [tuple(sorted(p)) for p in links if p <= set(terrain.names) and p not in links_present(terrain)]
     if missing:
-        log.info("地形上没有直接相通的相邻地点（经由别处仍走得到）：%s", missing)
+        log.info("地形上没有直接相通的相邻地点（经由别处仍走得到；图里会以地图为准）：%s", missing)
     areas = region_areas(world)
     place_doors(world, areas)
     _settle_items(world, terrain, areas, authored_sizes if rebuilt else {})
+    sync_adjacency(world)
     return areas
 
 
@@ -528,7 +535,11 @@ def _settle_items(world: "Neo4jWorld", terrain: Terrain, areas: Dict[str, Area],
 
 
 def door_pairs(world: "Neo4jWorld") -> Dict[str, Dict[str, Any]]:
-    """每扇门连着哪两块地：门的 connects_to；或者开门的钥匙效果里连的那两处；或者门所在地的「锁着的相邻」。"""
+    """每扇门连着哪两块地。
+
+    门已经摆在地图的门洞上：就是那个门洞两边（地图说了算）。还没摆：看门的 connects_to；
+    或者开门的钥匙效果里连的那两处；或者门所在地的「锁着的相邻」。
+    """
     import json
 
     rows = world.run_query(
@@ -536,11 +547,14 @@ def door_pairs(world: "Neo4jWorld") -> Dict[str, Dict[str, Any]]:
         MATCH (d:Item)-[:LOCATED_AT]->(l:Location) WHERE toLower(coalesce(d.item_kind, '')) = 'door'
         OPTIONAL MATCH (l)-[:LOCKED_ADJACENT_TO]-(m:Location)
         RETURN d.name AS door, l.name AS here, coalesce(d.connects_to, '') AS to,
-               coalesce(d.locked, false) AS locked, collect(DISTINCT m.name) AS locked_to
+               coalesce(d.locked, false) AS locked, collect(DISTINCT m.name) AS locked_to,
+               d.x AS x, d.y AS y
         """
     ) or []
     if not rows:
         return {}
+    t = terrain_of(world, build=False)
+    areas = region_areas(world) if t is not None else {}
     links: Dict[str, Tuple[str, str]] = {}
     for r in world.run_query("MATCH (i:Item) WHERE i.effects_on IS NOT NULL RETURN i.effects_on AS e") or []:
         try:
@@ -554,6 +568,15 @@ def door_pairs(world: "Neo4jWorld") -> Dict[str, Dict[str, Any]]:
     out: Dict[str, Dict[str, Any]] = {}
     for r in rows:
         here, other = r["here"], ""
+        area = areas.get(here)
+        on_map = None
+        if t is not None and area and r.get("x") is not None and r.get("y") is not None:
+            cell = (area[0] + _int(r["x"]), area[1] + _int(r["y"]))
+            on_map = next((w for w in t.doorways if w.cell == cell and here in (w.owner, w.other)), None)
+        if on_map is not None:
+            other = on_map.other if on_map.owner == here else on_map.owner
+            out[r["door"]] = {"here": here, "other": other, "locked": bool(r["locked"]), "cell": on_map.cell}
+            continue
         if r["to"]:
             other = r["to"]
         elif r["door"] in links:
@@ -643,19 +666,171 @@ def walkable_cells(world: "Neo4jWorld", areas: Optional[Dict[str, Area]] = None)
         return set()
     areas = areas if areas is not None else region_areas(world)
     _, blocked = _item_cells(world, areas)
-    # 锁着的门：门洞那一格不能走（门还没摆到门洞上也一样）；只「锁着相邻」、还没打开的也一样
+    return t.walkable() - blocked - locked_door_cells(world, t)
+
+
+def locked_door_cells(world: "Neo4jWorld", t: Terrain) -> Set[Cell]:
+    """锁着的门挡住的门洞：门摆在哪个门洞就挡哪个；还没摆上去的，挡住它那两块地之间所有的门洞。"""
+    out: Set[Cell] = set()
     for d in door_pairs(world).values():
-        if d["locked"]:
-            blocked.update(w.cell for w in t.doorways_between(d["here"], d["other"]))
+        if not d["locked"]:
+            continue
+        if d.get("cell"):
+            out.add(d["cell"])
+        else:
+            out.update(w.cell for w in t.doorways_between(d["here"], d["other"]))
+    return out
+
+
+# ---------------------------------------------------------------------
+# 连通关系从地图来：图里的 ADJACENT_TO / LOCKED_ADJACENT_TO 是地图的「摘要」
+# ---------------------------------------------------------------------
+
+
+def sync_adjacency(world: "Neo4jWorld") -> Dict[str, List[Tuple[str, str]]]:
+    """按地图重写地点之间的边：
+
+      走得通（敞开的交界，或开着的门洞）        → ADJACENT_TO（双向）
+      只隔着锁着的门才连着                      → LOCKED_ADJACENT_TO（双向，key = 开门的钥匙）
+      地图上不通                                → 没有边
+
+    只动两头都在地图上的地点之间的边。返回加了 / 删了哪些对。
+    """
+    import json
+
+    t = terrain_of(world, build=False)
+    if t is None:
+        return {}
+    on_map = {n for n in t.names if t.cells_of(n)}
+    every = {p for p in links_present(t) if p <= on_map}
+    open_ = {p for p in links_present(t, locked_door_cells(world, t)) if p <= on_map}
+    locked = every - open_
+    pairs = door_pairs(world)
+    keys: Dict[Any, str] = {}
     for r in world.run_query(
         """
-        MATCH (a:Location)-[:LOCKED_ADJACENT_TO]-(b:Location)
-        WHERE a.name < b.name AND NOT (a)-[:ADJACENT_TO]-(b)
-        RETURN a.name AS a, b.name AS b
+        MATCH (d:Item)-[:LOCATED_AT]->(:Location) WHERE toLower(coalesce(d.item_kind, '')) = 'door'
+        RETURN d.name AS door, d.accepts_from AS acc, coalesce(d.key_item, '') AS key
         """
     ) or []:
-        blocked.update(w.cell for w in t.doorways_between(r["a"], r["b"]))
-    return t.walkable() - blocked
+        try:
+            acc = json.loads(r["acc"]) if isinstance(r.get("acc"), str) else (r.get("acc") or [])
+        except ValueError:
+            acc = []
+        key = r["key"] or (str(acc[0]) if acc else "")
+        d = pairs.get(r["door"])
+        if d and key:
+            keys[frozenset((d["here"], d["other"]))] = key
+
+    changes: Dict[str, List[Tuple[str, str]]] = {"added": [], "removed": [], "locked": [], "unlocked": []}
+    for rel, want, add_key, drop_key in (("ADJACENT_TO", open_, "added", "removed"),
+                                         ("LOCKED_ADJACENT_TO", locked, "locked", "unlocked")):
+        have = {
+            frozenset((r["a"], r["b"]))
+            for r in world.run_query(
+                f"MATCH (a:Location)-[:{rel}]-(b:Location) WHERE a.name < b.name RETURN a.name AS a, b.name AS b"
+            ) or []
+        }
+        have = {p for p in have if p <= on_map and len(p) == 2}
+        for p in sorted(want, key=sorted):
+            a, b = sorted(p)
+            extra = " SET r1.key = $key, r2.key = $key" if rel == "LOCKED_ADJACENT_TO" else ""
+            world.run_query(
+                f"MATCH (a:Location {{name: $a}}), (b:Location {{name: $b}}) "
+                f"MERGE (a)-[r1:{rel}]->(b) MERGE (b)-[r2:{rel}]->(a)" + extra,
+                a=a, b=b, key=keys.get(p, ""),
+            )
+            if p not in have:
+                changes[add_key].append((a, b))
+        for p in sorted(have - want, key=sorted):
+            a, b = sorted(p)
+            world.run_query(
+                f"MATCH (a:Location {{name: $a}})-[r:{rel}]-(b:Location {{name: $b}}) DELETE r", a=a, b=b
+            )
+            changes[drop_key].append((a, b))
+    return changes
+
+
+def _save_keeping_items(world: "Neo4jWorld", terrain: Terrain) -> None:
+    """存改过的地形；外接矩形变了的地点，把地上东西的局部坐标跟着挪，世界位置不变。"""
+    before = region_areas(world)
+    save_terrain(world, terrain)
+    after = region_areas(world)
+    for name, (x, y, _, _) in after.items():
+        old = before.get(name)
+        if old and (old[0], old[1]) != (x, y):
+            world.run_query(
+                """
+                MATCH (i:Item)-[:LOCATED_AT]->(:Location {name: $n})
+                WHERE i.x IS NOT NULL AND i.y IS NOT NULL
+                SET i.x = i.x + $dx, i.y = i.y + $dy
+                """,
+                n=name, dx=old[0] - x, dy=old[1] - y,
+            )
+
+
+def _after_map_change(world: "Neo4jWorld", terrain: Terrain) -> Dict[str, Any]:
+    _save_keeping_items(world, terrain)
+    areas = region_areas(world)
+    place_doors(world, areas)
+    _settle_items(world, terrain, areas, {})
+    place_people(world)  # 站在新砌的墙里的人挪到旁边
+    return sync_adjacency(world)
+
+
+def edit_terrain(world: "Neo4jWorld", changes: Dict[Cell, Tuple[str, Optional[str]]]) -> Dict[str, Any]:
+    """改地形（砌墙、拆墙、开门洞、铺地……）：{世界格子: (种类, 地点 / None)}，改完按地图同步连通关系。
+
+    种类见 terrain_gen：'.' 室外地 ',' 室内地板 '+' 门洞 '#' 墙 '%' 篱笆 '~' 水 ' ' 荒野。
+    """
+    t = terrain_of(world)
+    if t is None:
+        return {}
+    return _after_map_change(world, edit_cells(t, changes))
+
+
+def connect_places(world: "Neo4jWorld", a: str, b: str) -> Dict[str, Any]:
+    """在地图上打通 a、b（已经通了就不动）。"""
+    t = terrain_of(world)
+    if t is None or a not in t.names or b not in t.names:
+        return {}
+    new = connect(t, a, b)
+    return sync_adjacency(world) if new is t else _after_map_change(world, new)
+
+
+def separate_places(world: "Neo4jWorld", a: str, b: str) -> Dict[str, Any]:
+    """在地图上隔断 a、b（门洞砌上，敞开的交界围起来）。"""
+    t = terrain_of(world)
+    if t is None or a not in t.names or b not in t.names:
+        return {}
+    return _after_map_change(world, separate(t, a, b))
+
+
+def apply_map_changes(
+    world: "Neo4jWorld",
+    *,
+    new_places: bool = False,
+    linked: Iterable[Tuple[str, str]] = (),
+    unlinked: Iterable[Tuple[str, str]] = (),
+    doors_changed: bool = False,
+) -> Dict[str, Any]:
+    """动作 / 脚本改了世界之后，把地图和连通关系对上（graph_ops.apply_all 调用）。
+
+    新地点 → 落到地图上；脚本连 / 断了两个地点 → 在地图上打通 / 隔断；门的锁变了 → 重新同步。
+    这个世界还没有地图（老测试的假世界）就什么都不做。
+    """
+    if terrain_of(world, build=False) is None:
+        return {}
+    if new_places:
+        layout_regions(world)
+    doors = {frozenset((d["here"], d["other"])) for d in door_pairs(world).values()}
+    for a, b in unlinked:
+        if frozenset((a, b)) in doors:
+            continue  # 隔着一扇门：关上 / 锁上就够了，不把门洞砌死
+        separate_places(world, a, b)
+    for a, b in linked:
+        connect_places(world, a, b)
+    return sync_adjacency(world)
 
 
 def region_shapes(world: "Neo4jWorld", areas: Optional[Dict[str, Area]] = None,
@@ -731,16 +906,50 @@ def _stable_hash(text: str) -> int:
     return h
 
 
-def resting_spot(walkable: Set[Cell], terrain: Terrain, region: str, who: str) -> Optional[Cell]:
-    """地点里给某人的落脚点：中间附近，按名字错开，免得大家叠在一个格子上；不站在门洞里。"""
-    inside = [c for c in terrain.cells_of(region) if c in walkable and terrain.kind_at(c) != DOOR]
-    mid = terrain.anchor(region)
-    if not inside or mid is None:
+def resting_spot(walkable: Set[Cell], terrain: Terrain, region: str, who: str,
+                 avoid: Iterable[Cell] = ()) -> Optional[Cell]:
+    """地点里给某人的落脚点：每人在每个地点有自己固定的一块（按名字散开在地点中间那一半里，不是都挤在正中间），
+    避开别人站着 / 正要去的格子和它们旁边一格；不站在门洞里，尽量不贴着墙。"""
+    inside = sorted(c for c in terrain.cells_of(region) if c in walkable and terrain.kind_at(c) != DOOR)
+    if not inside:
         return None
-    jitter = _stable_hash(who)
-    cx = mid[0] + (jitter % 7) - 3
-    cy = mid[1] + (jitter // 7 % 5) - 2
-    return min(inside, key=lambda c: (_octile(c, (cx, cy)), c))
+    roomy = [c for c in inside
+             if sum((c[0] + dx, c[1] + dy) in walkable for dx in (-1, 0, 1) for dy in (-1, 0, 1)) >= 8]
+    pool = roomy or inside
+    # 自己的那块：散在地点中间那一半里（不跑到边上，走路不至于太远）
+    mid = terrain.anchor(region) or pool[len(pool) // 2]
+    reach = max(3.0, 0.5 * math.sqrt(len(inside) / math.pi))
+    near_mid = [c for c in pool if _octile(c, mid) <= reach] or pool
+    rnd = random.Random(_stable_hash(f"{who}@{region}"))
+    want = near_mid[rnd.randrange(len(near_mid))]
+    near_others = {(x + dx, y + dy) for x, y in avoid for dx in (-1, 0, 1) for dy in (-1, 0, 1)}
+    free = [c for c in pool if c not in near_others] or [c for c in inside if c not in set(avoid)] or inside
+    return min(free, key=lambda c: (_octile(c, want), c))
+
+
+def people_cells(world: "Neo4jWorld", *, besides: str = "") -> Set[Cell]:
+    """别人站着的格子，和正在走去的终点。"""
+    import json
+
+    rows = world.run_query(
+        """
+        MATCH (p:Person)
+        WHERE p.name <> $me AND p.x IS NOT NULL AND p.y IS NOT NULL
+        RETURN p.x AS x, p.y AS y, p.walk_path AS path
+        """,
+        me=besides,
+    ) or []
+    out: Set[Cell] = set()
+    for r in rows:
+        out.add((_int(r["x"]), _int(r["y"])))
+        if r.get("path"):
+            try:
+                path = json.loads(r["path"])
+                if path:
+                    out.add((int(path[-1][0]), int(path[-1][1])))
+            except (ValueError, TypeError, IndexError):
+                pass
+    return out
 
 
 def person_cell(world: "Neo4jWorld", name: str) -> Optional[Cell]:
@@ -765,7 +974,7 @@ def person_cell(world: "Neo4jWorld", name: str) -> Optional[Cell]:
         cell = (_int(r["x"]), _int(r["y"]))
         if t.owner_at(cell) == loc and cell in walkable:
             return cell
-    spot = resting_spot(walkable, t, loc, name)
+    spot = resting_spot(walkable, t, loc, name, avoid=people_cells(world, besides=name))
     if spot:
         set_person_cell(world, name, spot)
     return spot
@@ -773,6 +982,72 @@ def person_cell(world: "Neo4jWorld", name: str) -> Optional[Cell]:
 
 def set_person_cell(world: "Neo4jWorld", name: str, cell: Cell) -> None:
     world.run_query("MATCH (p:Person {name: $n}) SET p.x = $x, p.y = $y", n=name, x=cell[0], y=cell[1])
+
+
+# ---------------------------------------------------------------------
+# 走在路上：Person.x / y 还是出发的那一格，走到哪了按时间算（Person.walk_*）
+# ---------------------------------------------------------------------
+
+
+def start_walk(world: "Neo4jWorld", name: str, path: List[Cell], started_at: float, seconds: float) -> None:
+    import json
+
+    world.run_query(
+        "MATCH (p:Person {name: $n}) SET p.walk_path = $path, p.walk_t0 = $t0, p.walk_secs = $secs",
+        n=name, path=json.dumps([list(c) for c in path]), t0=float(started_at), secs=float(seconds),
+    )
+
+
+def end_walk(world: "Neo4jWorld", name: str) -> None:
+    world.run_query("MATCH (p:Person {name: $n}) REMOVE p.walk_path, p.walk_t0, p.walk_secs", n=name)
+
+
+def walked_cell(path: List[Cell], started_at: float, seconds: float, now: float) -> Cell:
+    """按时间算走到了路上哪一格（匀速）。"""
+    if not path:
+        raise ValueError("empty path")
+    frac = 1.0 if seconds <= 0 else min(1.0, max(0.0, (now - started_at) / seconds))
+    return tuple(path[min(len(path) - 1, int(frac * (len(path) - 1)))])  # type: ignore[return-value]
+
+
+def current_cell(world: "Neo4jWorld", name: str, now: float) -> Optional[Cell]:
+    """这个人此刻站在哪：正在走路就是路上走到的那一格，否则是 person_cell。"""
+    import json
+
+    rows = world.run_query(
+        "MATCH (p:Person {name: $n}) RETURN p.walk_path AS path, p.walk_t0 AS t0, p.walk_secs AS secs", n=name
+    ) or []
+    if rows and rows[0].get("path"):
+        path = [tuple(c) for c in json.loads(rows[0]["path"])]
+        if path:
+            return walked_cell(path, float(rows[0]["t0"] or 0), float(rows[0]["secs"] or 0), now)
+    return person_cell(world, name)
+
+
+def stop_walk_here(world: "Neo4jWorld", name: str, now: float) -> Optional[Cell]:
+    """路走到一半停下（死了、被打断）：就停在走到的地方，人算在那块地上。"""
+    rows = world.run_query("MATCH (p:Person {name: $n}) RETURN p.walk_path IS NOT NULL AS w", n=name) or []
+    if not rows or not rows[0].get("w"):
+        return person_cell(world, name)
+    cell = current_cell(world, name, now)
+    end_walk(world, name)
+    if cell is None:
+        return None
+    set_person_cell(world, name, cell)
+    region = region_at(world, cell)
+    if region and region != person_region_name(world, name):
+        world.run_query(
+            """
+            MATCH (p:Person {name: $n})
+            OPTIONAL MATCH (p)-[r:LOCATED_AT]->()
+            DELETE r
+            WITH DISTINCT p
+            MATCH (l:Location {name: $loc})
+            MERGE (p)-[:LOCATED_AT]->(l)
+            """,
+            n=name, loc=region,
+        )
+    return cell
 
 
 def place_people(world: "Neo4jWorld") -> None:
@@ -838,9 +1113,10 @@ def plan_walk(world: "Neo4jWorld", actor: str, action_name: str, args: List[Any]
     walkable = walkable_cells(world) | {start}
     capability = get_content().capability_of(action_name)
 
+    others = people_cells(world, besides=actor)
     if capability == "travel":
         target = str(args[2]) if len(args) > 2 else ""
-        spot = resting_spot(walkable, t, target, actor) if target in t.names else None
+        spot = resting_spot(walkable, t, target, actor, avoid=others) if target in t.names else None
         goals = {spot} if spot else set()
     else:
         idx = _APPROACH_BY_NAME.get(action_name, _APPROACH_ARG.get(capability or ""))
@@ -858,6 +1134,7 @@ def plan_walk(world: "Neo4jWorld", actor: str, action_name: str, args: List[Any]
             for dy in (-1, 0, 1)
             if (tx + dx, ty + dy) not in target_cells
         }
+        goals = (goals - others) or goals  # 别站到已经有人的那一格上
     path = find_path(walkable, start, goals)
     if not path or len(path) < 2:
         return None

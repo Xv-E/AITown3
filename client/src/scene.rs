@@ -15,6 +15,10 @@ use crate::ui::{NearbyInteract, UiState};
 /// Pixels per world cell.
 pub const TILE: f32 = 32.0;
 pub const PLAYER_SPEED: f32 = 8.0 * TILE;
+/// Longest frame the player's movement takes into account (seconds).
+const MAX_FRAME_STEP: f32 = 1.0 / 20.0;
+/// Half the player's body (pixels): all four corners must be on open cells.
+const BODY_HALF: f32 = TILE * 0.3;
 /// How often the player's cell is reported to the server while walking.
 const REPORT_EVERY: Duration = Duration::from_millis(200);
 /// The server put the player further than this (cells) from anywhere we reported recently:
@@ -91,6 +95,26 @@ impl WalkGrid {
 
     pub fn has_layout(&self) -> bool {
         !self.walkable.is_empty()
+    }
+
+    /// The player's body (a square around `pos`) stands only on open cells.
+    pub fn body_fits(&self, pos: Vec2) -> bool {
+        [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)]
+            .iter()
+            .all(|(sx, sy)| self.is_open(cell_at(pos + Vec2::new(sx * BODY_HALF, sy * BODY_HALF))))
+    }
+
+    /// The closest open cell within `radius` cells.
+    pub fn nearest_open(&self, from: IVec2, radius: i32) -> Option<IVec2> {
+        (-radius..=radius)
+            .flat_map(|dx| (-radius..=radius).map(move |dy| from + IVec2::new(dx, dy)))
+            .filter(|c| self.walkable.contains(c))
+            .min_by_key(|c| ((*c - from).length_squared(), c.x, c.y))
+    }
+
+    #[cfg(test)]
+    pub fn from_cells(cells: impl IntoIterator<Item = IVec2>) -> Self {
+        Self { revision: None, walkable: cells.into_iter().collect() }
     }
 
     /// A* over open cells (8 directions, no corner cutting); path excludes `from`.
@@ -568,18 +592,53 @@ pub fn player_input(
     if direction == Vec2::ZERO {
         return;
     }
-    let step = direction.normalize() * PLAYER_SPEED * time.delta_secs();
-    // Slide along walls: try each axis on its own. Stuck off the ground: walk freely back onto it.
-    let stranded = !grid.is_open(cell_at(pos));
+    // Stuck inside a wall (a door locked behind you, a wall just built): step out to the nearest open cell.
+    if grid.has_layout() && !grid.body_fits(pos) {
+        if let Some(cell) = grid.nearest_open(cell_at(pos), 4) {
+            let to = cell_center(cell);
+            transform.translation.x = to.x;
+            transform.translation.y = to.y;
+        }
+        return;
+    }
+    // A slow frame must not turn into a jump (that is how one-cell walls got skipped).
+    let dt = time.delta_secs().min(MAX_FRAME_STEP);
+    let total = direction.normalize() * PLAYER_SPEED * dt;
+    // Small sub-steps, each axis on its own (slide along walls), the whole body must fit.
+    let pieces = (total.length() / (TILE * 0.25)).ceil().max(1.0) as i32;
+    let step = total / pieces as f32;
     let mut next = pos;
-    for delta in [Vec2::new(step.x, 0.0), Vec2::new(0.0, step.y)] {
-        let candidate = next + delta;
-        if stranded || grid.is_open(cell_at(candidate)) {
-            next = candidate;
+    for _ in 0..pieces {
+        for delta in [Vec2::new(step.x, 0.0), Vec2::new(0.0, step.y)] {
+            if delta == Vec2::ZERO {
+                continue;
+            }
+            if grid.body_fits(next + delta) {
+                next += delta;
+            } else if let Some(nudged) = corner_assist(&grid, next, delta) {
+                next = nudged; // brushing a corner: slide toward the middle of the lane / doorway
+            }
         }
     }
     transform.translation.x = next.x;
     transform.translation.y = next.y;
+}
+
+/// Blocked going `delta`: if the cell straight ahead is open, shift sideways toward the
+/// middle of the current row / column (at most as far as the step) so the body lines up with it.
+fn corner_assist(grid: &WalkGrid, pos: Vec2, delta: Vec2) -> Option<Vec2> {
+    let ahead = cell_at(pos + delta.normalize() * (BODY_HALF + 1.0));
+    if !grid.is_open(ahead) {
+        return None;
+    }
+    let mid = cell_center(cell_at(pos));
+    let reach = delta.length();
+    let side = if delta.x != 0.0 {
+        Vec2::new(0.0, (mid.y - pos.y).clamp(-reach, reach))
+    } else {
+        Vec2::new((mid.x - pos.x).clamp(-reach, reach), 0.0)
+    };
+    (side != Vec2::ZERO && grid.body_fits(pos + side)).then_some(pos + side)
 }
 
 pub fn report_player_position(
@@ -693,6 +752,20 @@ mod tests {
         for cell in [IVec2::new(0, 0), IVec2::new(37, 12), IVec2::new(59, 39)] {
             assert_eq!(cell_at(cell_center(cell)), cell);
         }
+    }
+
+    #[test]
+    fn the_body_does_not_poke_into_walls_and_finds_its_way_out() {
+        // A corridor one cell high (y = 0) from x = 0 to 4.
+        let grid = WalkGrid::from_cells((0..5).map(|x| IVec2::new(x, 0)));
+        let mid = cell_center(IVec2::new(2, 0));
+        assert!(grid.body_fits(mid));
+        assert!(!grid.body_fits(mid + Vec2::new(0.0, TILE * 0.3)), "half a body into the wall above");
+        assert_eq!(grid.nearest_open(IVec2::new(2, 2), 4), Some(IVec2::new(2, 0)));
+        // Pushing right while a bit off-centre: the assist slides back toward the middle.
+        let off = mid + Vec2::new(0.0, TILE * 0.15);
+        let nudged = corner_assist(&grid, off, Vec2::new(4.0, 0.0)).unwrap();
+        assert!(nudged.y < off.y && grid.body_fits(nudged));
     }
 
     #[test]

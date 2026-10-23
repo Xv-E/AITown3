@@ -3,6 +3,7 @@
   "name": "Spear",
   "item_kind": "spear",
   "portable": true,
+  "damage": 6,
   "value": 16,
   "description": "A log-shafted spear with a knapped stone head. Made at a workbench; traders pay well."
 }

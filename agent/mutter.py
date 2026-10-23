@@ -272,3 +272,120 @@ def _llm_line(name: str, info: Dict[str, Any], doing: str, icon: str) -> str:
     raw = invoke_primary(prompt, max_tokens=40, timeout=LLM_TIMEOUT) or ""
     line = str(raw).strip().strip('"').strip()
     return line.splitlines()[0][:120] if line else ""
+
+
+# ---------------------------------------------------------------------
+# 做事时说的一句：每个 NPC 动作开始时冒一句短话（模板，立刻有，不等模型），代替头顶的「目标」
+# ---------------------------------------------------------------------
+
+import itertools
+import re
+
+_ACTION_SEQ = itertools.count(1)
+# 模拟秒：同一个人这么久之内重复同一个动作（重试）不再说同一句（约一个半游戏小时）
+REPEAT_GAP = 20.0
+
+ACTION_LINES: Dict[str, List[str]] = {
+    "travel": ["Off to {place}.", "Right, {place} next.", "Better get to {place}.", "Heading for {place}."],
+    "take": ["I'll take that {item}.", "Ooh, {item}.", "That {item} could be useful.", "Mine now."],
+    "give": ["Here, {who}, this is for you.", "Take this {item}, {who}.", "For you, {who}."],
+    "drop": ["I'll leave this here.", "Don't need this {item}.", "There."],
+    "consume": ["Mm, {item}.", "Just what I needed.", "Don't mind if I do."],
+    "attack": ["Take that, {who}!", "You asked for it, {who}!", "Come here, {who}!", "Enough!"],
+    "use_on": ["Let's try the {item} on this.", "Maybe the {item} will do it.", "Come on, work..."],
+    "interact": ["Let's {label} this.", "Time to {label}.", "Right, {label}."],
+    "gather": ["Time to {label}.", "Better {label} while I'm here.", "Back to work: {label}."],
+    "flee": ["I'm getting out of here!", "Not today!", "Run!"],
+    "sleep": ["Time for bed.", "*yawn* Long day.", "Off to sleep."],
+}
+
+
+def _plain(name: str) -> str:
+    """Berry2 -> berry；CampfireClearing -> campfire clearing（说话时听起来像人话）。"""
+    base = re.sub(r"[_\s-]*\d+$", "", str(name or ""))
+    spaced = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", base).replace("_", " ").strip()
+    return spaced.lower() if spaced and spaced[0].isupper() and " " not in spaced else spaced
+
+
+def _doing_label(action: str) -> str:
+    """采集 / 制造这类动作说成人话：用作者写的 label（"Gather dry sticks" -> "gather dry sticks"），
+    没有就把动作名里的前缀去掉（gather_fell_log -> "fell log"）。"""
+    label = ""
+    try:
+        from registry import get_registry
+
+        spec = getattr(get_registry().get(action), "spec", None) or {}
+        label = str(spec.get("label") or (spec.get("rpg") or {}).get("label") or "")
+    except Exception:  # noqa: BLE001
+        label = ""
+    if not label:
+        label = re.sub(r"^(gather|craft|do)_", "", action).replace("_", " ")
+    label = re.sub(r"\s*\([^)]*\)", "", label).strip()          # "fell a log (axe)" -> "fell a log"
+    label = label[:1].lower() + label[1:] if label else action.replace("_", " ")
+    if action.startswith("craft_") and not label.startswith(("make", "build", "cook", "smoke", "pack")):
+        article = "an" if label[:1] in "aeiou" else "a"
+        label = f"make {article} {label}"                         # 做出来的是东西：说成「做一个……」
+    return label
+
+
+def action_line(name: str, action: str, args: List[str], *, goal: str = "") -> str:
+    """name 开始做 action(args) 时说的一句；空 = 不说（走过去搭话、发呆之类的）。"""
+    from content import get_content
+
+    cap = get_content().capability_of(action) or action
+    if action == "use_on":
+        cap = "use_on"
+    elif action in ("sleep",):
+        cap = "sleep"
+    elif cap == "travel" and goal == "Flee":
+        cap = "flee"
+    elif cap not in ACTION_LINES and action not in ("talk", "wait", "noop", "idle") and cap not in ("converse", "idle"):
+        cap = "gather"   # 采集、制造、内容包里的其它动作：按动作名说
+    lines = ACTION_LINES.get(cap)
+    if not lines:
+        return ""
+    arg = lambda i: str(args[i]) if len(args) > i else ""  # noqa: E731
+    fill = {
+        "place": arg(2) if cap in ("travel", "flee") else "",
+        "item": _plain(arg(1)),
+        "who": arg(2) if cap == "give" else arg(1),
+        "label": _doing_label(action) if cap == "gather" else (arg(2) or "use").replace("_", " "),
+    }
+    if cap == "use_on":
+        fill["item"] = _plain(arg(1))
+    rnd = random.Random(f"{name}:{action}:{':'.join(map(str, args))}:{next(_ACTION_SEQ)}")
+    return rnd.choice(lines).format(**fill)
+
+
+def say_action(loop, name: str, action: str, args: List[str], *, goal: str = "") -> Optional[Dict[str, Any]]:
+    """动作开始：这句话放进 loop.mutters，客户端在他头上冒出来。
+
+    同一个人短时间里重试同一件事（做不成又重来）不重复说。
+    """
+    now = float(getattr(loop, "sim_time", 0.0))
+    key = f"{action}:{':'.join(map(str, args))}"
+    said = loop.__dict__.setdefault("_action_lines_said", {})
+    last = said.get(name)
+    if last and last[0] == key and now - last[1] < REPEAT_GAP:
+        return None
+    text = action_line(name, action, list(args), goal=goal)
+    if not text:
+        return None
+    said[name] = (key, now)
+    entry = {
+        "id": f"a{next(_ACTION_SEQ)}:{name}",
+        "t": round(float(getattr(loop, "sim_time", 0.0)), 2),
+        "who": name,
+        "text": text,
+        "icon": "",
+        "emoji": "",
+        "important": False,
+        "overheard": False,
+        "kind": "action",
+    }
+    feed = getattr(loop, "mutters", None)
+    if feed is None:
+        feed = loop.mutters = []
+    feed.append(entry)
+    del feed[:-MUTTER_LIMIT]
+    return entry

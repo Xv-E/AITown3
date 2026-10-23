@@ -640,10 +640,28 @@ def _maybe_append_give(
         working_tools = {it.tool for it in list_interactions()}
     except Exception:
         working_tools = set()
-    # 有用途的物品（世界交互里的工具）不当随手礼物
+    try:
+        from rpg_content import gather_tool_kinds
+
+        tool_kinds = gather_tool_kinds()
+    except Exception:
+        tool_kinds = set()
+    rows = world.run_query(
+        """
+        MATCH (:Person {name: $c})-[:HAS_ITEM]->(i:Item)
+        RETURN i.name AS n, toLower(coalesce(i.item_kind, '')) AS kind,
+               coalesce(i.damage, 0) AS damage, coalesce(i.armor, 0) AS armor
+        """,
+        c=character,
+    ) or []
+    keep = {
+        r["n"] for r in rows
+        if r.get("kind") in tool_kinds or (r.get("damage") or 0) > 0 or (r.get("armor") or 0) > 0
+    }
+    # 有用途的物品（干活的工具、武器、护甲）不当随手礼物——送掉了明天就没法干活
     gifts = [
         i for i in held
-        if not (i.lower().startswith("potion") or i == "Potion") and i not in working_tools
+        if not (i.lower().startswith("potion") or i == "Potion") and i not in working_tools and i not in keep
     ]
     if not gifts:
         return plan
