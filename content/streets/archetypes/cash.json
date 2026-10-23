@@ -1,0 +1,310 @@
+{
+  "archetype": "cash",
+  "name": "Cash",
+  "item_kind": "cash",
+  "portable": true,
+  "value": 1,
+  "description": "A crumpled dollar note. Spending it puts it in someone else's pocket — money never leaves the streets.",
+  "effects_on": [
+    {
+      "target": "kind:noodle_stall",
+      "consume": false,
+      "preconditions": [
+        {
+          "op": "prop_gte",
+          "entity": "@target",
+          "label": "Item",
+          "prop": "stock",
+          "value": 1
+        }
+      ],
+      "ops": [
+        {
+          "op": "add_prop",
+          "entity": "@target",
+          "label": "Item",
+          "prop": "stock",
+          "delta": -1
+        },
+        {
+          "op": "add_prop",
+          "entity": "@target",
+          "label": "Item",
+          "prop": "takings",
+          "delta": 1
+        },
+        {
+          "op": "unlink",
+          "a": "@actor",
+          "a_label": "Person",
+          "b": "@tool",
+          "b_label": "Item",
+          "rel": "HAS_ITEM"
+        },
+        {
+          "op": "link",
+          "a": "@target.owner",
+          "a_label": "Person",
+          "b": "@tool",
+          "b_label": "Item",
+          "rel": "HAS_ITEM"
+        },
+        {
+          "op": "spawn_item",
+          "archetype": "noodles",
+          "held_by": "@actor"
+        }
+      ]
+    },
+    {
+      "target": "kind:fishball_cart",
+      "consume": false,
+      "preconditions": [
+        {
+          "op": "prop_gte",
+          "entity": "@target",
+          "label": "Item",
+          "prop": "stock",
+          "value": 1
+        }
+      ],
+      "ops": [
+        {
+          "op": "add_prop",
+          "entity": "@target",
+          "label": "Item",
+          "prop": "stock",
+          "delta": -1
+        },
+        {
+          "op": "add_prop",
+          "entity": "@target",
+          "label": "Item",
+          "prop": "takings",
+          "delta": 1
+        },
+        {
+          "op": "unlink",
+          "a": "@actor",
+          "a_label": "Person",
+          "b": "@tool",
+          "b_label": "Item",
+          "rel": "HAS_ITEM"
+        },
+        {
+          "op": "link",
+          "a": "@target.owner",
+          "a_label": "Person",
+          "b": "@tool",
+          "b_label": "Item",
+          "rel": "HAS_ITEM"
+        },
+        {
+          "op": "spawn_item",
+          "archetype": "fishballs",
+          "held_by": "@actor"
+        }
+      ]
+    },
+    {
+      "target": "kind:tea_house",
+      "consume": false,
+      "preconditions": [
+        {
+          "op": "prop_gte",
+          "entity": "@target",
+          "label": "Item",
+          "prop": "stock",
+          "value": 1
+        }
+      ],
+      "ops": [
+        {
+          "op": "add_prop",
+          "entity": "@target",
+          "label": "Item",
+          "prop": "stock",
+          "delta": -1
+        },
+        {
+          "op": "add_prop",
+          "entity": "@target",
+          "label": "Item",
+          "prop": "takings",
+          "delta": 1
+        },
+        {
+          "op": "unlink",
+          "a": "@actor",
+          "a_label": "Person",
+          "b": "@tool",
+          "b_label": "Item",
+          "rel": "HAS_ITEM"
+        },
+        {
+          "op": "link",
+          "a": "@target.owner",
+          "a_label": "Person",
+          "b": "@tool",
+          "b_label": "Item",
+          "rel": "HAS_ITEM"
+        },
+        {
+          "op": "spawn_item",
+          "archetype": "tea_set",
+          "held_by": "@actor"
+        }
+      ]
+    },
+    {
+      "target": "kind:bar_counter",
+      "consume": false,
+      "preconditions": [
+        {
+          "op": "prop_gte",
+          "entity": "@target",
+          "label": "Item",
+          "prop": "stock",
+          "value": 1
+        }
+      ],
+      "ops": [
+        {
+          "op": "add_prop",
+          "entity": "@target",
+          "label": "Item",
+          "prop": "stock",
+          "delta": -1
+        },
+        {
+          "op": "add_prop",
+          "entity": "@target",
+          "label": "Item",
+          "prop": "takings",
+          "delta": 1
+        },
+        {
+          "op": "unlink",
+          "a": "@actor",
+          "a_label": "Person",
+          "b": "@tool",
+          "b_label": "Item",
+          "rel": "HAS_ITEM"
+        },
+        {
+          "op": "link",
+          "a": "@target.owner",
+          "a_label": "Person",
+          "b": "@tool",
+          "b_label": "Item",
+          "rel": "HAS_ITEM"
+        },
+        {
+          "op": "spawn_item",
+          "archetype": "beer",
+          "held_by": "@actor"
+        }
+      ]
+    },
+    {
+      "target": "kind:herbal_counter",
+      "consume": false,
+      "preconditions": [
+        {
+          "op": "prop_gte",
+          "entity": "@target",
+          "label": "Item",
+          "prop": "stock",
+          "value": 1
+        }
+      ],
+      "ops": [
+        {
+          "op": "add_prop",
+          "entity": "@target",
+          "label": "Item",
+          "prop": "stock",
+          "delta": -1
+        },
+        {
+          "op": "add_prop",
+          "entity": "@target",
+          "label": "Item",
+          "prop": "takings",
+          "delta": 1
+        },
+        {
+          "op": "unlink",
+          "a": "@actor",
+          "a_label": "Person",
+          "b": "@tool",
+          "b_label": "Item",
+          "rel": "HAS_ITEM"
+        },
+        {
+          "op": "link",
+          "a": "@target.owner",
+          "a_label": "Person",
+          "b": "@tool",
+          "b_label": "Item",
+          "rel": "HAS_ITEM"
+        },
+        {
+          "op": "spawn_item",
+          "archetype": "herbal_tea",
+          "held_by": "@actor"
+        }
+      ]
+    },
+    {
+      "target": "kind:wholesale",
+      "consume": false,
+      "preconditions": [
+        {
+          "op": "prop_gte",
+          "entity": "@target",
+          "label": "Item",
+          "prop": "stock",
+          "value": 1
+        }
+      ],
+      "ops": [
+        {
+          "op": "add_prop",
+          "entity": "@target",
+          "label": "Item",
+          "prop": "stock",
+          "delta": -1
+        },
+        {
+          "op": "add_prop",
+          "entity": "@target",
+          "label": "Item",
+          "prop": "takings",
+          "delta": 1
+        },
+        {
+          "op": "unlink",
+          "a": "@actor",
+          "a_label": "Person",
+          "b": "@tool",
+          "b_label": "Item",
+          "rel": "HAS_ITEM"
+        },
+        {
+          "op": "link",
+          "a": "@target.owner",
+          "a_label": "Person",
+          "b": "@tool",
+          "b_label": "Item",
+          "rel": "HAS_ITEM"
+        },
+        {
+          "op": "spawn_item",
+          "archetype": "supplies",
+          "held_by": "@actor"
+        }
+      ]
+    }
+  ]
+}

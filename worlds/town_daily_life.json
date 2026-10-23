@@ -112,6 +112,13 @@
     },
     {
       "name": "Rowan",
+      "desire": "To find the grove his father planted, so the camp never has to fell the last old trees.",
+      "fear": "Being the one who let the forest die and forced the camp to move on.",
+      "secret": "He hurt his back last winter and can no longer carry what he pretends to.",
+      "bonds": {
+        "Ash": "fiercely protective; he carried Ash out of the fire that took the old camp",
+        "Reed": "old friends who bicker; Reed's loose talk once cost Rowan a promise he still regrets"
+      },
       "located_at": "Forest",
       "role": "npc",
       "brain": "routine",
@@ -191,6 +198,13 @@
     },
     {
       "name": "Sage",
+      "desire": "To see the whole camp eat together every night without anyone counting portions.",
+      "fear": "Hunger turning friends against each other, as it did in the hard winter.",
+      "secret": "She hid a sack of dried berries for a lean season and has told no one, not even Ash.",
+      "bonds": {
+        "Ash": "dear friend; they promised each other the fire would never go out on their watch",
+        "Rowan": "worries about him; he works himself to the bone and won't let anyone help"
+      },
       "located_at": "BerryGrove",
       "role": "npc",
       "brain": "llm",
@@ -271,6 +285,14 @@
     },
     {
       "name": "Ash",
+      "desire": "To get through one night without waking in a panic, and to be trusted rather than pitied.",
+      "fear": "The dark. The fire went out the night the old camp burned, and Ash's sister was lost in it.",
+      "secret": "Ash sometimes burns tomorrow's wood just to keep the light high, because the dark is unbearable.",
+      "bonds": {
+        "Rowan": "owes him their life, and hates having to beg him for wood every single day",
+        "Sage": "closest friend; the only one Ash lets see them cry",
+        "Reed": "suspects Reed knows about the fear, and dreads it spreading around camp"
+      },
       "located_at": "CampfireClearing",
       "role": "npc",
       "brain": "llm",
@@ -352,6 +374,13 @@
     },
     {
       "name": "Reed",
+      "desire": "To be needed by someone, not merely useful to everyone.",
+      "fear": "Being left behind when the camp moves on, as his own family once left him.",
+      "secret": "He knows how badly Ash fears the dark and has kept it to himself, though it would make a juicy story.",
+      "bonds": {
+        "Ash": "keeps their secret; feels a quiet tenderness he has never said aloud",
+        "Rowan": "old friends who bicker; Rowan still holds a grudge over a broken promise"
+      },
       "located_at": "RiverBank",
       "role": "npc",
       "brain": "routine",
@@ -925,6 +954,16 @@
   ],
   "facts": [
     {
+      "name": "AxemenWoodpile",
+      "text": "The Axemen keep a hidden woodpile deep in the forest for their own cold nights.",
+      "secret_level": 2,
+      "known_by": [
+        "Rowan",
+        "Reed"
+      ],
+      "faction": "Axemen"
+    },
+    {
       "name": "FireMustNeverDie",
       "text": "If the campfire dies at night, the cold and dark will scatter the camp. Ash is responsible for watching it.",
       "secret_level": 0,
@@ -1018,6 +1057,119 @@
       "a": "Rowan",
       "rel": "FRIENDS_WITH",
       "b": "Ash"
+    }
+  ],
+  "factions": [
+    {
+      "name": "EmberCamp",
+      "territory": {"CampfireClearing": 6, "Shelter": 5, "RiverBank": 3},
+      "traits": [{"id": "zealous", "why": "the fire must never die — a vow made the night the old camp burned"}],
+      "join_policy": "open",
+      "join_standing": 1,
+      "kind": "town",
+      "scale": "large",
+      "description": "Everyone who lives by the eternal fire.",
+      "goal": "Keep the eternal fire burning and everyone fed",
+      "members": [
+        {
+          "name": "Rowan",
+          "role": "lumberjack",
+          "loyalty": 7
+        },
+        {
+          "name": "Sage",
+          "role": "gatherer",
+          "loyalty": 8
+        },
+        {
+          "name": "Ash",
+          "role": "firekeeper",
+          "loyalty": 9
+        },
+        {
+          "name": "Reed",
+          "role": "hauler",
+          "loyalty": 6
+        }
+      ]
+    },
+    {
+      "name": "Axemen",
+      "territory": {"Forest": 6, "CampfireClearing": 2},
+      "traits": [{"id": "militant", "why": "they settle arguments with fists, the way Rowan's father did"}, {"id": "expansionist", "why": "always pushing deeper into the forest for wood"}],
+      "join_policy": "trial",
+      "join_standing": 3,
+      "trial": {"item": "firewood", "text": "Nobody runs with the Axemen until they have hauled wood to the boss with their own hands."},
+      "kind": "gang",
+      "scale": "small",
+      "parent": "EmberCamp",
+      "description": "The woodcutters. Rough, loyal to each other, quick to take offence.",
+      "goal": "Wood comes first — whoever hauls the logs eats first",
+      "members": [
+        {
+          "name": "Rowan",
+          "role": "boss",
+          "loyalty": 9
+        },
+        {
+          "name": "Reed",
+          "role": "runner",
+          "loyalty": 6
+        }
+      ],
+      "relations": [
+        {
+          "with": "BerryCircle",
+          "stance": "rival",
+          "reason": "they fight every night over who eats first at the fire"
+        }
+      ]
+    },
+    {
+      "name": "BerryCircle",
+      "territory": {"BerryGrove": 6, "CampfireClearing": 2},
+      "traits": [{"id": "pacifist", "why": "Sage believes food shared at the fire keeps the camp kind"}, {"id": "welcoming", "why": "anyone who comes hungry to the fire gets a share"}],
+      "join_policy": "sponsor",
+      "join_standing": 3,
+      "kind": "crew",
+      "scale": "small",
+      "parent": "EmberCamp",
+      "description": "Gatherers and the fire's keeper, who share every meal equally.",
+      "goal": "Food is shared equally at the fire, no matter who worked hardest",
+      "members": [
+        {
+          "name": "Sage",
+          "role": "elder",
+          "loyalty": 8
+        },
+        {
+          "name": "Ash",
+          "role": "keeper",
+          "loyalty": 7
+        }
+      ]
+    },
+    {
+      "name": "OldCampKin",
+      "territory": {"Shelter": 3},
+      "traits": [{"id": "insular", "why": "the two who survived the fire share their grief with no one else"}],
+      "join_policy": "closed",
+      "kind": "family",
+      "scale": "small",
+      "description": "The last two who walked out of the old camp's fire together.",
+      "goal": "Never lose anyone to fire again",
+      "members": [
+        {
+          "name": "Rowan",
+          "role": "guardian",
+          "loyalty": 8
+        },
+        {
+          "name": "Ash",
+          "role": "ward",
+          "loyalty": 9
+        }
+      ]
     }
   ]
 }

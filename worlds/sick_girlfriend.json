@@ -32,6 +32,9 @@
   "persons": [
     {
       "name": "Traveler",
+      "bonds": {
+        "Lila": "the person you love; you would walk through any forest for her"
+      },
       "located_at": "Home",
       "role": "player",
       "personality": "worried, determined, careful",
@@ -46,6 +49,13 @@
     },
     {
       "name": "Lila",
+      "desire": "To be well enough to walk to the lake with Traveler again, like their first spring together.",
+      "fear": "Becoming a burden, and watching Traveler wear himself out caring for her.",
+      "secret": "She felt ill for days before she collapsed, and hid it so no one would worry.",
+      "bonds": {
+        "Traveler": "deeply in love; worries more for him than for herself",
+        "DoctorRowan": "trusts him completely; he delivered her the night she was born"
+      },
       "located_at": "Home",
       "role": "npc",
       "personality": "gentle, tired, trusting",
@@ -64,6 +74,12 @@
     },
     {
       "name": "DoctorRowan",
+      "desire": "To train an apprentice before his hands grow too unsteady to work.",
+      "fear": "Losing another patient to fever, as he once lost his own son.",
+      "secret": "His hands tremble now, and he sends others into the forest because he can no longer make the walk.",
+      "bonds": {
+        "Lila": "has known her since birth; treats her like family"
+      },
       "located_at": "Clinic",
       "role": "npc",
       "personality": "precise, calm, helpful",
@@ -213,6 +229,58 @@
       "a": "DoctorRowan",
       "rel": "KNOWS",
       "b": "Lila"
+    }
+  ],
+  "factions": [
+    {
+      "name": "Hearthvale",
+      "territory": {"Clinic": 5, "Home": 4},
+      "traits": [{"id": "welcoming", "why": "a village that looks after its own and its neighbours"}],
+      "join_policy": "open",
+      "join_standing": 0,
+      "kind": "town",
+      "scale": "large",
+      "description": "The small village of the clinic and the forest edge.",
+      "goal": "Look after its own",
+      "members": [
+        {
+          "name": "DoctorRowan",
+          "role": "doctor",
+          "loyalty": 7
+        },
+        {
+          "name": "Lila",
+          "role": "villager",
+          "loyalty": 6
+        },
+        {
+          "name": "Traveler",
+          "role": "villager",
+          "loyalty": 6
+        }
+      ]
+    },
+    {
+      "name": "LilaHousehold",
+      "territory": {"Home": 6},
+      "join_policy": "closed",
+      "kind": "family",
+      "scale": "small",
+      "parent": "Hearthvale",
+      "description": "Lila and Traveler's home.",
+      "goal": "Get Lila well again",
+      "members": [
+        {
+          "name": "Traveler",
+          "role": "partner",
+          "loyalty": 10
+        },
+        {
+          "name": "Lila",
+          "role": "partner",
+          "loyalty": 10
+        }
+      ]
     }
   ]
 }

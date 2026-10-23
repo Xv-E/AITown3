@@ -521,7 +521,9 @@ class GameLoop:
         try:
             from world_systems import tick_world_systems
 
-            world_report = tick_world_systems(self.world, float(dt), self.sim_time) or {}
+            world_report = tick_world_systems(
+                self.world, float(dt), self.sim_time, memory=self.memory
+            ) or {}
         except Exception as e:
             if self.verbose:
                 print(f"[WARN] world_systems: {e}")
@@ -1277,7 +1279,7 @@ class GameLoop:
         try:
             from mission import sync_quest_progress
 
-            note = sync_quest_progress(self.world, agent.name)
+            note = sync_quest_progress(self.world, agent.name, memory=self.memory)
             if note and self.verbose:
                 print(f"[QUEST] [{agent.name}] {note}")
         except Exception:
@@ -2791,6 +2793,24 @@ class GameLoop:
         ok, reason = registry.execute(self.world, action_name, **kwargs)
         target = args[-1] if args else None
         metadata: Dict[str, Any] = {}
+        if ok:
+            try:
+                from content import get_content
+                from factions import on_action
+
+                changes = on_action(
+                    self.world, get_content().capability_of(action_name), list(args), memory=self.memory
+                )
+                if changes:
+                    metadata["faction_changes"] = changes
+                from street_economy import on_action as economy_action
+
+                money = economy_action(self.world, action_name, list(args), memory=self.memory)
+                if money:
+                    metadata["economy"] = money
+                    reason = f"{reason} ({'; '.join(money)})"
+            except Exception:
+                pass
         if ok and action_name == act("converse") and len(args) >= 3:
             try:
                 from dialogue_service import handle_talk_dialogue

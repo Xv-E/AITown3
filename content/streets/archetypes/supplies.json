@@ -1,0 +1,75 @@
+{
+  "archetype": "supplies",
+  "name": "Supplies",
+  "item_kind": "supplies",
+  "portable": true,
+  "value": 4,
+  "description": "A crate of noodles, fish, tea leaves, bottles and herbs from the wharf. Restocks any shop by 4.",
+  "effects_on": [
+    {
+      "target": "kind:noodle_stall",
+      "consume": true,
+      "ops": [
+        {
+          "op": "add_prop",
+          "entity": "@target",
+          "label": "Item",
+          "prop": "stock",
+          "delta": 4
+        }
+      ]
+    },
+    {
+      "target": "kind:fishball_cart",
+      "consume": true,
+      "ops": [
+        {
+          "op": "add_prop",
+          "entity": "@target",
+          "label": "Item",
+          "prop": "stock",
+          "delta": 4
+        }
+      ]
+    },
+    {
+      "target": "kind:tea_house",
+      "consume": true,
+      "ops": [
+        {
+          "op": "add_prop",
+          "entity": "@target",
+          "label": "Item",
+          "prop": "stock",
+          "delta": 4
+        }
+      ]
+    },
+    {
+      "target": "kind:bar_counter",
+      "consume": true,
+      "ops": [
+        {
+          "op": "add_prop",
+          "entity": "@target",
+          "label": "Item",
+          "prop": "stock",
+          "delta": 4
+        }
+      ]
+    },
+    {
+      "target": "kind:herbal_counter",
+      "consume": true,
+      "ops": [
+        {
+          "op": "add_prop",
+          "entity": "@target",
+          "label": "Item",
+          "prop": "stock",
+          "delta": 4
+        }
+      ]
+    }
+  ]
+}

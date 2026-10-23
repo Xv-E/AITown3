@@ -151,6 +151,8 @@ class DirectorPlanRequest(BaseModel):
     template_id: Optional[str] = None
     # Optional partial blueprint from the user; AI completes it
     draft: Optional[Dict[str, Any]] = None
+    # 手动配置的地图（maps/ 或 worlds/ 的 id，或 "current"）；不填 = 当前地图
+    map_id: Optional[str] = None
 
 
 class DirectorBuildRequest(BaseModel):
@@ -163,6 +165,7 @@ class DirectorBuildRequest(BaseModel):
     template_id: Optional[str] = None
     blueprint: Optional[Dict[str, Any]] = None
     draft: Optional[Dict[str, Any]] = None
+    map_id: Optional[str] = None
 
 
 _sim_task: Optional[asyncio.Task] = None
@@ -379,6 +382,60 @@ def api_player_position(req: PlayerPositionRequest):
     return result
 
 
+class FactionJoinRequest(BaseModel):
+    via: Optional[str] = None  # 向哪位在场成员开口；不填则自动找
+
+
+def _faction_call(fn_name: str, faction: str, **kwargs):
+    import sys as _sys
+    agent_path = str(_AITOWN3 / "agent")
+    if agent_path not in _sys.path:
+        _sys.path.insert(0, agent_path)
+    import factions as _factions
+    from llm_service import get_web_memory
+
+    world = get_world()
+    player = get_player(world)
+    if player is None:
+        raise HTTPException(status_code=404, detail="No player character in the current world")
+    fn = getattr(_factions, fn_name)
+    return fn(world, player["name"], faction, memory=get_web_memory(), **kwargs)
+
+
+@app.post("/api/factions/{name}/join")
+def api_faction_join(name: str, req: FactionJoinRequest):
+    """玩家向在场成员申请加入势力：joined | trial_started | refused。"""
+    try:
+        return _faction_call("request_join", name, via=(req.via or "").strip() or None)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.post("/api/factions/{name}/leave")
+def api_faction_leave(name: str):
+    try:
+        return _faction_call("leave_faction", name)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.post("/api/factions/tick")
+def api_faction_tick(ticks: int = 1):
+    """立刻推进势力历史若干轮（每轮 = FACTION_TICK_HOURS 游戏小时）。"""
+    try:
+        import faction_sim
+        from llm_service import get_web_memory
+
+        events = faction_sim.force_tick(get_world(), ticks=ticks, memory=get_web_memory())
+        return {"ok": True, "events": events, "chronicle": faction_sim.chronicle(get_world(), 12)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
 @app.get("/api/play/state")
 def api_play_state():
     """Fetch full play state (player, scene, actions, map) in one call."""
@@ -573,6 +630,35 @@ async def api_execute(req: ExecuteActionRequest):
                     reason = f"{reason}. {done}"
             except Exception:
                 pass
+            try:
+                from inner_life import settle_favors
+                from llm_service import get_web_memory
+
+                settled = settle_favors(world, memory=get_web_memory())
+                if settled:
+                    reason = f"{reason} (favor kept: {'; '.join(settled)})"
+            except Exception:
+                pass
+        faction_changes = []
+        if ok:
+            try:
+                import sys as _sys
+                agent_path = str(_AITOWN3 / "agent")
+                if agent_path not in _sys.path:
+                    _sys.path.insert(0, agent_path)
+                from factions import on_action
+                from llm_service import get_web_memory
+
+                faction_changes = on_action(world, capability, positional, memory=get_web_memory())
+                if faction_changes:
+                    reason = f"{reason} (factions: {'; '.join(faction_changes)})"
+                from street_economy import on_action as economy_action
+
+                money = economy_action(world, req.action, positional, memory=get_web_memory())
+                if money:
+                    reason = f"{reason} ({'; '.join(money)})"
+            except Exception:
+                pass
         interaction = None
         if ok and req.action == "interact":
             try:
@@ -594,6 +680,7 @@ async def api_execute(req: ExecuteActionRequest):
             "params": kwargs,
             "dialogue": dialogue,
             "interaction": interaction,
+            "faction_changes": faction_changes,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -1224,6 +1311,17 @@ async def api_load_world(world_id: str, clear: bool = True):
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+@app.get("/api/maps")
+def api_maps():
+    """手动配置的地图（导演只在这些地图上排布事件）。"""
+    try:
+        from director.maps import list_maps
+
+        return {"maps": list_maps(get_world())}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
 @app.post("/api/director/plan")
 async def api_director_plan(body: DirectorPlanRequest):
     """Plan/complete an event blueprint from user draft (does not write to world)."""
@@ -1235,6 +1333,8 @@ async def api_director_plan(body: DirectorPlanRequest):
                 body.prompt,
                 force_mock=body.force_mock,
                 draft=body.draft,
+                map_id=body.map_id,
+                world=get_world(),
             ).to_dict()
 
         loop = asyncio.get_running_loop()
@@ -1282,6 +1382,7 @@ async def api_director_build(body: DirectorBuildRequest):
                 clear=body.clear,
                 force_mock=body.force_mock,
                 draft=body.draft,
+                map_id=body.map_id,
             )
 
         loop = asyncio.get_running_loop()

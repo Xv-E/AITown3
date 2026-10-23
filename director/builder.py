@@ -17,13 +17,67 @@ logger = logging.getLogger(__name__)
 
 
 def _entity_label_for_name(world: "Neo4jWorld", name: str) -> Optional[str]:
-    for label in ("Person", "Location", "Item", "Quest", "Fact", "Rumor"):
+    for label in ("Person", "Location", "Item", "Quest", "Fact", "Rumor", "Faction"):
         try:
             if world.get_entity_by_name(name, label=label):
                 return label
         except Exception:
             continue
     return None
+
+
+def _join_props(f) -> Dict[str, Any]:
+    props: Dict[str, Any] = {"status": "active"}
+    if getattr(f, "traits", None):
+        props["traits"] = json.dumps(list(f.traits), ensure_ascii=False)
+    if getattr(f, "wage", 0):
+        props["wage"] = int(f.wage)
+    if getattr(f, "join_policy", ""):
+        props["join_policy"] = f.join_policy
+    if getattr(f, "join_standing", None) is not None:
+        props["join_standing"] = float(f.join_standing)
+    if getattr(f, "trial", None):
+        props["trial"] = json.dumps(dict(f.trial), ensure_ascii=False)
+    return props
+
+
+def _build_factions(world: "Neo4jWorld", factions) -> None:
+    """Faction 节点 + MEMBER_OF{role,loyalty} + PART_OF + FACTION_REL{stance,reason} + STANDING{value}。"""
+    for f in factions or []:
+        world.add_entity(
+            f.name,
+            entity_type="Faction",
+            kind=f.kind,
+            scale=f.scale,
+            description=f.description,
+            goal=f.goal,
+            values=f.values,
+            **_join_props(f),
+        )
+    for f in factions or []:
+        if f.parent:
+            world.link_entities(f.name, "Faction", f.parent, "Faction", "PART_OF")
+        for m in f.members:
+            world.link_entities(
+                m["name"], "Person", f.name, "Faction", "MEMBER_OF",
+                role=m["role"], loyalty=float(m["loyalty"]),
+            )
+        for r in f.relations:
+            world.link_entities(
+                f.name, "Faction", r["with"], "Faction", "FACTION_REL",
+                stance=r["stance"], reason=r["reason"],
+            )
+        for person, value in f.standing.items():
+            world.link_entities(person, "Person", f.name, "Faction", "STANDING", value=float(value))
+        for loc, strength in (getattr(f, "territory", None) or {}).items():
+            world.link_entities(f.name, "Faction", loc, "Location", "CONTROLS", strength=float(strength))
+    # 每处地点的当前控制者（最强的一方），供界面与 prompt 快速读取
+    try:
+        from faction_sim import refresh_control
+
+        refresh_control(world)
+    except Exception:
+        logger.debug("refresh_control skipped", exc_info=True)
 
 
 def build_from_blueprint(
@@ -114,6 +168,11 @@ def build_from_blueprint(
             props["accepts_from"] = json.dumps(list(person.accepts_from), ensure_ascii=False)
         if getattr(person, "routine", None):
             props["routine"] = json.dumps(list(person.routine), ensure_ascii=False)
+        for key in ("desire", "fear", "secret"):
+            if getattr(person, key, ""):
+                props[key] = getattr(person, key)
+        if getattr(person, "bonds", None):
+            props["bonds"] = json.dumps(dict(person.bonds), ensure_ascii=False)
         world.add_entity(person.name, entity_type="Person", **props)
         world.link_entities(person.name, "Person", person.located_at, "Location", "LOCATED_AT")
         world.link_entities(person.name, "Person", person.located_at, "Location", "VISITED")
@@ -206,14 +265,15 @@ def build_from_blueprint(
             if label:
                 world.link_entities(quest.name, "Quest", target, label, "INVOLVES")
 
+    # Factions（先于 Fact：内情可挂在势力上）
+    _build_factions(world, bp.factions)
+
     # Facts
     for fact in bp.facts:
-        world.add_entity(
-            fact.name,
-            entity_type="Fact",
-            text=fact.text,
-            secret_level=fact.secret_level,
-        )
+        fact_props: Dict[str, Any] = {"text": fact.text, "secret_level": fact.secret_level}
+        if getattr(fact, "faction", None):
+            fact_props["faction"] = fact.faction
+        world.add_entity(fact.name, entity_type="Fact", **fact_props)
         for person in fact.known_by:
             if world.get_entity_by_name(person, label="Person"):
                 world.link_entities(person, "Person", fact.name, "Fact", "KNOWS_FACT")
@@ -235,8 +295,8 @@ def build_from_blueprint(
             world.link_entities(a, "Person", b, "Item", rel)
         else:
             world.link_entities(a, "Person", b, "Person", rel)
-            if rel == "FRIENDS_WITH":
-                world.link_entities(b, "Person", a, "Person", "FRIENDS_WITH")
+            if rel in ("FRIENDS_WITH", "FAMILY_OF", "RIVALS_WITH"):
+                world.link_entities(b, "Person", a, "Person", rel)
 
     try:
         import sys
@@ -284,6 +344,7 @@ def build_from_blueprint(
             "rumors": len(bp.rumors),
             "adjacencies": len(bp.adjacencies),
             "social": len(bp.social),
+            "factions": len(bp.factions),
         },
         "blueprint": bp.to_dict(),
     }
@@ -333,8 +394,9 @@ def plan_and_build(
     template_id: Optional[str] = None,
     world_id: Optional[str] = None,
     draft: Optional[Dict[str, Any]] = None,
+    map_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """规划 + 构建一站式入口。也可直接指定 world_id 加载模板世界。"""
+    """规划 + 构建一站式入口。也可直接指定 world_id 加载模板世界。地图取自 map_id / 当前地图。"""
     from .planner import plan_event
     from .world_loader import load_world
 
@@ -348,5 +410,7 @@ def plan_and_build(
             template_id=template_id,
             world_id=world_id,
             draft=draft,
+            map_id=map_id,
+            world=world,
         )
     return build_from_blueprint(world, blueprint, clear=clear)

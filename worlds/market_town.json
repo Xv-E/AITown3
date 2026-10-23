@@ -61,6 +61,13 @@
     },
     {
       "name": "Mira",
+      "desire": "To buy the empty shop beside the Warehouse and stop living from stall to stall.",
+      "fear": "Ending up like her father, whose shop failed the winter its shelves went bare.",
+      "secret": "She still owes Bruno three months of coin from a loan that saved her stall, and has told no one.",
+      "bonds": {
+        "Bruno": "grateful and embarrassed; he lent her money when the stall nearly folded last winter and never asks for it back",
+        "Tilda": "fond but impatient; Tilda's late deliveries cost her customers, yet Tilda never charges her full price"
+      },
       "located_at": "Cottages",
       "role": "npc",
       "personality": "shrewd, cheerful, organised",
@@ -84,6 +91,13 @@
     },
     {
       "name": "Bruno",
+      "desire": "To cook one feast good enough that his daughter in the city would come home for it.",
+      "fear": "Cooking for an empty room again, like the quiet months after his wife died.",
+      "secret": "A fever last spring took most of his sense of smell; he tastes every dish twice, terrified someone will notice.",
+      "bonds": {
+        "Tilda": "his closest friend; she sat with him every night the winter his wife died",
+        "Mira": "protective of her; he lent her money and would never ask for it back, which she hates"
+      },
       "located_at": "Cottages",
       "role": "npc",
       "personality": "gruff, proud of his cooking, generous",
@@ -106,6 +120,13 @@
     },
     {
       "name": "Tilda",
+      "desire": "To save enough to buy the field she works instead of renting it from an absent landlord.",
+      "fear": "A bad harvest — her brother lost his farm that way and left town in shame.",
+      "secret": "She quietly gives bruised vegetables to a hungry family, and the landlord counts every crate.",
+      "bonds": {
+        "Bruno": "best friend; she keeps him company after closing so he is never alone",
+        "Mira": "likes her but feels judged; Mira counts things Tilda would rather just share"
+      },
       "located_at": "Cottages",
       "role": "npc",
       "personality": "hard-working, talkative, always hungry",
@@ -170,6 +191,16 @@
   ],
   "facts": [
     {
+      "name": "GuildPriceDeal",
+      "text": "The guild agreed in secret to hold vegetable prices down until the farmers give in.",
+      "secret_level": 2,
+      "known_by": [
+        "Mira",
+        "Bruno"
+      ],
+      "faction": "TradersGuild"
+    },
+    {
       "name": "BreadForACoin",
       "text": "Mira's stall sells bread for one coin; crates from the Warehouse restock it.",
       "secret_level": 0,
@@ -188,5 +219,86 @@
     { "a": "Mira", "rel": "KNOWS", "b": "Tilda" },
     { "a": "Bruno", "rel": "KNOWS", "b": "Tilda" },
     { "a": "Tilda", "rel": "FRIENDS_WITH", "b": "Bruno" }
+  ],
+  "factions": [
+    {
+      "name": "MarketTown",
+      "territory": {"TownSquare": 6, "Cottages": 5},
+      "traits": [{"id": "welcoming", "why": "a market town lives on strangers passing through"}],
+      "join_policy": "open",
+      "join_standing": 0,
+      "kind": "town",
+      "scale": "large",
+      "description": "Everyone who lives, trades or farms around the square.",
+      "goal": "Keep the market open and the town fed",
+      "members": [
+        {
+          "name": "Mira",
+          "role": "stallholder",
+          "loyalty": 6
+        },
+        {
+          "name": "Bruno",
+          "role": "tavern cook",
+          "loyalty": 7
+        },
+        {
+          "name": "Tilda",
+          "role": "farmer",
+          "loyalty": 5
+        }
+      ]
+    },
+    {
+      "name": "TradersGuild",
+      "territory": {"Market": 6, "Tavern": 5, "Warehouse": 4},
+      "traits": [{"id": "mercantile", "why": "they set every price in town"}, {"id": "secretive", "why": "they keep their price deal with each other quiet"}],
+      "join_policy": "trial",
+      "join_standing": 3,
+      "trial": {"item": "coin", "text": "Guild dues: one coin into the treasurer's hand, and you trade under the guild's prices."},
+      "kind": "guild",
+      "scale": "medium",
+      "parent": "MarketTown",
+      "description": "Stall and tavern keepers who set the town's prices together.",
+      "goal": "Full shelves and steady prices, bought cheap from the farms",
+      "members": [
+        {
+          "name": "Mira",
+          "role": "treasurer",
+          "loyalty": 8
+        },
+        {
+          "name": "Bruno",
+          "role": "member",
+          "loyalty": 5
+        }
+      ],
+      "relations": [
+        {
+          "with": "FarmersGrange",
+          "stance": "rival",
+          "reason": "they argue every week over what a crate of vegetables is worth"
+        }
+      ]
+    },
+    {
+      "name": "FarmersGrange",
+      "territory": {"Farm": 6, "Warehouse": 2},
+      "traits": [{"id": "vengeful", "why": "Tilda's brother lost his farm to guild prices"}, {"id": "insular", "why": "the field families only trust those who work the soil"}],
+      "join_policy": "sponsor",
+      "join_standing": 2,
+      "kind": "crew",
+      "scale": "small",
+      "parent": "MarketTown",
+      "description": "The few families who still work the fields outside town.",
+      "goal": "A fair price for every crate the fields produce",
+      "members": [
+        {
+          "name": "Tilda",
+          "role": "spokeswoman",
+          "loyalty": 8
+        }
+      ]
+    }
   ]
 }

@@ -1,0 +1,8 @@
+{
+  "archetype": "noodles",
+  "name": "Noodles",
+  "item_kind": "food",
+  "portable": true,
+  "value": 12,
+  "description": "A bowl of wonton noodles."
+}

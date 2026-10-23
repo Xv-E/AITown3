@@ -555,6 +555,13 @@ class WorldSimulator:
             state.decision_cooldown_until = 0.0
             state.replan_backoff_until = 0.0
         self.sim_time = loop.sim_time
+        # 跳时间时势力也在发展（一次最多补算几轮）
+        try:
+            from faction_sim import maybe_tick
+
+            maybe_tick(world, loop.sim_time, memory=getattr(loop, "memory", None))
+        except Exception:
+            pass
         return self.sim_time
 
     def _tick_result_to_agent_entry(self, entry: Dict[str, Any]) -> Dict[str, Any]:

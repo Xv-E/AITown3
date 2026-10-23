@@ -1,0 +1,15 @@
+{
+  "archetype": "rent_book",
+  "item_kind": "rent_book",
+  "portable": false,
+  "value": 0,
+  "description": "The landlord's rent book. Every tenant owes rent each day.",
+  "script": {
+    "lore": "Tenants pay their landlord rent every day; whoever cannot pay falls behind.",
+    "initial_state": {
+      "landlord": "",
+      "rent": 1,
+      "tenants": []
+    }
+  }
+}

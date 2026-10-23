@@ -12,7 +12,17 @@ PROFILE_FIELDS: Tuple[Tuple[str, str], ...] = (
     ("background", "Background"),
     ("values", "Values"),
     ("mood", "Mood"),
+    ("factions", "Factions"),
 )
+
+
+def _factions_text(world, name: str) -> str:
+    try:
+        from factions import membership_summary
+
+        return membership_summary(world, name)
+    except Exception:
+        return ""
 
 
 def _format_values(values: Any) -> str:
@@ -63,6 +73,7 @@ def get_character_profile(world, name: str, *, live_goal: Optional[str] = None) 
         "background": profile.background,
         "values": profile.values,
         "mood": profile.mood,
+        "factions": _factions_text(world, name),
     }
     for key, label in PROFILE_FIELDS:
         val = raw.get(key)

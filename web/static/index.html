@@ -100,7 +100,10 @@
             </div>
             <div class="action-btns" id="action-btns"></div>
             <div class="inv-row">Inventory: <strong id="inv-text">—</strong></div>
+            <div class="quest-row streets-row" id="streets-row" hidden>Streets: <strong id="streets-text">—</strong></div>
             <div class="quest-row">Quest: <strong id="quest-text">—</strong></div>
+            <div class="quest-row factions-row">Factions: <strong id="faction-text">—</strong></div>
+            <div class="quest-row chronicle-row">Chronicle: <strong id="chronicle-text">—</strong></div>
             <div class="quest-row clues-row">Clues: <strong id="clue-text">—</strong></div>
           </div>
         </div>
@@ -173,6 +176,8 @@
       <p class="hint">① Sketch the story → ② AI fills in four steps (skeleton→world→cast→mechanics) with solvability checks → ③ Review/edit JSON → ④ Confirm to write the world. For preset levels use “Template worlds”.</p>
       <p class="director-status" id="director-status"></p>
 
+      <label for="director-map">Map (hand-configured in maps/ or worlds/; the Director never invents places)</label>
+      <select id="director-map"></select>
       <label for="director-prompt">Event draft (rough is fine)</label>
       <textarea id="director-prompt" rows="4">A traveler must get a key from storage, then open the vault door.</textarea>
 
