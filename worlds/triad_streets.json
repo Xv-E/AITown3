@@ -116,7 +116,7 @@
     },
     {
       "name": "CornerStore",
-      "description": "A cramped corner store (士多): cigarettes, soda, phone cards and credit for regulars.",
+      "description": "A cramped corner store: cigarettes, soda, phone cards and credit for regulars.",
       "tags": "shop,social",
       "indoor": true,
       "parent": "TeaHouseRow"
@@ -127,13 +127,93 @@
       "tags": "food,social",
       "indoor": true,
       "parent": "TeaHouseRow"
+    },
+    {
+      "name": "TeaHouse",
+      "description": "Uncle Wing's Golden Tea House: marble tables, milk tea in thick cups, the racing pages and every rumour on the street.",
+      "tags": "food,social,work",
+      "indoor": true,
+      "parent": "TeaHouseRow"
+    },
+    {
+      "name": "LuckyBar",
+      "description": "Miss Choi's Lucky Bar: a long counter, a jukebox, and a back booth where the Tigers drink on credit.",
+      "tags": "nightlife,social,work",
+      "indoor": true,
+      "parent": "NeonStrip"
+    },
+    {
+      "name": "HerbalShop",
+      "description": "Mr Chow's herbal shop: drawers of dried roots, a clay pot always simmering, and a cot in the back room where he sleeps.",
+      "tags": "medicine,work,home",
+      "indoor": true,
+      "parent": "HerbalLane"
+    },
+    {
+      "name": "DockOffice",
+      "description": "Ho's office at the head of the wharf: a desk of ledgers, a kettle, and a camp bed for nights the boats run late.",
+      "tags": "work,home",
+      "indoor": true,
+      "parent": "Wharf"
+    },
+    {
+      "name": "TigerDen",
+      "description": "The Black Tigers' workshop inside the garage yard: car lifts, a heavy bag, mattresses on the oil-stained floor.",
+      "tags": "hideout,home",
+      "indoor": true,
+      "parent": "GarageYard"
+    },
+    {
+      "name": "LauFlat",
+      "description": "Mrs Lau's two rooms on the second floor: a shrine to her husband, Ah Kit's bunk, the smell of stock bones.",
+      "tags": "home",
+      "indoor": true,
+      "parent": "NoodleAlley"
+    },
+    {
+      "name": "WingFlat",
+      "description": "Uncle Wing's tidy flat: framed photographs of the tea house in 1962 and a locked drawer.",
+      "tags": "home",
+      "indoor": true,
+      "parent": "NoodleAlley"
+    },
+    {
+      "name": "ChoiFlat",
+      "description": "Miss Choi's flat: silk curtains, too many shoes, and a window she keeps shut.",
+      "tags": "home",
+      "indoor": true,
+      "parent": "NoodleAlley"
+    },
+    {
+      "name": "FongFlat",
+      "description": "Auntie Fong's flat: lucky charms on every door frame and a radio always on.",
+      "tags": "home",
+      "indoor": true,
+      "parent": "NoodleAlley"
+    },
+    {
+      "name": "MaFlat",
+      "description": "Big Ma's cubicle flat: a bed, a hotplate and the cart's spare wheel.",
+      "tags": "home",
+      "indoor": true,
+      "parent": "NoodleAlley"
+    },
+    {
+      "name": "FaiFlat",
+      "description": "The cramped room Ah Fai shares with his little sister; her school books on the only table.",
+      "tags": "home",
+      "indoor": true,
+      "parent": "NoodleAlley"
+    },
+    {
+      "name": "YanFlat",
+      "description": "A bed-space cubicle Ah Yan rents by the month; a photo of her mother taped to the wall.",
+      "tags": "home",
+      "indoor": true,
+      "parent": "NoodleAlley"
     }
   ],
   "adjacencies": [
-    {
-      "a": "BackAlley",
-      "b": "GarageYard"
-    },
     {
       "a": "BackAlley",
       "b": "NeonStrip"
@@ -147,8 +227,20 @@
       "b": "NoodleAlley"
     },
     {
+      "a": "ChoiFlat",
+      "b": "Tenements"
+    },
+    {
       "a": "CornerStore",
       "b": "TeaHouseRow"
+    },
+    {
+      "a": "DockOffice",
+      "b": "Wharf"
+    },
+    {
+      "a": "FaiFlat",
+      "b": "Tenements"
     },
     {
       "a": "FerryPier",
@@ -171,8 +263,24 @@
       "b": "Wharf"
     },
     {
+      "a": "FongFlat",
+      "b": "Tenements"
+    },
+    {
+      "a": "GarageYard",
+      "b": "TeaHouseRow"
+    },
+    {
+      "a": "GarageYard",
+      "b": "TigerDen"
+    },
+    {
       "a": "GoldenPhoenixClub",
       "b": "NeonStrip"
+    },
+    {
+      "a": "HerbalLane",
+      "b": "HerbalShop"
     },
     {
       "a": "HerbalLane",
@@ -185,6 +293,18 @@
     {
       "a": "KaraokeLounge",
       "b": "NeonStrip"
+    },
+    {
+      "a": "LauFlat",
+      "b": "Tenements"
+    },
+    {
+      "a": "LuckyBar",
+      "b": "NeonStrip"
+    },
+    {
+      "a": "MaFlat",
+      "b": "Tenements"
     },
     {
       "a": "MahjongHall",
@@ -223,6 +343,10 @@
       "b": "Tenements"
     },
     {
+      "a": "TeaHouse",
+      "b": "TeaHouseRow"
+    },
+    {
       "a": "TempleStreet",
       "b": "Tenements"
     },
@@ -233,6 +357,14 @@
     {
       "a": "TempleStreet",
       "b": "Wharf"
+    },
+    {
+      "a": "Tenements",
+      "b": "WingFlat"
+    },
+    {
+      "a": "Tenements",
+      "b": "YanFlat"
     }
   ],
   "persons": [
@@ -466,7 +598,7 @@
     },
     {
       "name": "AhKit",
-      "located_at": "Tenements",
+      "located_at": "LauFlat",
       "role": "npc",
       "personality": "proud, restless, softer than he lets on",
       "background": "Grew up on Mrs Lau's noodles and joined the Dragons at sixteen to make sure nobody pushed her around.",
@@ -490,7 +622,7 @@
         {
           "start": 7,
           "end": 8,
-          "location": "Tenements",
+          "location": "LauFlat",
           "activity": "wake up at his mother's flat",
           "goal": "Go to location"
         },
@@ -550,7 +682,7 @@
         {
           "start": 17,
           "end": 18,
-          "location": "TeaHouseRow",
+          "location": "TeaHouse",
           "activity": "collect protection money",
           "action": "collect_dues",
           "once": true
@@ -558,7 +690,7 @@
         {
           "start": 18,
           "end": 18.5,
-          "location": "TeaHouseRow",
+          "location": "TeaHouse",
           "activity": "buy milk tea and a bun at GoldenTeaHouse",
           "goal": "Use item on",
           "target_entity": "GoldenTeaHouse",
@@ -569,7 +701,7 @@
         {
           "start": 18.5,
           "end": 19,
-          "location": "TeaHouseRow",
+          "location": "TeaHouse",
           "activity": "milk tea and a bun",
           "goal": "Use item",
           "item_kind": "food",
@@ -579,10 +711,10 @@
         {
           "start": 19,
           "end": 19.5,
-          "location": "NeonStrip",
-          "activity": "buy a beer at LuckyBar",
+          "location": "LuckyBar",
+          "activity": "buy a beer at LuckyBarCounter",
           "goal": "Use item on",
-          "target_entity": "LuckyBar",
+          "target_entity": "LuckyBarCounter",
           "item_kind": "cash",
           "once": true,
           "social": true
@@ -590,7 +722,7 @@
         {
           "start": 19.5,
           "end": 20,
-          "location": "NeonStrip",
+          "location": "LuckyBar",
           "activity": "a beer",
           "goal": "Use item",
           "item_kind": "food",
@@ -600,7 +732,7 @@
         {
           "start": 20,
           "end": 23,
-          "location": "NeonStrip",
+          "location": "LuckyBar",
           "activity": "drink and show his face",
           "goal": "Go to location",
           "social": true
@@ -608,7 +740,7 @@
         {
           "start": 23,
           "end": 7,
-          "location": "Tenements",
+          "location": "LauFlat",
           "activity": "sleep",
           "action": "sleep"
         }
@@ -616,7 +748,7 @@
     },
     {
       "name": "TigerSze",
-      "located_at": "GarageYard",
+      "located_at": "TigerDen",
       "role": "npc",
       "personality": "loud, generous, quick to violence",
       "background": "A former boxer who turned a repair yard into the Black Tigers' den; still blames the Dragons for the fire.",
@@ -640,21 +772,21 @@
         {
           "start": 2,
           "end": 10,
-          "location": "GarageYard",
+          "location": "TigerDen",
           "activity": "sleep",
           "action": "sleep"
         },
         {
           "start": 10,
           "end": 11,
-          "location": "GarageYard",
+          "location": "TigerDen",
           "activity": "train with the heavy bag",
           "goal": "Go to location"
         },
         {
           "start": 11,
           "end": 11.5,
-          "location": "TeaHouseRow",
+          "location": "TeaHouse",
           "activity": "buy milk tea at GoldenTeaHouse",
           "goal": "Use item on",
           "target_entity": "GoldenTeaHouse",
@@ -665,7 +797,7 @@
         {
           "start": 11.5,
           "end": 12,
-          "location": "TeaHouseRow",
+          "location": "TeaHouse",
           "activity": "milk tea",
           "goal": "Use item",
           "item_kind": "food",
@@ -712,8 +844,8 @@
         {
           "start": 22,
           "end": 2,
-          "location": "NeonStrip",
-          "activity": "own the night",
+          "location": "GoldenPhoenixClub",
+          "activity": "own the night at the Golden Phoenix",
           "goal": "Go to location",
           "social": true
         }
@@ -721,7 +853,7 @@
     },
     {
       "name": "MadDogWai",
-      "located_at": "GarageYard",
+      "located_at": "TigerDen",
       "role": "npc",
       "personality": "reckless, funny, cruel when drunk",
       "background": "Earned his name biting a man's ear off in a dispute over a parking space.",
@@ -744,7 +876,7 @@
         {
           "start": 0,
           "end": 10,
-          "location": "GarageYard",
+          "location": "TigerDen",
           "activity": "sleep",
           "action": "sleep"
         },
@@ -759,7 +891,7 @@
         {
           "start": 12,
           "end": 13,
-          "location": "NeonStrip",
+          "location": "LuckyBar",
           "activity": "collect protection money",
           "action": "collect_dues",
           "once": true
@@ -767,10 +899,10 @@
         {
           "start": 13,
           "end": 13.5,
-          "location": "NeonStrip",
-          "activity": "buy a beer at LuckyBar",
+          "location": "LuckyBar",
+          "activity": "buy a beer at LuckyBarCounter",
           "goal": "Use item on",
-          "target_entity": "LuckyBar",
+          "target_entity": "LuckyBarCounter",
           "item_kind": "cash",
           "once": true,
           "social": true
@@ -778,7 +910,7 @@
         {
           "start": 13.5,
           "end": 14,
-          "location": "NeonStrip",
+          "location": "LuckyBar",
           "activity": "a beer",
           "goal": "Use item",
           "item_kind": "food",
@@ -796,7 +928,7 @@
         {
           "start": 17,
           "end": 18,
-          "location": "TeaHouseRow",
+          "location": "TeaHouse",
           "activity": "collect protection money",
           "action": "collect_dues",
           "once": true
@@ -833,8 +965,8 @@
         {
           "start": 20,
           "end": 24,
-          "location": "NeonStrip",
-          "activity": "drink with the boys",
+          "location": "KaraokeLounge",
+          "activity": "sing badly with the boys",
           "goal": "Go to location",
           "social": true
         }
@@ -842,7 +974,7 @@
     },
     {
       "name": "AhFai",
-      "located_at": "Tenements",
+      "located_at": "FaiFlat",
       "role": "npc",
       "personality": "anxious, kind, easily led",
       "background": "Joined the Black Tigers because his cousin's family owed Sze; still lives in Leung's building.",
@@ -865,8 +997,8 @@
         {
           "start": 8,
           "end": 9,
-          "location": "Tenements",
-          "activity": "get up quietly",
+          "location": "FaiFlat",
+          "activity": "get his sister off to school",
           "goal": "Go to location"
         },
         {
@@ -916,7 +1048,7 @@
         {
           "start": 18,
           "end": 18.5,
-          "location": "TeaHouseRow",
+          "location": "TeaHouse",
           "activity": "buy milk tea at GoldenTeaHouse",
           "goal": "Use item on",
           "target_entity": "GoldenTeaHouse",
@@ -927,7 +1059,7 @@
         {
           "start": 18.5,
           "end": 19,
-          "location": "TeaHouseRow",
+          "location": "TeaHouse",
           "activity": "milk tea",
           "goal": "Use item",
           "item_kind": "food",
@@ -945,7 +1077,7 @@
         {
           "start": 22,
           "end": 8,
-          "location": "Tenements",
+          "location": "FaiFlat",
           "activity": "sleep",
           "action": "sleep"
         }
@@ -953,7 +1085,7 @@
     },
     {
       "name": "MrsLau",
-      "located_at": "Tenements",
+      "located_at": "LauFlat",
       "role": "npc",
       "personality": "tough, warm, sharp-tongued",
       "background": "Has sold noodles in the same lane for twenty-two years and buried a husband who owed the wrong people.",
@@ -977,8 +1109,8 @@
         {
           "start": 6,
           "end": 7,
-          "location": "Tenements",
-          "activity": "wake before dawn",
+          "location": "LauFlat",
+          "activity": "wake before dawn and boil the stock",
           "goal": "Go to location"
         },
         {
@@ -992,7 +1124,7 @@
         {
           "start": 14,
           "end": 14.5,
-          "location": "TeaHouseRow",
+          "location": "TeaHouse",
           "activity": "buy milk tea at GoldenTeaHouse",
           "goal": "Use item on",
           "target_entity": "GoldenTeaHouse",
@@ -1003,7 +1135,7 @@
         {
           "start": 14.5,
           "end": 15,
-          "location": "TeaHouseRow",
+          "location": "TeaHouse",
           "activity": "milk tea",
           "goal": "Use item",
           "item_kind": "food",
@@ -1029,7 +1161,7 @@
         {
           "start": 22,
           "end": 6,
-          "location": "Tenements",
+          "location": "LauFlat",
           "activity": "sleep",
           "action": "sleep"
         }
@@ -1037,7 +1169,7 @@
     },
     {
       "name": "UncleWing",
-      "located_at": "Tenements",
+      "located_at": "WingFlat",
       "role": "npc",
       "personality": "dignified, cautious, stubborn",
       "background": "Runs the Golden Tea House his father opened; chairman of the street merchants for eleven years.",
@@ -1049,7 +1181,7 @@
       "speech_style": "formal, old-fashioned",
       "secret_policy": "guarded",
       "trust_toward_player": 2,
-      "works_at": "TeaHouseRow",
+      "works_at": "TeaHouse",
       "desire": "To hand the tea house to his granddaughter without a single debt to any gang.",
       "fear": "That the merchants will break and each pay alone.",
       "secret": "He has written down every dollar paid to both gangs for three years, in a ledger under the till.",
@@ -1061,7 +1193,7 @@
         {
           "start": 6,
           "end": 12,
-          "location": "TeaHouseRow",
+          "location": "TeaHouse",
           "activity": "open the tea house",
           "goal": "Go to location",
           "social": true
@@ -1090,7 +1222,7 @@
         {
           "start": 13,
           "end": 20,
-          "location": "TeaHouseRow",
+          "location": "TeaHouse",
           "activity": "run the tea house",
           "goal": "Go to location",
           "social": true
@@ -1106,7 +1238,7 @@
         {
           "start": 21,
           "end": 6,
-          "location": "Tenements",
+          "location": "WingFlat",
           "activity": "sleep",
           "action": "sleep"
         }
@@ -1114,7 +1246,7 @@
     },
     {
       "name": "MissChoi",
-      "located_at": "Tenements",
+      "located_at": "ChoiFlat",
       "role": "npc",
       "personality": "glamorous, calculating, lonely",
       "background": "Bought the Lucky Bar with money nobody asks about; the Tigers drink free, so she pays more.",
@@ -1126,7 +1258,7 @@
       "speech_style": "flirtatious, never gives a straight answer",
       "secret_policy": "lie",
       "trust_toward_player": 0,
-      "works_at": "NeonStrip",
+      "works_at": "LuckyBar",
       "desire": "To own the whole NeonStrip and answer to nobody.",
       "fear": "Going back to being nobody's girl from the ferry.",
       "secret": "She sells what she hears in the bar to Sergeant Tam.",
@@ -1138,7 +1270,7 @@
         {
           "start": 4,
           "end": 12,
-          "location": "Tenements",
+          "location": "ChoiFlat",
           "activity": "sleep",
           "action": "sleep"
         },
@@ -1166,7 +1298,7 @@
         {
           "start": 13,
           "end": 4,
-          "location": "NeonStrip",
+          "location": "LuckyBar",
           "activity": "run the Lucky Bar",
           "goal": "Go to location",
           "social": true
@@ -1175,7 +1307,7 @@
     },
     {
       "name": "AuntieFong",
-      "located_at": "Tenements",
+      "located_at": "FongFlat",
       "role": "npc",
       "personality": "nosy, superstitious, generous",
       "background": "Has run the mahjong parlour since the old days; knows every gambler's debts.",
@@ -1199,7 +1331,7 @@
         {
           "start": 8,
           "end": 8.5,
-          "location": "TeaHouseRow",
+          "location": "TeaHouse",
           "activity": "buy breakfast tea at GoldenTeaHouse",
           "goal": "Use item on",
           "target_entity": "GoldenTeaHouse",
@@ -1210,7 +1342,7 @@
         {
           "start": 8.5,
           "end": 9,
-          "location": "TeaHouseRow",
+          "location": "TeaHouse",
           "activity": "breakfast tea",
           "goal": "Use item",
           "item_kind": "food",
@@ -1228,7 +1360,7 @@
         {
           "start": 23,
           "end": 8,
-          "location": "Tenements",
+          "location": "FongFlat",
           "activity": "sleep",
           "action": "sleep"
         }
@@ -1236,7 +1368,7 @@
     },
     {
       "name": "MrChow",
-      "located_at": "HerbalLane",
+      "located_at": "HerbalShop",
       "role": "npc",
       "personality": "gentle, curious, morally flexible",
       "background": "A failed medical student who treats knife wounds without asking questions.",
@@ -1248,7 +1380,7 @@
       "speech_style": "slow, precise, a little dry",
       "secret_policy": "open",
       "trust_toward_player": 3,
-      "works_at": "HerbalLane",
+      "works_at": "HerbalShop",
       "desire": "To be called 'doctor' again by someone who means it.",
       "fear": "Treating a wound he cannot close.",
       "secret": "He stitched up the man who cut Bones' brother — and it was not Mad Dog Wai.",
@@ -1266,7 +1398,7 @@
         {
           "start": 7,
           "end": 12,
-          "location": "HerbalLane",
+          "location": "HerbalShop",
           "activity": "brew remedies",
           "goal": "Go to location",
           "social": true
@@ -1274,7 +1406,7 @@
         {
           "start": 12,
           "end": 12.5,
-          "location": "TeaHouseRow",
+          "location": "TeaHouse",
           "activity": "buy milk tea at GoldenTeaHouse",
           "goal": "Use item on",
           "target_entity": "GoldenTeaHouse",
@@ -1285,7 +1417,7 @@
         {
           "start": 12.5,
           "end": 13,
-          "location": "TeaHouseRow",
+          "location": "TeaHouse",
           "activity": "milk tea",
           "goal": "Use item",
           "item_kind": "food",
@@ -1295,7 +1427,7 @@
         {
           "start": 13,
           "end": 20,
-          "location": "HerbalLane",
+          "location": "HerbalShop",
           "activity": "see patients",
           "goal": "Go to location",
           "social": true
@@ -1303,7 +1435,7 @@
         {
           "start": 20,
           "end": 6,
-          "location": "HerbalLane",
+          "location": "HerbalShop",
           "activity": "sleep",
           "action": "sleep"
         }
@@ -1311,7 +1443,7 @@
     },
     {
       "name": "BigMa",
-      "located_at": "Tenements",
+      "located_at": "MaFlat",
       "role": "npc",
       "personality": "loud, cheerful, fearless",
       "background": "Pushes her fish ball cart through the wet market at dawn; the Tigers smashed it last winter.",
@@ -1364,7 +1496,7 @@
         {
           "start": 20,
           "end": 6,
-          "location": "Tenements",
+          "location": "MaFlat",
           "activity": "sleep",
           "action": "sleep"
         }
@@ -1372,7 +1504,7 @@
     },
     {
       "name": "DockerHo",
-      "located_at": "FerryPier",
+      "located_at": "DockOffice",
       "role": "npc",
       "personality": "practical, greedy, fair in his own way",
       "background": "Moves every crate that feeds the district's stalls; pays both gangs and complains to neither.",
@@ -1424,10 +1556,10 @@
         {
           "start": 19,
           "end": 19.5,
-          "location": "NeonStrip",
-          "activity": "buy a beer at LuckyBar",
+          "location": "LuckyBar",
+          "activity": "buy a beer at LuckyBarCounter",
           "goal": "Use item on",
-          "target_entity": "LuckyBar",
+          "target_entity": "LuckyBarCounter",
           "item_kind": "cash",
           "once": true,
           "social": true
@@ -1435,7 +1567,7 @@
         {
           "start": 19.5,
           "end": 20,
-          "location": "NeonStrip",
+          "location": "LuckyBar",
           "activity": "a beer",
           "goal": "Use item",
           "item_kind": "food",
@@ -1445,7 +1577,7 @@
         {
           "start": 20,
           "end": 21,
-          "location": "NeonStrip",
+          "location": "LuckyBar",
           "activity": "talk prices over a beer",
           "goal": "Go to location",
           "social": true
@@ -1453,7 +1585,7 @@
         {
           "start": 21,
           "end": 6,
-          "location": "FerryPier",
+          "location": "DockOffice",
           "activity": "sleep",
           "action": "sleep"
         }
@@ -1461,7 +1593,7 @@
     },
     {
       "name": "AhYan",
-      "located_at": "Tenements",
+      "located_at": "YanFlat",
       "role": "npc",
       "personality": "strong, quiet, observant",
       "background": "Carries crates at the wharf for a dollar a day; sends half of it home on the ferry.",
@@ -1550,7 +1682,7 @@
         {
           "start": 22,
           "end": 6,
-          "location": "Tenements",
+          "location": "YanFlat",
           "activity": "sleep",
           "action": "sleep"
         }
@@ -1582,7 +1714,7 @@
         {
           "start": 7,
           "end": 7.5,
-          "location": "TeaHouseRow",
+          "location": "TeaHouse",
           "activity": "buy milk tea at GoldenTeaHouse",
           "goal": "Use item on",
           "target_entity": "GoldenTeaHouse",
@@ -1593,7 +1725,7 @@
         {
           "start": 7.5,
           "end": 8,
-          "location": "TeaHouseRow",
+          "location": "TeaHouse",
           "activity": "milk tea",
           "goal": "Use item",
           "item_kind": "food",
@@ -1705,7 +1837,7 @@
     {
       "name": "GoldenTeaHouse",
       "archetype": "tea_house",
-      "located_at": "TeaHouseRow",
+      "located_at": "TeaHouse",
       "description": "Uncle Wing's Golden Tea House. Milk tea and a bun for a dollar.",
       "script": {
         "initial_state": {
@@ -1715,9 +1847,9 @@
       }
     },
     {
-      "name": "LuckyBar",
+      "name": "LuckyBarCounter",
       "archetype": "bar_counter",
-      "located_at": "NeonStrip",
+      "located_at": "LuckyBar",
       "description": "Miss Choi's Lucky Bar. A dollar a bottle.",
       "script": {
         "initial_state": {
@@ -1741,7 +1873,7 @@
     {
       "name": "ChowHerbalShop",
       "archetype": "herbal_counter",
-      "located_at": "HerbalLane",
+      "located_at": "HerbalShop",
       "description": "Mr Chow's herbal shop. A dollar for a brew that mends bruises.",
       "script": {
         "initial_state": {
@@ -2759,7 +2891,8 @@
         "TeaHouseRow": 2,
         "PawnShop": 4,
         "CornerStore": 2,
-        "KaraokeLounge": 2
+        "KaraokeLounge": 2,
+        "TeaHouse": 2
       },
       "relations": [
         {
@@ -2817,7 +2950,10 @@
         "TeaHouseRow": 3,
         "NoodleAlley": 2,
         "GoldenPhoenixClub": 6,
-        "KaraokeLounge": 3
+        "KaraokeLounge": 3,
+        "TigerDen": 8,
+        "LuckyBar": 4,
+        "TeaHouse": 3
       },
       "traits": [
         {
@@ -2846,7 +2982,8 @@
       ],
       "territory": {
         "PoliceStation": 8,
-        "HerbalLane": 3
+        "HerbalLane": 3,
+        "HerbalShop": 3
       },
       "relations": [
         {
@@ -2964,7 +3101,8 @@
         }
       ],
       "territory": {
-        "Wharf": 5
+        "Wharf": 5,
+        "DockOffice": 6
       },
       "relations": [
         {
@@ -3018,18 +3156,30 @@
       "k": "KaraokeLounge",
       "w": "PawnShop",
       "s": "CornerStore",
-      "j": "JadeBanquetHall"
+      "j": "JadeBanquetHall",
+      "l": "LauFlat",
+      "n": "WingFlat",
+      "o": "ChoiFlat",
+      "f": "FongFlat",
+      "a": "MaFlat",
+      "i": "FaiFlat",
+      "y": "YanFlat",
+      "e": "TeaHouse",
+      "b": "LuckyBar",
+      "g": "HerbalShop",
+      "d": "DockOffice",
+      "x": "TigerDen"
     },
     "rows": [
       "~~~~~~~~~~WWWWWWWWWWWWFFFFFFFFFFFFFFFF##################################################",
       "~~~~~~~~~~WWWWWWWWWWWWFFFFFFFFFFFFFFFF#hhhhhhhhhhhhhh##mmmmmmmmmmm#cccccccccccc#kkkkkkk#",
-      "~~~~~~~~~~WWWWWWWWWWWWFFFFFFFFFFFFFFFF#hhhhhhhhhhhhhh##mmmmmmmmmmm#cccccccccccc#kkkkkkk#",
-      "~~~~~~~~~~WWWWWWWWWWWWFFFFFFFFFFFFFFFF#hhhhhhhhhhhhhh##mmmmmmmmmmm#cccccccccccc#kkkkkkk#",
-      "~~~~~~~~~~WWWWWWWWWWWWFFFFFFFFFFFFFFFF#hhhhhhhhhhhhhh##mmmmmmmmmmm#cccccccccccc#kkkkkkk#",
-      "~~~~~~~~~~WWWWWWWWWWWWFFFFFFFFFFFFFFFF#hhhhhhhhhhhhhh##mmmmmmmmmmm#cccccccccccc#kkkkkkk#",
-      "~~~~~~~~~~WWWWWWWWWWWWFFFFFFFFFFFFFFFF#hhhhhhhhhhhhhh##mmmmmmmmmmm#cccccccccccc#kkkkkkk#",
-      "~~~~~~~~~~WWWWWWWWWWWWFFFFFFFFFFFFFFFF#hhhhhhhhhhhhhh##mmmmmmmmmmm#cccccccccccc#kkkkkkk#",
-      "~~~~~~~~~~WWWWWWWWWWWWFFFFFFFFFFFFFFFF#hhhhhhhhhhhhhh##mmmmmmmmmmm#cccccccccccc#kkkkkkk#",
+      "~~~~~~~~~~WW########WWFFFFFFFFFFFFFFFF#hhhhhhhhhhhhhh##mmmmmmmmmmm#cccccccccccc#kkkkkkk#",
+      "~~~~~~~~~~WW#dddddd#WWFFFFFFFFFFFFFFFF#hhhhhhhhhhhhhh##mmmmmmmmmmm#cccccccccccc#kkkkkkk#",
+      "~~~~~~~~~~WW#dddddd#WWFFFFFFFFFFFFFFFF#hhhhhhhhhhhhhh##mmmmmmmmmmm#cccccccccccc#kkkkkkk#",
+      "~~~~~~~~~~WW#dddddd#WWFFFFFFFFFFFFFFFF#hhhhhhhhhhhhhh##mmmmmmmmmmm#cccccccccccc#kkkkkkk#",
+      "~~~~~~~~~~WW#dddddd#WWFFFFFFFFFFFFFFFF#hhhhhhhhhhhhhh##mmmmmmmmmmm#cccccccccccc#kkkkkkk#",
+      "~~~~~~~~~~WW#dddddd#WWFFFFFFFFFFFFFFFF#hhhhhhhhhhhhhh##mmmmmmmmmmm#cccccccccccc#kkkkkkk#",
+      "~~~~~~~~~~WW###+####WWFFFFFFFFFFFFFFFF#hhhhhhhhhhhhhh##mmmmmmmmmmm#cccccccccccc#kkkkkkk#",
       "~~~~~~~~~~WWWWWWWWWWWWFFFFFFFFFFFFFFFF#hhhhhhhhhhhhhh##mmmmmmmmmmm#cccccccccccc#kkkkkkk#",
       "~~~~~~~~~~WWWWWWWWWWWWFFFFFFFFFFFFFFFF#hhhhhhhhhhhhhh##mmmmmmmmmmm#cccccccccccc#kkkkkkk#",
       "~~~~~~~~~~WWWWWWWWWWWWFFFFFFFFFFFFFFFF#hhhhhhhhhhhhhh##mmmmmmmmmmm#cccccccccccc#kkkkkkk#",
@@ -3038,36 +3188,36 @@
       "~~~~~~~~~~WWWWWWWWWWWWTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
       "~~~~~~~~~~WWWWWWWWWWWWTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
       "~~~~~~~~~~WWWWWWWWWWWWTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
-      "~~~~~~~~~~WWWWWWWWWWWW###########+####AAA######+######BBBB%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%",
-      "~~~~~~~~~~WWWWWWWWWWWW#rrrrrr#ttttttt#AAA#ppppppppppp#BBBB%GGGGGGGGGGGGGGGGGGGGGGGGGGGG%",
-      "~~~~~~~~~~WWWWWWWWWWWW#rrrrrr#ttttttt#AAA#ppppppppppp#BBBB%GGGGGGGGGGGGGGGGGGGGGGGGGGGG%",
-      "~~~~~~~~~~WWWWWWWWWWWW#rrrrrr#ttttttt#AAA#ppppppppppp#BBBB%GGGGGGGGGGGGGGGGGGGGGGGGGGGG%",
-      "~~~~~~~~~~WWWWWWWWWWWW#rrrrrr#ttttttt#AAA#ppppppppppp#BBBB%GGGGGGGGGGGGGGGGGGGGGGGGGGGG%",
-      "~~~~~~~~~~WWWWWWWWWWWW#rrrrrr#ttttttt#AAA#ppppppppppp#BBBB%GGGGGGGGGGGGGGGGGGGGGGGGGGGG%",
-      "~~~~~~~~~~WWWWWWWWWWWW####+###ttttttt#AAA#ppppppppppp#BBBB%GGGGGGGGGGGGGGGGGGGGGGGGGGGG%",
-      "~~~~~~~~~~PPPPPPPPPPPP#tttttttttttttt#AAA#ppppppppppp#BBBB%GGGGGGGGGGGGGGGGGGGGGGGGGGGG%",
-      "~~~~~~~~~~PPPPPPPPPPPP#tttttttttttttt#AAA#ppppppppppp#BBBB+GGGGGGGGGGGGGGGGGGGGGGGGGGGG%",
-      "~~~~~~~~~~PPPPPPPPPPPP#tttttttttttttt#AAA#ppppppppppp#BBBB%GGGGGGGGGGGGGGGGGGGGGGGGGGGG%",
-      "~~~~~~~~~~PPPPPPPPPPPP#tttttttttttttt#AAA#ppppppppppp#BBBB%GGGGGGGGGGGGGGGGGGGGGGGGGGGG%",
-      "~~~~~~~~~~PPPPPPPPPPPP+tttttttttttttt+AAA#ppppppppppp#BBBB%GGGGGGGGGGGGGGGGGGGGGGGGGGGG%",
-      "~~~PPPPPPPPPPPPPPPPPPP#tttttttttttttt#AAA#ppppppppppp#BBBB%GGGGGGGGGGGGGGGGGGGGGGGGGGGG%",
-      "~~~PPPPPPPPPPPPPPPPPPP#tttttttttttttt#AAA#ppppppppppp#BBBB%GGGGGGGGGGGGGGGGGGGGGGGGGGGG%",
-      "~~~PPPPPPPPPPPPPPPPPPP#tttttttttttttt#AAA#ppppppppppp#BBBB%GGGGGGGGGGGGGGGGGGGGGGGGGGGG%",
-      "~~~PPPPPPPPPPPPPPPPPPP################AAA######+######BBBB%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%",
+      "~~~~~~~~~~WWWWWWWWWWWW########+#######AAA######+######BBBB###+###%%%%%%%%%%%%%%%%%%%%%%%",
+      "~~~~~~~~~~WWWWWWWWWWWW#rrrrrr#tt#nnnn#AAA#ppppppppppp#BBBB#bbbbbb%GGGGGGGGGGGGGGGGGGGGG%",
+      "~~~~~~~~~~WWWWWWWWWWWW#rrrrrr#tt+nnnn#AAA#ppppppppppp#BBBB#bbbbbb%GGGGGGGGG###########G%",
+      "~~~~~~~~~~WWWWWWWWWWWW#rrrrrr+tt#nnnn#AAA#ppppppppppp#BBBB#bbbbbb%GGGGGGGGG#xxxxxxxxx#G%",
+      "~~~~~~~~~~WWWWWWWWWWWW#rrrrrr#tt######AAA#ppppppppppp#BBBB#bbbbbb%GGGGGGGGG#xxxxxxxxx#G%",
+      "~~~~~~~~~~WWWWWWWWWWWW#rrrrrr#tt#oooo#AAA#ppppppppppp#BBBB#bbbbbb%GGGGGGGGG#xxxxxxxxx#G%",
+      "~~~~~~~~~~WWWWWWWWWWWW########tt+oooo#AAA#ppppppppppp#BBBB#bbbbbb%GGGGGGGGG#xxxxxxxxx#G%",
+      "~~~~~~~~~~PPPPPPPPPPPP#iii#yy#tt#oooo#AAA#ppppppppppp#BBBB#######%GGGGGGGGG#xxxxxxxxx#G%",
+      "~~~~~~~~~~PPPPPPPPPPPP#iii#yy#tt######AAA#ppppppppppp#BBBB#eeeeee%GGGGGGGGG#xxxxxxxxx#G%",
+      "~~~~~~~~~~PPPPPPPPPPPP#iii#yy#tt#ffff#AAA#ppppppppppp#BBBB#eeeeee%GGGGGGGGG#####+#####G%",
+      "~~~~~~~~~~PPPPPPPPPPPP##+##+##tt+ffff#AAA#ppppppppppp#BBBB#eeeeee%GGGGGGGGGGGGGGGGGGGGG%",
+      "~~~~~~~~~~PPPPPPPPPPPP+ttttttttt#ffff#AAA#ppppppppppp#BBBB#eeeeee%GGGGGGGGGGGGGGGGGGGGG%",
+      "~~~PPPPPPPPPPPPPPPPPPP####+###tt######AAA#ppppppppppp#BBBB#eeeeee%GGGGGGGGGGGGGGGGGGGGG%",
+      "~~~PPPPPPPPPPPPPPPPPPP#llllll#tt+aaaa#AAA#ppppppppppp#BBBB#eeeeee%GGGGGGGGGGGGGGGGGGGGG%",
+      "~~~PPPPPPPPPPPPPPPPPPP#llllll#tt#aaaa#AAA#ppppppppppp#BBBB#eeeeee%GGGGGGGGGGGGGGGGGGGGG%",
+      "~~~PPPPPPPPPPPPPPPPPPP########+#######AAA######+######BBBB###+###%%%%%%%%%%%+%%%%%%%%%%%",
       "~~~~~~~~~~PPPPPPPPPPPPAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR",
       "~~~~~~~~~~PPPPPPPPPPPPAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR",
       "~~~~~~~~~~PPPPPPPPPPPPAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR",
       "~~~~~~~~~~PPPPPPPPPPPP%%%%%%%%+%%%%%%%HHHHHHHHHHHHHHHH#####+##########+##########+######",
       "~~~~~~~~~~PPPPPPPPPPPP%SSSSSSSSSSSSSS%HHHHHHHHHHHHHHHH#wwwwwwwwww#ssssssssss#jjjjjjjjjj#",
       "~~~~~~~~~~PPPPPPPPPPPP%SSSSSSSSSSSSSS%HHHHHHHHHHHHHHHH#wwwwwwwwww#ssssssssss#jjjjjjjjjj#",
-      "~~~~~~~~~~PPPPPPPPPPPP%SSSSSSSSSSSSSS%HHHHHHHHHHHHHHHH#wwwwwwwwww#ssssssssss#jjjjjjjjjj#",
-      "~~~~~~~~~~PPPPPPPPPPPP%SSSSSSSSSSSSSS%HHHHHHHHHHHHHHHH#wwwwwwwwww#ssssssssss#jjjjjjjjjj#",
-      "~~~~~~~~~~PPPPPPPPPPPP%SSSSSSSSSSSSSS%HHHHHHHHHHHHHHHH#wwwwwwwwww#ssssssssss#jjjjjjjjjj#",
-      "~~~~~~~~~~PPPPPPPPPPPP%SSSSSSSSSSSSSS%HHHHHHHHHHHHHHHH#wwwwwwwwww#ssssssssss#jjjjjjjjjj#",
-      "~~~~~~~~~~PPPPPPPPPPPP%SSSSSSSSSSSSSS%HHHHHHHHHHHHHHHH#wwwwwwwwww#ssssssssss#jjjjjjjjjj#",
-      "~~~~~~~~~~PPPPPPPPPPPP%SSSSSSSSSSSSSS%HHHHHHHHHHHHHHHH#wwwwwwwwww#ssssssssss#jjjjjjjjjj#",
-      "~~~~~~~~~~PPPPPPPPPPPP%SSSSSSSSSSSSSS%HHHHHHHHHHHHHHHH#wwwwwwwwww#ssssssssss#jjjjjjjjjj#",
-      "~~~~~~~~~~PPPPPPPPPPPP%%%%%%%%%%%%%%%%HHHHHHHHHHHHHHHH##################################"
+      "~~~~~~~~~~PPPPPPPPPPPP%SSSSSSSSSSSSSS%#####+####HHHHHH#wwwwwwwwww#ssssssssss#jjjjjjjjjj#",
+      "~~~~~~~~~~PPPPPPPPPPPP%SSSSSSSSSSSSSS%#gggggggg#HHHHHH#wwwwwwwwww#ssssssssss#jjjjjjjjjj#",
+      "~~~~~~~~~~PPPPPPPPPPPP%SSSSSSSSSSSSSS%#gggggggg#HHHHHH#wwwwwwwwww#ssssssssss#jjjjjjjjjj#",
+      "~~~~~~~~~~PPPPPPPPPPPP%SSSSSSSSSSSSSS%#gggggggg#HHHHHH#wwwwwwwwww#ssssssssss#jjjjjjjjjj#",
+      "~~~~~~~~~~PPPPPPPPPPPP%SSSSSSSSSSSSSS%#gggggggg#HHHHHH#wwwwwwwwww#ssssssssss#jjjjjjjjjj#",
+      "~~~~~~~~~~PPPPPPPPPPPP%SSSSSSSSSSSSSS%#gggggggg#HHHHHH#wwwwwwwwww#ssssssssss#jjjjjjjjjj#",
+      "~~~~~~~~~~PPPPPPPPPPPP%SSSSSSSSSSSSSS%#gggggggg#HHHHHH#wwwwwwwwww#ssssssssss#jjjjjjjjjj#",
+      "~~~~~~~~~~PPPPPPPPPPPP%%%%%%%%%%%%%%%%##########HHHHHH##################################"
     ],
     "decor": [
       "          ppppppppppppcccccccccccccccc                                                  ",
@@ -3088,23 +3238,23 @@
       "          ppppppppppppcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
       "          ppppppppppppcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
       "          pppppppppppp                ccc             gggg                              ",
-      "          pppppppppppp                ccc             gggg gggggggggggggggggggggggggggg ",
-      "          pppppppppppp                ccc             gggg gggggggggggggggggggggggggggg ",
-      "          pppppppppppp                ccc             gggg gggggggggggggggggggggggggggg ",
-      "          pppppppppppp                ccc             gggg gggggggggggggggggggggggggggg ",
-      "          pppppppppppp                ccc             gggg gggggggggggggggggggggggggggg ",
-      "          pppppppppppp                ccc             gggg gggggggggggggggggggggggggggg ",
-      "          pppppppppppp                ccc             gggg gggggggggggggggggggggggggggg ",
-      "          pppppppppppp                ccc             gggg gggggggggggggggggggggggggggg ",
-      "          pppppppppppp                ccc             gggg gggggggggggggggggggggggggggg ",
-      "          pppppppppppp                ccc             gggg gggggggggggggggggggggggggggg ",
-      "          pppppppppppp                ccc             gggg gggggggggggggggggggggggggggg ",
-      "   ppppppppppppppppppp                ccc             gggg gggggggggggggggggggggggggggg ",
-      "   ppppppppppppppppppp                ccc             gggg gggggggggggggggggggggggggggg ",
-      "   ppppppppppppppppppp                ccc             gggg gggggggggggggggggggggggggggg ",
+      "          pppppppppppp                ccc             gggg        ggggggggggggggggggggg ",
+      "          pppppppppppp                ccc             gggg        ggggggggggggggggggggg ",
+      "          pppppppppppp                ccc             gggg        ggggggggggggggggggggg ",
+      "          pppppppppppp                ccc             gggg        ggggggggggggggggggggg ",
+      "          pppppppppppp                ccc             gggg        ggggggggggggggggggggg ",
+      "          pppppppppppp                ccc             gggg        ggggggggggggggggggggg ",
+      "          pppppppppppp                ccc             gggg        ggggggggggggggggggggg ",
+      "          pppppppppppp                ccc             gggg        ggggggggggggggggggggg ",
+      "          pppppppppppp                ccc             gggg        ggggggggggggggggggggg ",
+      "          pppppppppppp                ccc             gggg        ggggggggggggggggggggg ",
+      "          pppppppppppp                ccc             gggg        ggggggggggggggggggggg ",
+      "   ppppppppppppppppppp                ccc             gggg        ggggggggggggggggggggg ",
+      "   ppppppppppppppppppp                ccc             gggg        ggggggggggggggggggggg ",
+      "   ppppppppppppppppppp                ccc             gggg        ggggggggggggggggggggg ",
       "   ppppppppppppppppppp                ccc             gggg                              ",
       "          ppppppppppppcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-      "          ppppppppppppccccccccccccccccccccccccccccccccccscccccscccccscccccscccccscccccsc",
+      "          ppppppppppppccccccccccccccccccccccccccccccccccccccccccccccscccccscccccscccccsc",
       "          ppppppppppppcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
       "          pppppppppppp                ================                                  ",
       "          pppppppppppp gggggggggggggg ================                                  ",
