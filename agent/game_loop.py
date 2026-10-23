@@ -468,6 +468,33 @@ class GameLoop:
         state = self.get_agent_state(agent.name)
         return self.force_mock if state is None else self._rule_based(state)
 
+    def _story_errand_goal(self, state: AgentState) -> Optional[Dict[str, Any]]:
+        """Storyteller 交代的差事：去找某人当面说件事（或开口求助）。过期 / 没有返回 None。"""
+        try:
+            from storyteller import ERRAND_HOURS, _hours, read_errand
+
+            errand = read_errand(self.world, state.agent.name)
+        except Exception:  # noqa: BLE001
+            return None
+        if not errand or not errand.get("to") or errand.get("to") == state.agent.name:
+            return None
+        set_at = errand.get("set_at")
+        if set_at is not None and self.sim_time - float(set_at) > _hours(ERRAND_HOURS):
+            return None
+        return {
+            "goal": "Gain information", "target_entity": errand["to"], "priority": 0.9, "source": "story",
+            "reason": f"Talk to {errand['to']}: {errand.get('topic') or ''}"[:200],
+        }
+
+    def _story_talk(self, a: str, b: str) -> bool:
+        """这段话是剧情差事（一方专门来找另一方）：规则模式下也用大模型写台词。"""
+        try:
+            from storyteller import read_errand
+
+            return any((read_errand(self.world, x) or {}).get("to") == y for x, y in ((a, b), (b, a)))
+        except Exception:  # noqa: BLE001
+            return False
+
     def _is_player(self, state: AgentState) -> bool:
         row = self._person_flags(state)
         if not row:
@@ -2091,6 +2118,11 @@ class GameLoop:
         st = self.storyteller
         if st is None:
             return
+        try:
+            st.tick_questlines(self)
+        except Exception as e:  # noqa: BLE001
+            if self.verbose:
+                print(f"[WARN] storyteller questline: {e}")
         fut = self._story_future
         if fut is not None:
             if not fut.done():
@@ -2132,6 +2164,14 @@ class GameLoop:
             "lines": said,
         })
         del self.conversations[:-CONVERSATION_LIMIT]
+        # 剧情靠对话往前走：差事办成、玩家说的话，都记进 Storyteller 的线索
+        st = getattr(self, "storyteller", None)
+        if st is not None:
+            try:
+                st.on_conversation(self, a, b, location, said)
+            except Exception as e:  # noqa: BLE001
+                if self.verbose:
+                    print(f"[WARN] storyteller conversation: {e}")
 
     def _feelings_after(self, agent: AgentProfile, action_name: str, args: List[str]) -> None:
         """送东西、做成买卖之类的事会改变别人对他的好感（见 relations.py）。"""
@@ -2340,7 +2380,9 @@ class GameLoop:
         old = self._talk_prefetch.pop(name, None)
         if old is not None:
             old["future"].cancel()
-        if action_name != act("converse") or len(args) < 3 or self._rule_based_name(state.agent):
+        if action_name != act("converse") or len(args) < 3 or (
+            self._rule_based_name(state.agent) and not self._story_talk(args[0], args[1])
+        ):
             return
         from dialogue_service import generate_talk_dialogue
 
@@ -2585,6 +2627,10 @@ class GameLoop:
                 "routine": routine_cands[0] if routine_cands else None,
                 "ephemeral_n": len(ephemeral_cands),
             }
+        # 剧情差事排在最前（UI 里看得到它为什么去找那个人）
+        errand_goal = self._story_errand_goal(state)
+        if errand_goal is not None:
+            candidates = [errand_goal] + list(candidates)
         state.candidate_goals = list(candidates)
         state.decision_steps = []
 
@@ -2618,7 +2664,14 @@ class GameLoop:
                 break
 
         picked = None
-        if not self._rule_based(state):
+        # 剧情靠对话往前走：Storyteller 派的差事优先于日程和自己的打算（物品告警 / 火情除外）
+        if errand_goal is not None and not any(
+            (rc or {}).get("source") in ("item_script", "fire_emergency") for rc in routine_cands
+        ):
+            assessed = assess_goal(self.world, agent.name, errand_goal, engines=self.plan_engines)
+            if assessed.ok and not assessed.already_satisfied and assessed.plan:
+                picked = assessed
+        if picked is None and not self._rule_based(state):
             # LLM 自己的选择优先；与当前目标相同则继续原计划
             for c in candidates:
                 if (c or {}).get("source") != "llm":
@@ -2978,7 +3031,7 @@ class GameLoop:
                         args[2],
                         memory=self.memory,
                         # 背景 NPC 去找人说话（日程里的寒暄）不调用大模型：不写台词
-                        force_mock=self._rule_based_name(agent),
+                        force_mock=self._rule_based_name(agent) and not self._story_talk(args[0], args[1]),
                         # 跟玩家说话：只说自己这句，不替玩家回答
                         listener_speaks=not to_player,
                     )

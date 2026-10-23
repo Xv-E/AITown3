@@ -423,10 +423,22 @@ def _heart_blocks(world, me: str, other: str, knowledge=None) -> tuple[str, str]
         money = ""
     if money:
         heart = f"{heart}\n{money}" if heart else money
+    # 剧情：心事，以及 Storyteller 派来找对方说的事 / 要的东西
+    ask_item = None
+    try:
+        from storyteller import story_context
+
+        story, ask_item = story_context(world, me, other)
+    except Exception:
+        story = ""
+    if story:
+        heart = f"{heart}\n{story}" if heart else story
     favor = ""
     try:
         if not _is_player(world, me):
             options = favor_item_options(world)
+            if ask_item and ask_item not in options:
+                options = [ask_item] + options
             if options:
                 favor = favor_prompt_block(options)
     except Exception:
@@ -1252,7 +1264,7 @@ def generate_talk_dialogue(
 
     if not listener_speaks:
         # 对方是玩家：只说发起方这一句，回话由玩家自己在对话框里打
-        return {
+        early = {
             "summary": f"{speaker_a} spoke to {speaker_b}",
             "lines": [{"speaker": speaker_a, "text": msg}] if msg else [],
             "trust_delta": 0,
@@ -1262,6 +1274,12 @@ def generate_talk_dialogue(
             "utterance_source": utterance_source,
             "awaiting_reply": bool(msg),
         }
+        # 这句里开口求助 / 换了心情：照样落成人情、写回情绪
+        if msg:
+            for key in ("favor", "mood"):
+                if utterance_meta.get(key):
+                    early[f"speaker_{key}"] = utterance_meta[key]
+        return early
 
     knowledge = load_npc_knowledge(
         world, speaker_b, memory=memory, player_message=msg
@@ -1434,6 +1452,12 @@ def _apply_heart_outcomes(
             quest = None
         if not quest:
             continue
+        try:
+            from storyteller import on_favor_registered
+
+            on_favor_registered(world, giver, helper, favor, quest)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("story favor link failed: %s", e)
         dialogue.setdefault("quests_created", []).append(quest)
         if memory is None:
             continue

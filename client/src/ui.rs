@@ -2881,6 +2881,40 @@ fn director_body(p: &mut ChildSpawnerCommands, view: &DirectorView) {
             }
         });
 
+    // Story threads: what the storyteller is developing, and how far each has come.
+    section(p, "Story threads");
+    if d.threads.is_empty() {
+        line(p, "  (none yet - they grow out of what people say and do)".into(), MUTED, 14.0);
+    }
+    for t in &d.threads {
+        let open = t.status == "open";
+        let status = match t.status.as_str() {
+            "open" => String::new(),
+            other => format!("  [{other}]"),
+        };
+        line(p, format!("  {}{status}", t.title), if open { TEXT } else { MUTED }, 16.0);
+        let mut about = Vec::new();
+        if !t.stakes.is_empty() {
+            about.push(format!("at stake: {}", t.stakes));
+        }
+        if !t.people.is_empty() {
+            about.push(format!("with {}", t.people.join(", ")));
+        }
+        match t.questline.as_str() {
+            "" | "-" => {}
+            "(being written)" => about.push("a questline is being written from it".to_string()),
+            q => about.push(format!("became the questline: {q}")),
+        }
+        if !about.is_empty() {
+            line(p, format!("    {}", trim_line(&about.join("; "), 220)), MUTED, 13.0);
+        }
+        if open {
+            for n in t.notes.iter().rev().take(3).collect::<Vec<_>>().into_iter().rev() {
+                line(p, format!("    - {}", trim_line(n, 200)), SAID, 13.0);
+            }
+        }
+    }
+
     // The quest designer: a whole questline with its own places, people and items.
     section(p, "Quest designer");
     line(

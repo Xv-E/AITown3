@@ -163,6 +163,8 @@ def loop_snapshot(loop: "GameLoop") -> Dict[str, Any]:
         "storyteller": None if st is None else {
             "arc": st.arc, "beats": st.beats, "last_at": st.last_at,
             "template_turn": getattr(st, "_template_turn", 0),
+            "threads": getattr(st, "threads", []),
+            "last_questline_at": getattr(st, "last_questline_at", -1e9),
         },
         "agents": [_state_to_dict(s) for s in loop.agents],
     }
@@ -182,6 +184,12 @@ def restore_loop(loop: "GameLoop", snap: Dict[str, Any]) -> None:
         st.beats = list(saved.get("beats") or [])
         st.last_at = float(saved.get("last_at") or 0.0)
         st._template_turn = int(saved.get("template_turn") or 0)  # noqa: SLF001
+        st.threads = [
+            # 存档时还在写的任务线不会接着写：让那条线索之后重新有机会
+            dict(t, questline="" if t.get("questline") == "(being written)" else t.get("questline", ""))
+            for t in saved.get("threads") or [] if isinstance(t, dict)
+        ]
+        st.last_questline_at = float(saved.get("last_questline_at", -1e9))
     for data in snap.get("agents") or []:
         state = loop.get_agent_state(data.get("name"))
         if state is not None:

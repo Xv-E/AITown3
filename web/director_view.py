@@ -18,6 +18,12 @@ def beat_line(beat: Dict[str, Any]) -> str:
     if op == "whisper":
         urgent = " (urgent - interrupts their plan)" if beat.get("urgent") else ""
         return f"Whispered to {pretty(beat.get('to'))}{urgent}: {beat.get('text')}"
+    if op == "talk":
+        return f"Sent {pretty(beat.get('who'))} to talk to {pretty(beat.get('to'))}: {beat.get('topic')}"
+    if op == "ask":
+        reward = f" (offers: {beat.get('reward')})" if beat.get("reward") else ""
+        return (f"Sent {pretty(beat.get('who'))} to ask {pretty(beat.get('to') or 'the player')} for "
+                f"{beat.get('item')}: {beat.get('why')}{reward}")
     if op == "adjust":
         change = f"{beat.get('from')} -> {beat.get('to')}" if "from" in beat else f"by {beat.get('delta')}"
         why = f" - {beat.get('why')}" if beat.get("why") else ""
@@ -83,6 +89,7 @@ def build_director_view(loop: Any, world: Any) -> Dict[str, Any]:
         "next_clock": "",
         "next_in_hours": None,
         "beats": [],
+        "threads": [],
         "conflicts": [],
         "tensions": [],
         "chronicle": [],
@@ -100,6 +107,7 @@ def build_director_view(loop: Any, world: Any) -> Dict[str, Any]:
         next_at = st.last_at + st.interval
         out["next_clock"] = format_clock(max(next_at, loop.sim_time))
         out["next_in_hours"] = round(max(0.0, next_at - loop.sim_time) * 24.0 / DAY_LENGTH_SECONDS, 2)
+        out["threads"] = st.thread_views() if hasattr(st, "thread_views") else []
         out["beats"] = [
             {"clock": b.get("clock", ""), "op": b.get("op", ""), "line": beat_line(b)}
             for b in reversed(st.beats[-12:])

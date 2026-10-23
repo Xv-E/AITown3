@@ -283,6 +283,14 @@ Respond with a JSON object:
             if inner.fear:
                 lines.append(f"You fear: {inner.fear}")
             try:
+                from storyteller import story_context
+
+                story, _ = story_context(self.world, agent.name)
+                if story:
+                    lines.append(story)
+            except Exception:
+                pass
+            try:
                 from factions import faction_situation_text
                 from routine import people_at_location
 

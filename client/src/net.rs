@@ -1931,6 +1931,28 @@ pub struct DirectorData {
     pub alliances: Vec<AllianceView>,
     #[serde(default)]
     pub requests: Vec<DirectorLine>,
+    /// Story threads the storyteller is developing (mostly through conversations).
+    #[serde(default)]
+    pub threads: Vec<StoryThreadView>,
+}
+
+#[derive(Deserialize, Clone, Default)]
+pub struct StoryThreadView {
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub title: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub stakes: String,
+    /// "open" | "resolved" | "faded"
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub status: String,
+    #[serde(default, deserialize_with = "lenient_vec")]
+    pub people: Vec<String>,
+    /// Latest progress, oldest first ("clock what happened").
+    #[serde(default, deserialize_with = "lenient_vec")]
+    pub notes: Vec<String>,
+    /// The questline written from it ("(being written)", "-" = failed, "" = none yet).
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub questline: String,
 }
 
 #[derive(Deserialize, Clone, Default)]
