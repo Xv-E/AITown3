@@ -675,6 +675,8 @@
   "factions": [
     {
       "name": "Ashford",
+      "join_policy": "open",
+      "join_standing": 1,
       "kind": "town",
       "scale": "large",
       "description": "The town around the market square and its sealed archive.",
@@ -704,6 +706,9 @@
     },
     {
       "name": "TownWatch",
+      "join_policy": "trial",
+      "join_standing": 3,
+      "trial": {"item": "Lantern", "text": "Bring a lantern for the night round and hand it to the sergeant — show you will keep watch."},
       "kind": "authority",
       "scale": "medium",
       "parent": "Ashford",
@@ -731,6 +736,7 @@
     },
     {
       "name": "ArchivistHouse",
+      "join_policy": "closed",
       "kind": "family",
       "scale": "small",
       "description": "The old archivist's sister and his apprentice — all that is left of his house.",
@@ -750,6 +756,8 @@
     },
     {
       "name": "CraftsGuild",
+      "join_policy": "sponsor",
+      "join_standing": 3,
       "kind": "guild",
       "scale": "medium",
       "parent": "Ashford",

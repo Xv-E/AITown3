@@ -132,6 +132,110 @@ class TestRipple(FactionTestCase):
         self.assertEqual(self.g.standing, {})
 
 
+class Recorder:
+    """只记写入的假 world。"""
+
+    def __init__(self):
+        self.queries = []
+
+    def run_query(self, query, **params):
+        self.queries.append((query, params))
+        return []
+
+
+class JoinTestCase(FactionTestCase):
+    RULES = {
+        "EmberCamp": ("town", "open", 1.0, ""),
+        "Axemen": ("gang", "trial", 3.0, "firewood"),
+        "BerryCircle": ("crew", "sponsor", 3.0, ""),
+        "OldCampKin": ("family", "closed", 0.0, ""),
+    }
+    LOCATION = {"Traveler": "Forest", "Rowan": "Forest", "Reed": "Forest", "Ash": "Camp", "Sage": "Forest"}
+
+    def setUp(self):
+        super().setUp()
+        self.world = Recorder()
+        self.trials = {}
+        g = self.g
+
+        def rules(world, f):
+            kind, policy, thr, item = self.RULES[f]
+            return factions.JoinRules(f, kind, policy, thr, item, "prove it")
+
+        def members(world, f):
+            return [
+                {"name": p, "role": r, "loyalty": l, "location": self.LOCATION.get(p)}
+                for p, rows in g.MEMBERS.items() for (fn, _k, _s, r, l) in rows if fn == f
+            ]
+
+        for name, fn in (
+            ("join_rules", rules),
+            ("direct_members", members),
+            ("_location_of", lambda world, p: self.LOCATION.get(p)),
+            ("_personal_trust", lambda world, npc, p: 0.0),
+            ("_open_trial", lambda world, p, f: self.trials.get((p, f))),
+        ):
+            self._saved[name] = getattr(factions, name)
+            setattr(factions, name, fn)
+
+    def join_as_member(self, person, faction, role="recruit"):
+        kind, _p, _t, _i = self.RULES[faction]
+        self.g.MEMBERS = {**self.g.MEMBERS, person: self.g.MEMBERS.get(person, []) + [(faction, kind, "small", role, 5)]}
+
+
+class TestJoin(JoinTestCase):
+    def test_open_faction_needs_standing_and_a_member_here(self):
+        check = factions.join_check(self.world, "Traveler", "EmberCamp")
+        self.assertFalse(check.ok)
+        self.assertTrue(any("below" in b for b in check.blockers))
+        self.g.standing[("Traveler", "EmberCamp")] = 1.0
+        check = factions.join_check(self.world, "Traveler", "EmberCamp")
+        self.assertTrue(check.ok, check.blockers)
+        self.assertIn("Rowan", check.sponsors)
+
+    def test_family_is_closed(self):
+        check = factions.join_check(self.world, "Traveler", "OldCampKin")
+        self.assertIn("outsiders cannot simply join", " ".join(check.blockers))
+
+    def test_sponsor_must_like_you(self):
+        self.g.standing[("Traveler", "BerryCircle")] = 3.0
+        check = factions.join_check(self.world, "Traveler", "BerryCircle")
+        self.assertIn("nobody here is willing to vouch for you", check.blockers)
+        self._saved.setdefault("_personal_trust", factions._personal_trust)
+        factions._personal_trust = lambda world, npc, p: 3.0
+        self.assertTrue(factions.join_check(self.world, "Traveler", "BerryCircle").ok)
+
+    def test_rival_membership_raises_the_bar(self):
+        self.join_as_member("Traveler", "Axemen")
+        self.g.standing[("Traveler", "BerryCircle")] = 4.0
+        factions._personal_trust = lambda world, npc, p: 9.0
+        check = factions.join_check(self.world, "Traveler", "BerryCircle")
+        self.assertEqual(check.threshold, 5.0)
+        self.assertFalse(check.ok)
+
+    def test_trial_starts_quest_then_give_admits(self):
+        self.g.standing[("Traveler", "Axemen")] = 3.0
+        res = factions.request_join(self.world, "Traveler", "Axemen")
+        self.assertEqual(res["outcome"], "trial_started")
+        self.assertEqual(res["giver"], "Rowan")
+        q, params = next((q, p) for q, p in self.world.queries if "q.kind = 'trial'" in q)
+        self.assertEqual(params["item"], "firewood")
+        self.assertEqual(params["g"], "Rowan")
+
+    def test_admit_shifts_rivals_and_writes_membership(self):
+        notes = factions.admit(self.world, "Traveler", "Axemen", via="Rowan")
+        self.assertTrue(notes[0].startswith("Traveler joined Axemen"))
+        self.assertAlmostEqual(self.g.standing[("Traveler", "Axemen")], 1.0)
+        self.assertAlmostEqual(self.g.standing[("Traveler", "BerryCircle")], -1.0)
+        self.assertTrue(any("MERGE (p)-[m:MEMBER_OF]->(f)" in q for q, _ in self.world.queries))
+
+    def test_refused_request_reports_blockers(self):
+        res = factions.request_join(self.world, "Traveler", "OldCampKin")
+        self.assertFalse(res["ok"])
+        self.assertEqual(res["outcome"], "refused")
+        self.assertTrue(res["notes"])
+
+
 class TestLabels(unittest.TestCase):
     def test_labels(self):
         self.assertEqual(factions.standing_label(7), "trusted")

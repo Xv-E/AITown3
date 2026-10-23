@@ -234,6 +234,8 @@
   "factions": [
     {
       "name": "Hearthvale",
+      "join_policy": "open",
+      "join_standing": 0,
       "kind": "town",
       "scale": "large",
       "description": "The small village of the clinic and the forest edge.",
@@ -258,6 +260,7 @@
     },
     {
       "name": "LilaHousehold",
+      "join_policy": "closed",
       "kind": "family",
       "scale": "small",
       "parent": "Hearthvale",

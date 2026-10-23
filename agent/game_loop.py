@@ -1820,7 +1820,9 @@ class GameLoop:
                 from content import get_content
                 from factions import on_action
 
-                changes = on_action(self.world, get_content().capability_of(action_name), list(args))
+                changes = on_action(
+                    self.world, get_content().capability_of(action_name), list(args), memory=self.memory
+                )
                 if changes:
                     metadata["faction_changes"] = changes
             except Exception:

@@ -127,6 +127,23 @@ Worlds may declare factions of any size — a family, a gang, a guild, the town 
 - Facts may set `"faction"`: that faction's private business, shared with members, maybe with allies, never with rivals.
 - The play UI shows your standing with each faction; dossiers list memberships.
 
+#### Joining factions
+
+Each faction has a joining rule (`join_policy`, `join_standing`, `trial`; defaults depend on `kind`):
+
+| policy | defaults | what it takes |
+|--------|----------|---------------|
+| `open` | town | standing ≥ threshold, and a member here to ask |
+| `sponsor` | guild, crew, other | as `open`, plus a member here who leans ≥ 3 toward you (attitude + personal trust) |
+| `trial` | gang, order, authority | as `open`, then a `Quest(kind=trial)`: hand the leader `trial.item` yourself |
+| `closed` | family | outsiders cannot join |
+
+- Being in a faction it is hostile to blocks joining; being in a rival adds +2 to the threshold.
+- Joining makes you a `recruit`, raises your standing with the faction by 1, shifts allies (+) and rivals / enemies (−1 / −2), and teaches you the faction's facts. At standing ≥ 7 you become a full `member`.
+- Leaving costs −3 standing.
+- NPCs who are members are told the real rules when they talk to you, so they don't promise what the game won't allow.
+- API: `POST /api/factions/{name}/join` (`{"via": "Rowan"}` optional), `POST /api/factions/{name}/leave`. The play UI shows a join / leave button per faction, with the reason in the tooltip when it is disabled.
+
 ## Project layout
 
 ```

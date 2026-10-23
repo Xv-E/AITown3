@@ -26,6 +26,17 @@ def _entity_label_for_name(world: "Neo4jWorld", name: str) -> Optional[str]:
     return None
 
 
+def _join_props(f) -> Dict[str, Any]:
+    props: Dict[str, Any] = {}
+    if getattr(f, "join_policy", ""):
+        props["join_policy"] = f.join_policy
+    if getattr(f, "join_standing", None) is not None:
+        props["join_standing"] = float(f.join_standing)
+    if getattr(f, "trial", None):
+        props["trial"] = json.dumps(dict(f.trial), ensure_ascii=False)
+    return props
+
+
 def _build_factions(world: "Neo4jWorld", factions) -> None:
     """Faction 节点 + MEMBER_OF{role,loyalty} + PART_OF + FACTION_REL{stance,reason} + STANDING{value}。"""
     for f in factions or []:
@@ -37,6 +48,7 @@ def _build_factions(world: "Neo4jWorld", factions) -> None:
             description=f.description,
             goal=f.goal,
             values=f.values,
+            **_join_props(f),
         )
     for f in factions or []:
         if f.parent:

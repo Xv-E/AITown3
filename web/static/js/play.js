@@ -685,14 +685,54 @@
     const sorted = factions.slice().sort(
       (a, b) => (b.member - a.member) || (b.standing - a.standing)
     );
-    el.textContent = sorted
+    const policyText = { open: "open", sponsor: "needs a sponsor", trial: "needs a trial", closed: "closed" };
+    el.innerHTML = sorted
       .map((f) => {
         const where = `${f.kind}${f.parent ? " of " + f.parent : ""}`;
-        if (f.member) return `${f.name} (${where}) — you: ${f.role || "member"}`;
+        const name = escapeHtml(f.name);
+        if (f.member) {
+          const leave = f.direct
+            ? ` <button class="faction-btn" data-faction="${name}" data-op="leave">Leave</button>`
+            : "";
+          return `<span class="faction">${name} (${escapeHtml(where)}) — you: ${escapeHtml(f.role || "member")}${leave}</span>`;
+        }
         const sign = f.standing > 0 ? "+" : "";
-        return `${f.name} (${where}) — ${f.label} ${sign}${f.standing}`;
+        let join = "";
+        const j = f.join;
+        if (j && j.policy !== "closed") {
+          const label = j.policy === "trial" ? "Ask for a trial" : "Ask to join";
+          const why = j.can_join
+            ? `${policyText[j.policy]}; ask ${j.sponsors_here.join(", ")}`
+            : j.blockers.join("; ");
+          join = ` <button class="faction-btn" data-faction="${name}" data-op="join"${
+            j.can_join ? "" : " disabled"
+          } title="${escapeHtml(why)}">${label}</button>`;
+        }
+        return `<span class="faction">${name} (${escapeHtml(where)}) — ${escapeHtml(f.label)} ${sign}${f.standing}${join}</span>`;
       })
       .join(" · ");
+    el.querySelectorAll(".faction-btn").forEach((btn) => {
+      btn.addEventListener("click", () => factionOp(btn.dataset.faction, btn.dataset.op));
+    });
+  }
+
+  async function factionOp(faction, op) {
+    try {
+      const res = await api(`/api/factions/${encodeURIComponent(faction)}/${op}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const notes = (res.notes || []).join("; ");
+      const kind = res.ok ? "ok" : "fail";
+      const head = op === "leave" ? `Left ${faction}` :
+        res.outcome === "joined" ? `Joined ${faction}` :
+        res.outcome === "trial_started" ? `${faction} set you a trial` : `${faction} refused you`;
+      logEvent(`${head}: ${notes}`, kind);
+      await loadPlayState();
+    } catch (e) {
+      logEvent(String(e.message || e), "fail");
+    }
   }
 
   function renderClues(clues) {

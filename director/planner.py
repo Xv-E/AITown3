@@ -127,6 +127,8 @@ Rules:
   relations: {with, stance: allied|friendly|neutral|rival|hostile, reason} — at least one rival or
   hostile pair so loyalties pull against each other. The player usually starts in none (standing 0).
   A fact may set "faction" when it is that faction's private business.
+  Optional join rules: join_policy open|sponsor|trial|closed (families are closed), join_standing
+  (standing an outsider needs), trial {item, text} — an existing portable item the leader wants handed over.
 - For talk_info: at least one fact known_by an NPC but NOT the player.
 - For use_on_person: target person.accepts_from must list the tool item name.
 - background/desire/fear/secret/bond history/fact text <= 35 words; other strings <= 12 words.
@@ -150,7 +152,8 @@ JSON shape:
     "name","kind":"family|gang|guild|crew|order|authority|town|other",
     "scale":"small|medium|large","description","goal","parent",
     "members":[{"name","role","loyalty"}],
-    "relations":[{"with","stance","reason"}]
+    "relations":[{"with","stance","reason"}],
+    "join_policy","join_standing","trial":{"item","text"}
   }]
 }
 facts[].faction (optional): name of the faction this fact privately belongs to

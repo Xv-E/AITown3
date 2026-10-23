@@ -734,6 +734,8 @@
   "factions": [
     {
       "name": "EmberCamp",
+      "join_policy": "open",
+      "join_standing": 1,
       "kind": "town",
       "scale": "large",
       "description": "Everyone who lives by the eternal fire.",
@@ -763,6 +765,9 @@
     },
     {
       "name": "Axemen",
+      "join_policy": "trial",
+      "join_standing": 3,
+      "trial": {"item": "firewood", "text": "Nobody runs with the Axemen until they have hauled wood to the boss with their own hands."},
       "kind": "gang",
       "scale": "small",
       "parent": "EmberCamp",
@@ -790,6 +795,8 @@
     },
     {
       "name": "BerryCircle",
+      "join_policy": "sponsor",
+      "join_standing": 3,
       "kind": "crew",
       "scale": "small",
       "parent": "EmberCamp",
@@ -810,6 +817,7 @@
     },
     {
       "name": "OldCampKin",
+      "join_policy": "closed",
       "kind": "family",
       "scale": "small",
       "description": "The last two who walked out of the old camp's fire together.",

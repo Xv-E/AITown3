@@ -245,6 +245,47 @@ def api_player():
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+class FactionJoinRequest(BaseModel):
+    via: Optional[str] = None  # 向哪位在场成员开口；不填则自动找
+
+
+def _faction_call(fn_name: str, faction: str, **kwargs):
+    import sys as _sys
+    agent_path = str(_AITOWN3 / "agent")
+    if agent_path not in _sys.path:
+        _sys.path.insert(0, agent_path)
+    import factions as _factions
+    from llm_service import get_web_memory
+
+    world = get_world()
+    player = get_player(world)
+    if player is None:
+        raise HTTPException(status_code=404, detail="No player character in the current world")
+    fn = getattr(_factions, fn_name)
+    return fn(world, player["name"], faction, memory=get_web_memory(), **kwargs)
+
+
+@app.post("/api/factions/{name}/join")
+def api_faction_join(name: str, req: FactionJoinRequest):
+    """玩家向在场成员申请加入势力：joined | trial_started | refused。"""
+    try:
+        return _faction_call("request_join", name, via=(req.via or "").strip() or None)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.post("/api/factions/{name}/leave")
+def api_faction_leave(name: str):
+    try:
+        return _faction_call("leave_faction", name)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
 @app.get("/api/play/state")
 def api_play_state():
     """Fetch full play state (player, scene, actions, map) in one call."""
@@ -430,8 +471,9 @@ async def api_execute(req: ExecuteActionRequest):
                 if agent_path not in _sys.path:
                     _sys.path.insert(0, agent_path)
                 from factions import on_action
+                from llm_service import get_web_memory
 
-                faction_changes = on_action(world, capability, positional)
+                faction_changes = on_action(world, capability, positional, memory=get_web_memory())
                 if faction_changes:
                     reason = f"{reason} (factions: {'; '.join(faction_changes)})"
             except Exception:

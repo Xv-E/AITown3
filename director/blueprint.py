@@ -361,6 +361,10 @@ class FactionSpec:
     relations: List[Dict[str, Any]] = field(default_factory=list)
     # 开局声望：{人名: -10..10}（多数人默认 0）
     standing: Dict[str, float] = field(default_factory=dict)
+    # 入会规矩：open | sponsor | trial | closed（空 = 按种类默认）；所需声望；考验 {item, text}
+    join_policy: str = ""
+    join_standing: Optional[float] = None
+    trial: Dict[str, str] = field(default_factory=dict)
 
     def normalized(self) -> "FactionSpec":
         kind = (self.kind or "other").strip().lower()
@@ -392,6 +396,9 @@ class FactionSpec:
                 "stance": stance,
                 "reason": str(r.get("reason") or "").strip(),
             })
+        policy = (self.join_policy or "").strip().lower()
+        if policy not in ("open", "sponsor", "trial", "closed"):
+            policy = ""
         standing = {
             _clean_name(str(k)): _clamp(v, -10, 10, 0)
             for k, v in (self.standing or {}).items() if k
@@ -407,6 +414,14 @@ class FactionSpec:
             members=members,
             relations=relations,
             standing=standing,
+            join_policy=policy,
+            join_standing=(
+                _clamp(self.join_standing, -10, 10, 0) if self.join_standing is not None else None
+            ),
+            trial={
+                k: str(v).strip() for k, v in (self.trial or {}).items()
+                if k in ("item", "text") and str(v or "").strip()
+            } if isinstance(self.trial, dict) else {},
         )
 
 
@@ -1054,6 +1069,9 @@ class EventBlueprint:
                     members=list(x.get("members") or []),
                     relations=list(x.get("relations") or []),
                     standing=dict(x.get("standing") or {}) if isinstance(x.get("standing"), dict) else {},
+                    join_policy=str(x.get("join_policy") or ""),
+                    join_standing=x.get("join_standing"),
+                    trial=dict(x.get("trial") or {}) if isinstance(x.get("trial"), dict) else {},
                 )
                 for x in (data.get("factions") or [])
                 if isinstance(x, dict) and x.get("name")

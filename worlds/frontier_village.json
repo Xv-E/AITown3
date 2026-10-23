@@ -231,6 +231,8 @@
   "factions": [
     {
       "name": "Settlers",
+      "join_policy": "open",
+      "join_standing": 0,
       "kind": "town",
       "scale": "large",
       "description": "The three who staked out the village, and whoever joins them.",
@@ -255,6 +257,7 @@
     },
     {
       "name": "OrenHousehold",
+      "join_policy": "closed",
       "kind": "family",
       "scale": "small",
       "parent": "Settlers",
@@ -282,6 +285,8 @@
     },
     {
       "name": "Fieldfolk",
+      "join_policy": "sponsor",
+      "join_standing": 2,
       "kind": "crew",
       "scale": "small",
       "parent": "Settlers",

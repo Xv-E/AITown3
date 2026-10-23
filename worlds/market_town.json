@@ -247,6 +247,8 @@
   "factions": [
     {
       "name": "MarketTown",
+      "join_policy": "open",
+      "join_standing": 0,
       "kind": "town",
       "scale": "large",
       "description": "Everyone who lives, trades or farms around the square.",
@@ -271,6 +273,9 @@
     },
     {
       "name": "TradersGuild",
+      "join_policy": "trial",
+      "join_standing": 3,
+      "trial": {"item": "coin", "text": "Guild dues: one coin into the treasurer's hand, and you trade under the guild's prices."},
       "kind": "guild",
       "scale": "medium",
       "parent": "MarketTown",
@@ -298,6 +303,8 @@
     },
     {
       "name": "FarmersGrange",
+      "join_policy": "sponsor",
+      "join_standing": 2,
       "kind": "crew",
       "scale": "small",
       "parent": "MarketTown",
