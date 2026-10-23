@@ -13,7 +13,11 @@ content/
     planning.json        PDDL 自动编译的手动剪枝（见第 5 节）
 ```
 
-默认加载 `base`，再按名字顺序加载 `content/` 下其它带 `pack.json` 的包（如 `village`）。
+默认加载 `base`，再按名字顺序加载 `content/` 下其它带 `pack.json` 的包（如 `streets`、`village`）。
+
+- `village`：边境村落的建设（工地、作坊、面包房……）
+- `streets`：街头经济 — `cash` 付给摊档时进摊主口袋（不销毁），摊档卖完向码头 `wholesale` 进 `supplies`，
+  `rent_book` 记房租，`collect_dues` 收保护费（结算在 `agent/street_economy.py`）
 环境变量 `AITOWN_CONTENT_PACKS`（逗号分隔）可以显式指定加载哪些包。
 **后加载的包覆盖同名定义**，所以想改 `base` 里的某个动作，新建一个包写同名文件即可：
 

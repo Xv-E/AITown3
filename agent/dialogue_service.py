@@ -16,6 +16,17 @@ import re
 from typing import Callable, Any, Dict, List, Optional
 
 from agent_profile import AgentProfile
+from factions import faction_block, pair_view, ripple
+from inner_life import (
+    DIALOGUE_CRAFT,
+    apply_mood,
+    favor_item_options,
+    favor_prompt_block,
+    graph_relations,
+    inner_life_block,
+    load_inner_life,
+    register_favor,
+)
 from npc_knowledge import (
     adjust_trust,
     knowledge_prompt_block,
@@ -179,15 +190,31 @@ def _parse_dialogue_payload(
     except (TypeError, ValueError):
         trust_delta = 0
     trust_delta = max(-1, min(2, trust_delta))
-    return {"lines": lines, "trust_delta": trust_delta}
+    out: Dict[str, Any] = {"lines": lines, "trust_delta": trust_delta}
+    out.update(_parse_heart_extras(data))
+    return out
+
+
+def _parse_heart_extras(data: Dict[str, Any]) -> Dict[str, Any]:
+    """对话 JSON 里可选的情绪变化与求助。"""
+    from inner_life import parse_favor
+
+    extras: Dict[str, Any] = {}
+    mood = str(data.get("mood") or "").strip()
+    if mood:
+        extras["mood"] = mood[:24]
+    favor = parse_favor(data.get("favor"))
+    if favor:
+        extras["favor"] = favor
+    return extras
 
 
 def _invoke_dialogue_primary(prompt: str) -> tuple[str, Dict[str, Any]]:
     """Qwen 主路径（无 GBNF）。返回 (raw_text, provider_info)。"""
     from llm_router import invoke_primary
 
-    # 对话只需 1–2 句短 JSON，token 宜少，避免拖到超时后 raw=null
-    max_tokens = int(os.getenv("DIALOGUE_MAX_TOKENS", "220"))
+    # 1–2 句台词 + 可选 mood/favor，token 仍宜少，避免拖到超时后 raw=null
+    max_tokens = int(os.getenv("DIALOGUE_MAX_TOKENS", "400"))
     timeout = float(os.getenv("DIALOGUE_LLM_TIMEOUT", "30"))
     info: Dict[str, Any] = {
         "used": False,
@@ -332,6 +359,99 @@ def _parse_utterance_payload(text: str) -> Optional[str]:
     return None
 
 
+def _parse_utterance_extras(text: str) -> Dict[str, Any]:
+    cleaned = _strip_reasoning(text or "")
+    for cand in reversed(_extract_json_objects(cleaned)):
+        try:
+            obj = json.loads(cand)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict) and (obj.get("text") or obj.get("utterance")):
+            return _parse_heart_extras(obj)
+    return {}
+
+
+def _is_player(world, name: str) -> bool:
+    if world is None or not name:
+        return False
+    try:
+        rows = world.run_query(
+            """
+            MATCH (p:Person {name: $n})
+            RETURN coalesce(p.is_player, false) AS ip, coalesce(p.role, '') AS role
+            LIMIT 1
+            """,
+            n=name,
+        ) or []
+    except Exception:
+        return False
+    return bool(rows) and (bool(rows[0].get("ip")) or rows[0].get("role") == "player")
+
+
+def _heart_blocks(world, me: str, other: str, knowledge=None) -> tuple[str, str]:
+    """(内心 + 关系 + 势力块, 求助格式块)。玩家自己不生成求助任务。"""
+    if world is None:
+        return "", ""
+    view = None
+    try:
+        view = pair_view(world, me, other)
+    except Exception as e:
+        logger.debug("faction view failed: %s", e)
+    try:
+        inner = load_inner_life(world, me)
+        rels = graph_relations(world, me, other)
+        # 亲近度 = 个人信任（仅对玩家）+ 势力倾向
+        trust = view.score if view is not None and view.reasons else None
+        if knowledge is not None and _is_player(world, other):
+            trust = int(getattr(knowledge, "trust_toward_player", 0) or 0) + (trust or 0)
+        heart = inner_life_block(inner, listener=other, rels=rels, trust=trust)
+    except Exception as e:
+        logger.debug("inner life block failed: %s", e)
+        heart = ""
+    try:
+        fblock = faction_block(world, me, other, view=view) if view is not None else ""
+    except Exception as e:
+        logger.debug("faction block failed: %s", e)
+        fblock = ""
+    if fblock:
+        heart = f"{heart}\n{fblock}" if heart else fblock
+    try:
+        from street_economy import economy_text
+
+        money = economy_text(world, me)
+    except Exception:
+        money = ""
+    if money:
+        heart = f"{heart}\n{money}" if heart else money
+    favor = ""
+    try:
+        if not _is_player(world, me):
+            options = favor_item_options(world)
+            if options:
+                favor = favor_prompt_block(options)
+    except Exception:
+        favor = ""
+    return heart, favor
+
+
+def _shared_history(memory, me: str, other: str, top_k: int = 2) -> List[str]:
+    """我和对方之间的过往（记忆检索，只保留提到对方的）。"""
+    if memory is None or not other:
+        return []
+    try:
+        hits = memory.search(me, f"{other} talked together", top_k=top_k + 3) or []
+    except Exception:
+        return []
+    out: List[str] = []
+    for h in hits:
+        t = str(h.get("text") or "").strip()
+        if t and other in t and t not in out:
+            out.append(t[:160])
+        if len(out) >= top_k:
+            break
+    return out
+
+
 def _build_speaker_utterance_prompt(
     *,
     speaker_a: str,
@@ -344,20 +464,26 @@ def _build_speaker_utterance_prompt(
     max_chars: int,
     retry_note: str = "",
     situation: str = "",
+    heart_block: str = "",
+    favor_block: str = "",
 ) -> str:
     retry = f"{retry_note}\n" if retry_note else ""
     hints = "; ".join(mem_hints[:3]) if mem_hints else "none"
     goal = (getattr(agent_a, "goal", "") or "").strip() or "(none set)"
+    heart = f"{heart_block}\n" if heart_block else ""
+    favor = f"{favor_block}\n" if favor_block else ""
+    fmt = '{"text":"...","mood":"one word"' + (',"favor":{...}' if favor_block else "") + "}"
     return f"""{retry}You are {speaker_a} at {location}. You will speak ONE line to {speaker_b}.
 Profile: {agent_a.personality}; {agent_a.background}; mood={agent_a.mood}
 Current goal: {goal}
 Your situation: {situation or '(nothing pressing)'}
-About {speaker_b}: {partner_brief}
+{heart}About {speaker_b}: {partner_brief}
 What you know (do not invent beyond this):
 {facts_block}
 Memory hints: {hints}
-Write one short in-character utterance (ask, greet, share, or press for info). Prefer advancing your goal. Speak in English only. Max {max_chars} chars.
-Return ONLY JSON: {{"text":"..."}}
+{DIALOGUE_CRAFT}
+Write one in-character line: greet, confide, tease, apologise, share news, or ask for help. If your goal needs something, say what it means to you, not just what is missing. Speak in English only. Max {max_chars} chars.
+{favor}Return ONLY JSON: {fmt}
 JSON:"""
 
 
@@ -416,6 +542,8 @@ def _llm_speaker_utterance(
     )
     facts_block = _speaker_facts_block(knowledge_a)
     mem_hints = [m[:160] for m in (knowledge_a.memory_snippets or [])[:3] if m]
+    mem_hints = _shared_history(memory, speaker_a, speaker_b) + mem_hints
+    heart_block, favor_block = _heart_blocks(world, speaker_a, speaker_b, knowledge_a)
 
     situation_a = situation_brief(world, speaker_a)
     prompt = _build_speaker_utterance_prompt(
@@ -428,6 +556,8 @@ def _llm_speaker_utterance(
         mem_hints=mem_hints,
         max_chars=max_chars,
         situation=situation_a,
+        heart_block=heart_block,
+        favor_block=favor_block,
     )
 
     t0 = _time.perf_counter()
@@ -467,6 +597,8 @@ def _llm_speaker_utterance(
                 "IMPORTANT: Previous answer was invalid. "
                 f"Output real speech from {speaker_a} to {speaker_b} as JSON."
             ),
+            heart_block=heart_block,
+            favor_block=favor_block,
         )
         try:
             raw2, _ = _invoke_dialogue_primary(retry_prompt)
@@ -481,13 +613,17 @@ def _llm_speaker_utterance(
     if text:
         if len(text) > max_chars:
             text = text[:max_chars]
+        extras = _parse_utterance_extras(raw)
+        if not favor_block:
+            extras.pop("favor", None)
+        meta.update(extras)
         tid = _record_dialogue_trace(
             prompt=prompt,
             raw=raw,
             ok=True,
             error="",
             meta=meta,
-            parsed={"text": text},
+            parsed={"text": text, **extras},
             elapsed_ms=(_time.perf_counter() - t0) * 1000,
         )
         meta["trace_id"] = tid
@@ -614,15 +750,19 @@ def _build_dialogue_prompt(
     history: Optional[List[Dict[str, str]]] = None,
     speaker_is_player: bool = True,
     situation: str = "",
+    heart_block: str = "",
+    favor_block: str = "",
 ) -> str:
     """尽量短的对话 prompt，降低 DashScope 超时概率。"""
     retry = f"{retry_note}\n" if retry_note else ""
     so_far = history_block(history)
-    hints = "; ".join(mem_hints[:2]) if mem_hints else "none"
+    hints = "; ".join(mem_hints[:3]) if mem_hints else "none"
     # 压缩 knowledge，避免长上下文拖慢
     clue = (clue_block or "").strip()
     if len(clue) > 600:
         clue = clue[:600] + "…"
+    heart = f"{heart_block}\n" if heart_block else ""
+    favor = f"{favor_block}\n" if favor_block else ""
     return f"""{retry}You are {speaker_b} at {location}. Stay in character. Reply in the language the player writes in (English if unsure).
 {so_far}{'Player (' + speaker_a + ')' if speaker_is_player else speaker_a}: "{safe_msg or '(greets you)'}"
 Profile: {agent_b.personality}; {agent_b.background}; mood={agent_b.mood}; style={style}
@@ -630,11 +770,12 @@ Your situation:
 {situation or '(nothing pressing)'}
 If they offer help or ask what you need, answer concretely from your situation: what you need, where it can be
 found or how it is made, and what you'll give for it. Don't make up needs you don't have.
-Knowledge (do not invent beyond this):
+{heart}Knowledge (do not invent beyond this):
 {clue}
 Memory hints: {hints}
+{DIALOGUE_CRAFT}
 {limits_block}
-Return ONLY JSON: {{"lines":[{{"speaker":"{speaker_b}","text":"..."}}],"trust_delta":0}}
+{favor}Return ONLY JSON: {{"lines":[{{"speaker":"{speaker_b}","text":"..."}}],"trust_delta":0,"mood":"how you feel now, one word"}}
 1-{limits['npc_lines_max']} NPC lines, each 1-{limits['npc_text']} chars. No player echo. trust_delta in -1..2.
 Only include facts you actually say; the listener learns from your spoken words, not from unspoken knowledge.
 JSON:"""
@@ -658,11 +799,13 @@ def _soft_npc_fallback(
         mood = str(getattr(knowledge, "mood", "") or "")
     low = (style + " " + role + " " + mood).lower()
     if "antagonist" in low or "liar" in low or "thief" in low or "nervous" in low:
-        npc_text = "The key? I… I haven't seen it. Don't look at me like that."
+        npc_text = "Hm? Not now. I've got enough on my mind without your questions."
     elif "guard" in low or "captain" in low:
-        npc_text = "I'm looking into the castle key myself. Share any leads you have."
+        npc_text = "Keep it short, I'm on duty. What do you want?"
+    elif any(w in low for w in ("sad", "tired", "worried", "anxious")):
+        npc_text = "Sorry… my head's somewhere else today. Ask me again in a little while?"
     else:
-        npc_text = "The key's missing? It's quite the stir — I've only heard rumors."
+        npc_text = "Oh — hello. Give me a moment, I lost my train of thought."
     if len(npc_text) > 160:
         npc_text = npc_text[:160]
     lines: List[Dict[str, str]] = []
@@ -727,7 +870,8 @@ def _llm_dialogue(
     safe_msg = msg.replace('"', "'")
     clue_block = knowledge_prompt_block(knowledge) if knowledge else "No knowledge loaded."
     mem = (knowledge.memory_snippets if knowledge else []) or []
-    mem_hints = [m[:160] for m in mem[:3] if m]
+    mem_hints = _shared_history(memory, speaker_b, speaker_a) + [m[:160] for m in mem[:3] if m]
+    heart_block, favor_block = _heart_blocks(world, speaker_b, speaker_a, knowledge)
     style = ""
     if knowledge:
         style = knowledge.speech_style or knowledge.personality
@@ -757,6 +901,8 @@ def _llm_dialogue(
         history=history,
         speaker_is_player=_is_player_name(world, speaker_a),
         situation=situation_brief(world, speaker_b) + earlier_block(speaker_b, speaker_a),
+        heart_block=heart_block,
+        favor_block=favor_block,
     )
 
     t0 = _time.perf_counter()
@@ -897,6 +1043,8 @@ def _llm_dialogue(
             parsed={
                 "lines": parsed["lines"],
                 "trust_delta": parsed.get("trust_delta"),
+                "mood": parsed.get("mood"),
+                "favor": parsed.get("favor"),
             },
             gbnf=ginfo,
             elapsed_ms=elapsed,
@@ -928,6 +1076,8 @@ def _llm_dialogue(
             f"Write a real in-character reply for {speaker_b} about the player's question. "
             f"Do not output angle brackets or template words."
         ),
+        heart_block=heart_block,
+        favor_block=favor_block,
     )
     text2 = ""
     gbnf_info2: Dict[str, Any] = {
@@ -1156,6 +1306,12 @@ def generate_talk_dialogue(
     result["utterance_source"] = utterance_source
     if utterance_meta.get("trace_id"):
         result["utterance_trace_id"] = utterance_meta["trace_id"]
+    if result.get("source") != "llm":
+        result.pop("favor", None)
+        result.pop("mood", None)
+    for key in ("favor", "mood"):
+        if utterance_meta.get(key):
+            result[f"speaker_{key}"] = utterance_meta[key]
     if not apply_trust:
         result["trust_base"] = knowledge.trust_toward_player
         return result
@@ -1165,6 +1321,7 @@ def generate_talk_dialogue(
 def _settle_trust(world, speaker_a: str, speaker_b: str, result: Dict[str, Any], base: int) -> Dict[str, Any]:
     """按这段话记好感：NPC 之间改 FEELS，对玩家改 trust_toward_player。"""
     delta = int(result.get("trust_delta") or 0)
+    raw_delta = delta
     if not _is_player_name(world, speaker_a):
         # NPC 之间：回话的人对发起的人的好感随这段话变（trust_toward_player 只记对玩家的）
         if world is not None and delta and result.get("source") == "llm":
@@ -1181,6 +1338,14 @@ def _settle_trust(world, speaker_a: str, speaker_b: str, result: Dict[str, Any],
         new_trust = base + (delta if result.get("source") == "llm" else 0)
     result["trust"] = new_trust
     result["trust_delta"] = delta if result.get("source") == "llm" else 0
+    if world is not None and raw_delta and result.get("source") == "llm":
+        # 谈话结果同时传到 speaker_b 所在势力对 speaker_a 的声望
+        try:
+            notes = ripple(world, speaker_a, speaker_b, raw_delta * 0.5, why=f"talk with {speaker_b}")
+            if notes:
+                result["faction_changes"] = notes
+        except Exception as e:
+            logger.debug("talk ripple failed: %s", e)
     return result
 
 
@@ -1239,6 +1404,58 @@ def write_dialogue_memories(
                 with_player=speaker_a,
                 player_message=msg[:200] if msg else "",
             )
+
+
+def _apply_heart_outcomes(
+    world,
+    memory,
+    dialogue: Dict[str, Any],
+    speaker_a: str,
+    speaker_b: str,
+    location: str,
+) -> None:
+    """对话后的情绪变化写回人物；真心求助落成 favor 任务并记入双方记忆。"""
+    if world is None:
+        return
+    for who, key in ((speaker_b, "mood"), (speaker_a, "speaker_mood")):
+        if dialogue.get(key):
+            apply_mood(world, who, dialogue[key])
+    for giver, helper, key in (
+        (speaker_b, speaker_a, "favor"),
+        (speaker_a, speaker_b, "speaker_favor"),
+    ):
+        favor = dialogue.get(key)
+        if not favor:
+            continue
+        try:
+            quest = register_favor(world, giver, helper, favor, location=location)
+        except Exception as e:
+            logger.debug("register favor failed: %s", e)
+            quest = None
+        if not quest:
+            continue
+        dialogue.setdefault("quests_created", []).append(quest)
+        if memory is None:
+            continue
+        why = favor.get("why") or ""
+        reward = favor.get("reward") or ""
+        memory.add(
+            giver,
+            f"You asked {helper} at {location} for {favor['item']}: {why}",
+            type="favor",
+            location=location,
+            actor=giver,
+            target=helper,
+        )
+        memory.add(
+            helper,
+            f"{giver} asked you at {location} for {favor['item']}: {why}"
+            + (f" They offered: {reward}" if reward else ""),
+            type="favor",
+            location=location,
+            actor=giver,
+            target=helper,
+        )
 
 
 def handle_talk_dialogue(
@@ -1333,6 +1550,7 @@ def apply_talk_dialogue(
                 )
     except Exception:
         pass
+    _apply_heart_outcomes(world, memory, dialogue, speaker_a, speaker_b, location)
     try:
         from knowledge import share_from_dialogue
 

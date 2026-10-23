@@ -1,0 +1,8 @@
+{
+  "archetype": "tea_set",
+  "name": "TeaSet",
+  "item_kind": "food",
+  "portable": true,
+  "value": 10,
+  "description": "Milk tea and a warm pineapple bun."
+}

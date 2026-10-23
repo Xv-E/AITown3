@@ -1,9 +1,9 @@
 """
-导演规划器 — 根据事件描述规划人物/地点/物品/任务蓝图。
+导演规划器 — 在手动配置的地图上规划人物/物品/任务/势力蓝图（不生成地图）。
 
 流程（多步 LLM，失败再回退模板）：
-  1) skeleton  — 标题/前提/卡司名册/任务/主线物/谜题类型
-  2) world     — 地点邻接、物品放置、任务骨架（人物仅占位）
+  1) skeleton  — 标题/前提/卡司名册/任务/主线物/谜题类型（起点/目标取自地图）
+  2) world     — 物品放置、任务骨架（人物仅占位）；地点与连通一律用地图
   3) cast      — NPC/玩家完整人设、事实传闻、社交关系
   4) mechanics — effects_on × accepts_from（可玩交互）
   → ensure_cast_quality + ensure_playable_mechanics + EventBlueprint.normalized()
@@ -24,6 +24,7 @@ from .validate import (
     is_minimally_playable,
 )
 from .solvability import check_solvable
+from .maps import _map_part, load_map, map_prompt_block, neighbors
 from .world_loader import list_worlds, load_world, pick_world
 
 logger = logging.getLogger(__name__)
@@ -39,17 +40,21 @@ Rules:
 - English CamelCase names for entities (TownSquare, StolenLedger, VaultDoor, InnkeeperMara).
 - cast MUST include exactly one role=player (Traveler unless user named another).
 - cast SHOULD include 1-3 NPCs (role=npc) and usually one antagonist when the plot needs opposition.
-- Each cast entry needs a short function (why they matter to the quest).
+- Each cast entry needs a function: why they matter to the quest AND what they personally stand to gain or lose.
+- backstory: what happened BEFORE play starts, as cause and effect — who did what, why, and who is hurt by it.
+  The quest must follow from the backstory; avoid "X is missing, fetch X" with no reason behind it.
 - One clear quest objective and one macguffin CamelCase item name.
 - puzzle_kind must be one of: key_door | deliver | use_on_person | talk_info | custom
 - If the draft implies a locked door/vault/gate, use puzzle_kind=key_door and name both key and door.
+- The map is hand-made and FIXED: start_location and goal_location must be names from it.
+  For key_door pick a goal_location with a single exit (a dead end) so a door can guard it.
 - talk_info / use_on_person MUST name the informant or target NPC in cast.
-- EVERY string field <= 12 words. Output ONLY valid JSON.
+- backstory <= 45 words; function <= 20 words; every other string <= 12 words. Output ONLY valid JSON.
 """
 
 SKELETON_SCHEMA = """
 Required JSON keys:
-title, premise,
+title, premise, backstory,
 cast: [{name, role, function}]  role: player|npc|antagonist,
 player_name (must match the cast player),
 antagonist_name (empty if none),
@@ -58,33 +63,31 @@ quest: {name, objective, macguffin},
 puzzle_kind: key_door|deliver|use_on_person|talk_info|custom,
 key_name (string, empty unless key_door),
 door_name (string, empty unless key_door),
-goal_location (CamelCase place the player ultimately needs),
-start_location (CamelCase hub)
+goal_location (a place from the FIXED MAP the player ultimately needs),
+start_location (a place from the FIXED MAP where the player begins)
 """
 
 WORLD_SYSTEM = """You are the Director of a small playable RPG town simulation.
-Step 2/4: expand the FIXED skeleton into map topology, item placement, and a thin quest.
+Step 2/4: place the FIXED skeleton onto the FIXED hand-made map: item placement and a thin quest.
 Persons are PLACEHOLDERS only (name/role/located_at). Full NPC profiles come in step 3.
 
 Rules:
 - Keep skeleton cast / macguffin / key / door / quest names EXACTLY.
-- 3-5 locations (include start_location and goal_location), connected adjacencies.
-- Rooms inside a building (tavern, shop, cellar, vault...) are their own locations with
-  indoor=true and parent=<the outdoor location the building stands in>; outdoor places omit both.
-- For key_door: do NOT put goal_location in open adjacencies; goal is reached via unlocking later.
+- The map is hand-configured: do NOT invent, rename or connect locations. Omit "locations" and
+  "adjacencies"; every located_at / connects_to must be a place from the FIXED MAP.
 - persons: one stub per cast member; put them at fitting locations (player at start).
 - Items: place macguffin/key/door correctly. Doors: item_kind=door, locked=true, portable=false,
   located_at start-side room, accepts_from:[KeyName], connects_to=goal_location.
   Keys: item_kind=key, portable=true, quest_flag=main_macguffin when it is the macguffin.
 - 1 quest; involves must list existing Person/Location/Item names only.
+- quest.description carries the human stakes from the skeleton backstory: what went wrong,
+  who is hurt, and why the giver cares personally (<= 40 words).
 - Leave facts/rumors/social empty ([]) — cast step owns those.
-- EVERY string <= 12 words. Output ONLY valid JSON.
+- quest.description <= 40 words; every other string <= 12 words. Output ONLY valid JSON.
 """
 
 WORLD_SCHEMA = """
 Required JSON keys:
-locations[{name,description,tags,indoor,parent}],
-adjacencies[{a,b}],
 persons[{name,located_at,role}],
 items[{name,value,located_at,held_by,owned_by,quest_flag,description,item_kind,locked,portable,
        accepts_from,connects_to,effects_on}],
@@ -101,17 +104,40 @@ Do NOT rename cast members. Do NOT add/remove locations or items. Do NOT write i
 Rules:
 - Keep every cast name/role from the world stubs EXACTLY.
 - Every person needs: personality, background, goal, values, mood, hp, power_level,
-  speech_style, secret_policy, trust_toward_player, located_at (must be an existing location).
+  speech_style, secret_policy, trust_toward_player, located_at (must be an existing location),
+  desire, fear, secret, bonds.
+- background: a concrete past event that ties this person to the backstory (not a job title).
+- desire: what they long for beyond today's chores; fear: what they dread losing or facing.
+- secret: something they hide that touches the backstory or another cast member.
+  The antagonist's secret must explain WHY they oppose the player — a motive, not pure villainy.
+- bonds: 1-2 entries per person {with, feeling, history}: a shared past with another cast member
+  (a debt, an old love, a rivalry, family, guilt, a broken promise). Bonds should pull people in
+  different directions so conversations carry tension and warmth.
 - Optional: works_at, accepts_from (tool names that may be used ON this person).
 - secret_policy: share_gossip | guarded | lie | open
 - trust_toward_player: integer -5..10 (antagonist usually <= 1; helpful npc >= 2)
 - Player goal should match the quest objective; NPC goals should be local motives.
 - 1-3 facts with known_by listing who already knows them (plot-critical info on the right NPC).
+  Facts are links in the backstory's chain of cause and effect, not game instructions.
 - 0-2 rumors with believed_by.
-- social: KNOWS between player and each NPC; FRIENDS_WITH/LIKES sparingly.
+- social: KNOWS between player and each NPC; FRIENDS_WITH/LIKES/RIVALS_WITH/FAMILY_OF to mirror bonds.
+- factions: 2-5 factions of DIFFERENT sizes that every NPC belongs to at least one of:
+  small ones (a family, a gang, a crew) and larger ones (a guild, the town watch, the whole town).
+  Small factions may set parent to a larger one. Each faction has a goal that can clash with others.
+  members: {name, role (e.g. mother, boss, apprentice), loyalty 0-10}; a person may belong to several.
+  relations: {with, stance: allied|friendly|neutral|rival|hostile, reason} — at least one rival or
+  hostile pair so loyalties pull against each other. The player usually starts in none (standing 0).
+  A fact may set "faction" when it is that faction's private business.
+  territory: {Location: strength 1-10} over FIXED MAP places each faction holds (towns hold many,
+  gangs and families one or two; rivals may share a contested place).
+  traits: 1-3 {id, why} picked from: expansionist, insular, welcoming, militant, pacifist, vengeful,
+  mercantile, zealous, secretive — each "why" ties the trait to the faction's story.
+  Optional join rules: join_policy open|sponsor|trial|closed (families are closed), join_standing
+  (standing an outsider needs), trial {item, text} — an existing portable item the leader wants handed over.
 - For talk_info: at least one fact known_by an NPC but NOT the player.
 - For use_on_person: target person.accepts_from must list the tool item name.
-- EVERY string <= 12 words. Output ONLY valid JSON.
+- background/desire/fear/secret/bond history/fact text <= 35 words; other strings <= 12 words.
+- Output ONLY valid JSON.
 """
 
 CAST_SCHEMA = """
@@ -120,13 +146,24 @@ JSON shape:
   "persons":[{
     "name","located_at","works_at","role",
     "personality","background","goal","values","mood","hp","power_level",
-    "speech_style","secret_policy","trust_toward_player","accepts_from"
+    "speech_style","secret_policy","trust_toward_player","accepts_from",
+    "desire","fear","secret",
+    "bonds":[{"with","feeling","history"}]
   }],
   "facts":[{name,text,secret_level,known_by}],
   "rumors":[{name,text,about,believed_by}],
-  "social":[{a,rel,b}]
+  "social":[{a,rel,b}],
+  "factions":[{
+    "name","kind":"family|gang|guild|crew|order|authority|town|other",
+    "scale":"small|medium|large","description","goal","parent",
+    "members":[{"name","role","loyalty"}],
+    "relations":[{"with","stance","reason"}],
+    "join_policy","join_standing","trial":{"item","text"},
+    "territory":{"Place":5},"traits":[{"id","why"}]
+  }]
 }
-rel: KNOWS|FRIENDS_WITH|LIKES
+facts[].faction (optional): name of the faction this fact privately belongs to
+rel: KNOWS|FRIENDS_WITH|LIKES|RIVALS_WITH|FAMILY_OF
 """
 
 MECHANICS_SYSTEM = """You are the Director of a small playable RPG town simulation.
@@ -414,9 +451,12 @@ def _normalize_skeleton(raw: Dict[str, Any], prompt: str) -> Optional[Dict[str, 
         )
         npcs = [informant]
 
+    backstory = str(raw.get("backstory") or "").strip()
+
     return {
         "title": title,
         "premise": premise,
+        "backstory": backstory,
         "player_name": player,
         "antagonist_name": antagonist,
         "npc_names": npcs[:3],
@@ -433,23 +473,26 @@ def _normalize_skeleton(raw: Dict[str, Any], prompt: str) -> Optional[Dict[str, 
 def _stage_skeleton(
     prompt: str,
     draft: Optional[Dict[str, Any]],
+    map_data: Dict[str, Any],
 ) -> Optional[Dict[str, Any]]:
     user = (
         "Extract a story skeleton JSON from this draft.\n\n"
         f"Draft:\n{prompt.strip()}\n"
         f"{_draft_block(draft)}\n"
+        f"{map_prompt_block(map_data)}\n"
         f"{SKELETON_SCHEMA}\n"
         "JSON:"
     )
     data = _invoke_json(
         system=SKELETON_SYSTEM,
         user=user,
-        max_tokens=550,
+        max_tokens=700,
         stage="skeleton",
     )
     if not data:
         return None
-    return _normalize_skeleton(data, prompt)
+    sk = _normalize_skeleton(data, prompt)
+    return _fit_skeleton_to_map(sk, map_data) if sk else None
 
 
 def _inject_skeleton_constraints(world: Dict[str, Any], sk: Dict[str, Any]) -> Dict[str, Any]:
@@ -460,15 +503,9 @@ def _inject_skeleton_constraints(world: Dict[str, Any], sk: Dict[str, Any]) -> D
 
     start = sk["start_location"]
     goal = sk.get("goal_location") or ""
+    # 地图手动配置：这里只读地点，不新增（_apply_fixed_map 会换成固定地图）
     locs = [x for x in (out.get("locations") or []) if isinstance(x, dict)]
-    loc_names = {str(x.get("name", "")) for x in locs}
-    if start and start not in loc_names:
-        locs.insert(0, {"name": start, "description": "Starting hub.", "tags": "hub"})
-        loc_names.add(start)
-    if goal and goal not in loc_names:
-        locs.append({"name": goal, "description": "Goal area.", "tags": "goal,secret"})
-        loc_names.add(goal)
-    out["locations"] = locs
+    loc_names = {str(x.get("name", "")) for x in locs} | {start, goal} - {""}
 
     # persons — 按 cast 名册强制占位；完整人设留给 cast 阶段
     persons = [x for x in (out.get("persons") or []) if isinstance(x, dict)]
@@ -651,11 +688,13 @@ def _stage_world(
     prompt: str,
     skeleton: Dict[str, Any],
     draft: Optional[Dict[str, Any]],
+    map_data: Dict[str, Any],
 ) -> Optional[Dict[str, Any]]:
     user = (
-        "Expand this FIXED skeleton into world JSON (no effects_on yet).\n\n"
+        "Place this FIXED skeleton onto the FIXED map as world JSON (no effects_on yet).\n\n"
         f"Original draft:\n{prompt.strip()}\n\n"
         f"Skeleton (DO NOT rename):\n{json.dumps(skeleton, ensure_ascii=False, indent=2)}\n"
+        f"{map_prompt_block(map_data)}\n"
         f"{_draft_block(draft)}\n"
         f"{WORLD_SCHEMA}\n"
         "JSON:"
@@ -668,10 +707,10 @@ def _stage_world(
     )
     if not data:
         return None
-    if not data.get("locations") or not data.get("persons"):
-        logger.warning("Director world stage missing locations/persons")
+    if not data.get("persons"):
+        logger.warning("Director world stage missing persons")
         return None
-    return _inject_skeleton_constraints(data, skeleton)
+    return _apply_fixed_map(_inject_skeleton_constraints(data, skeleton), map_data, skeleton)
 
 
 def _apply_cast_patch(
@@ -706,9 +745,14 @@ def _apply_cast_patch(
             "speech_style",
             "secret_policy",
             "parent_goal",
+            "desire",
+            "fear",
+            "secret",
         ):
             if key in upd and upd[key] is not None and str(upd[key]).strip():
                 cur[key] = str(upd[key]).strip()
+        if isinstance(upd.get("bonds"), (list, dict)):
+            cur["bonds"] = upd["bonds"]
         if "hp" in upd and upd["hp"] is not None:
             try:
                 cur["hp"] = int(upd["hp"])
@@ -753,6 +797,8 @@ def _apply_cast_patch(
         out["rumors"] = [x for x in patch["rumors"] if isinstance(x, dict)]
     if isinstance(patch.get("social"), list):
         out["social"] = list(patch["social"])
+    if isinstance(patch.get("factions"), list):
+        out["factions"] = [x for x in patch["factions"] if isinstance(x, dict) and x.get("name")]
     return out
 
 
@@ -764,6 +810,7 @@ def _stage_cast(
     compact = {
         "title": world.get("title"),
         "premise": world.get("premise"),
+        "backstory": skeleton.get("backstory"),
         "puzzle_kind": skeleton.get("puzzle_kind"),
         "quest": skeleton.get("quest"),
         "cast": skeleton.get("cast"),
@@ -795,7 +842,7 @@ def _stage_cast(
         ],
     }
     user = (
-        "Flesh out cast profiles, facts, rumors, and social links.\n"
+        "Flesh out cast profiles, facts, rumors, social links, and factions.\n"
         "Keep every person name/role. Do not invent new people.\n\n"
         f"Draft intent:\n{prompt.strip()}\n\n"
         f"World context:\n{json.dumps(compact, ensure_ascii=False, indent=2)}\n"
@@ -805,7 +852,7 @@ def _stage_cast(
     return _invoke_json(
         system=CAST_SYSTEM,
         user=user,
-        max_tokens=900,
+        max_tokens=2200,
         stage="cast",
     )
 
@@ -899,25 +946,20 @@ def _stage_mechanics(
     return data
 
 
-def _fallback_world_from_skeleton(sk: Dict[str, Any]) -> Dict[str, Any]:
-    """第二步失败时，用骨架生成最小可玩草稿，再交给机制修补。"""
+def _fallback_world_from_skeleton(sk: Dict[str, Any], map_data: Dict[str, Any]) -> Dict[str, Any]:
+    """第二步失败时，在固定地图上摆一个最小可玩草稿，再交给机制修补。"""
     start = sk["start_location"]
-    goal = sk.get("goal_location") or "Vault"
-    locs = [
-        {"name": start, "description": "Starting hub.", "tags": "hub"},
-    ]
+    goal = sk.get("goal_location") or ""
+    names = [x["name"] for x in map_data.get("locations") or []]
+    others = [n for n in names if n not in (start, goal)]
     if sk["puzzle_kind"] == "key_door":
-        mid = "Storage" if start != "Storage" else "SideRoom"
-        locs.append({"name": mid, "description": "Side room with supplies.", "tags": "item"})
-        locs.append({"name": goal, "description": "Sealed goal area.", "tags": "goal,secret"})
-        adj = [{"a": start, "b": mid}]
         key_name = sk["key_name"] or sk["quest"]["macguffin"]
         door_name = sk["door_name"] or "VaultDoor"
         items = [
             {
                 "name": key_name,
                 "value": 50,
-                "located_at": mid,
+                "located_at": _farthest(map_data, start, exclude={goal}) or start,
                 "quest_flag": "main_macguffin",
                 "item_kind": "key",
                 "portable": True,
@@ -928,7 +970,7 @@ def _fallback_world_from_skeleton(sk: Dict[str, Any]) -> Dict[str, Any]:
             {
                 "name": door_name,
                 "value": 0,
-                "located_at": start,
+                "located_at": start,  # _apply_fixed_map 移到守门的地点
                 "item_kind": "door",
                 "locked": True,
                 "portable": False,
@@ -940,14 +982,13 @@ def _fallback_world_from_skeleton(sk: Dict[str, Any]) -> Dict[str, Any]:
         ]
         involves = [key_name, door_name, sk["player_name"], goal]
     else:
-        locs.append({"name": goal if goal != start else "Market", "description": "Second place.", "tags": ""})
-        adj = [{"a": start, "b": locs[-1]["name"]}]
         mac = sk["quest"]["macguffin"]
+        spot = goal or (others[0] if others else start)
         items = [
             {
                 "name": mac,
                 "value": 100,
-                "located_at": locs[-1]["name"],
+                "located_at": spot,
                 "quest_flag": "main_macguffin",
                 "description": "Central quest object.",
                 "effects_on": [],
@@ -961,45 +1002,16 @@ def _fallback_world_from_skeleton(sk: Dict[str, Any]) -> Dict[str, Any]:
             "name": sk["player_name"],
             "located_at": start,
             "role": "player",
-            "personality": "",
-            "background": "A traveler drawn into local trouble.",
             "goal": sk["quest"]["objective"],
-            "values": "",
-            "mood": "determined",
-            "hp": 100,
-            "power_level": 10,
         }
     ]
-    for entry in sk.get("cast") or []:
-        if not isinstance(entry, dict):
-            continue
-        name = str(entry.get("name") or "")
-        role = str(entry.get("role") or "npc")
-        if not name or name == sk["player_name"]:
-            continue
-        persons.append(
-            {
-                "name": name,
-                "located_at": locs[-1]["name"] if role == "antagonist" else start,
-                "role": role,
-                "personality": "",
-                "background": str(entry.get("function") or "Town resident."),
-                "goal": "Keep the secret" if role == "antagonist" else "Daily work",
-                "values": "",
-                "mood": "tense" if role == "antagonist" else "neutral",
-                "hp": 100,
-                "power_level": 12 if role == "antagonist" else 10,
-            }
-        )
-        if name not in involves:
-            involves.append(name)
-    if sk.get("antagonist_name") and sk["antagonist_name"] not in {
-        p["name"] for p in persons
-    }:
+    for i, n in enumerate(sk.get("npc_names") or []):
+        persons.append({"name": n, "located_at": others[i % len(others)] if others else start, "role": "npc"})
+    if sk.get("antagonist_name"):
         persons.append(
             {
                 "name": sk["antagonist_name"],
-                "located_at": locs[-1]["name"],
+                "located_at": others[-1] if others else start,
                 "role": "antagonist",
                 "personality": "secretive",
                 "background": "Opposes the traveler.",
@@ -1012,18 +1024,16 @@ def _fallback_world_from_skeleton(sk: Dict[str, Any]) -> Dict[str, Any]:
         )
         involves.append(sk["antagonist_name"])
 
-    return _inject_skeleton_constraints(
+    world = _inject_skeleton_constraints(
         {
             "title": sk["title"],
             "premise": sk["premise"],
-            "locations": locs,
-            "adjacencies": adj,
             "persons": persons,
             "items": items,
             "quests": [
                 {
                     "name": sk["quest"]["name"],
-                    "description": sk["quest"]["objective"],
+                    "description": sk.get("backstory") or sk["quest"]["objective"],
                     "stage": "intro",
                     "state": "active",
                     "involves": involves,
@@ -1043,12 +1053,114 @@ def _fallback_world_from_skeleton(sk: Dict[str, Any]) -> Dict[str, Any]:
         },
         sk,
     )
+    return _apply_fixed_map(world, map_data, sk)
+
+
+def _farthest(map_data: Dict[str, Any], start: str, *, exclude: set) -> Optional[str]:
+    """沿开放连通 BFS，离起点最远且不在 exclude 里的地点。"""
+    nb = neighbors(map_data)
+    seen, frontier, last = {start}, [start], None
+    while frontier:
+        nxt = []
+        for n in frontier:
+            for m in nb.get(n, []):
+                if m not in seen:
+                    seen.add(m)
+                    nxt.append(m)
+                    if m not in exclude:
+                        last = m
+        frontier = nxt
+    return last
+
+
+def _fit_skeleton_to_map(sk: Dict[str, Any], map_data: Dict[str, Any]) -> Dict[str, Any]:
+    """起点 / 目标必须是地图上的地点；key_door 的目标必须是只有一个出口的死角，否则改为 deliver。"""
+    out = dict(sk)
+    locs = map_data.get("locations") or []
+    names = [x["name"] for x in locs]
+    nb = neighbors(map_data)
+    if out.get("start_location") not in names:
+        hub = next((x["name"] for x in locs if "hub" in str(x.get("tags") or "")), None)
+        out["start_location"] = hub or (names[0] if names else out.get("start_location"))
+    start = out["start_location"]
+    goal = out.get("goal_location") or ""
+    if out.get("puzzle_kind") == "key_door":
+        # 死角：至多一个开放出口（0 个 = 地图上本就只能经门进入）
+        leaves = sorted(
+            (n for n in names if n != start and len(nb.get(n) or []) <= 1),
+            key=lambda n: len(nb.get(n) or []),
+        )
+        if goal not in leaves:
+            goal = leaves[0] if leaves else ""
+        if not goal:
+            logger.info("Fixed map has no dead end for a door; key_door → deliver")
+            out["puzzle_kind"] = "deliver"
+            out["key_name"] = out["door_name"] = ""
+    elif goal not in names:
+        goal = ""
+    out["goal_location"] = goal
+    return out
+
+
+def _apply_fixed_map(world: Dict[str, Any], map_data: Dict[str, Any], sk: Dict[str, Any]) -> Dict[str, Any]:
+    """地点 / 连通一律换成手动地图；越界的位置拉回起点；key_door 把通往目标的那条边改成门。"""
+    out = dict(world)
+    out["locations"] = [dict(x) for x in map_data.get("locations") or []]
+    adjacencies = [dict(e) for e in map_data.get("adjacencies") or []]
+    names = {x["name"] for x in out["locations"]}
+    start = sk.get("start_location") or next(iter(names), "")
+    goal = sk.get("goal_location") or ""
+
+    gate = ""
+    if sk.get("puzzle_kind") == "key_door" and goal:
+        locked_partner = next(
+            (e["b"] if e.get("a") == goal else e["a"] for e in adjacencies
+             if e.get("locked") and goal in (e.get("a"), e.get("b"))),
+            "",
+        )
+        gate = next(iter(neighbors(map_data).get(goal) or []), "") or locked_partner or start
+        # 门代替这条边：解锁时机制会重新连上 ADJACENT_TO
+        adjacencies = [e for e in adjacencies if {e.get("a"), e.get("b")} != {gate, goal}]
+    out["adjacencies"] = adjacencies
+
+    for p in out.get("persons") or []:
+        if isinstance(p, dict) and p.get("located_at") not in names:
+            p["located_at"] = start
+        if isinstance(p, dict) and p.get("works_at") and p["works_at"] not in names:
+            p["works_at"] = None
+    door_name = sk.get("door_name") or ""
+    for it in out.get("items") or []:
+        if not isinstance(it, dict):
+            continue
+        if gate and it.get("name") == door_name:
+            it["located_at"] = gate
+            it["connects_to"] = goal
+        elif it.get("located_at") and it["located_at"] not in names:
+            it["located_at"] = start
+        if it.get("connects_to") and it["connects_to"] not in names:
+            it["connects_to"] = goal or ""
+    for q in out.get("quests") or []:
+        if isinstance(q, dict):
+            q["involves"] = [x for x in (q.get("involves") or []) if x]
+    return out
+
+
+def _with_backstory(world: Dict[str, Any], sk: Dict[str, Any]) -> Dict[str, Any]:
+    """前情写进 premise：所有 NPC 决策 / 对话都会读到世界前提。"""
+    backstory = str(sk.get("backstory") or "").strip()
+    premise = str(world.get("premise") or sk.get("premise") or "").strip()
+    if not backstory or backstory in premise:
+        return world
+    out = dict(world)
+    out["premise"] = f"{premise} Before all this: {backstory}".strip()
+    return out
 
 
 def _llm_plan(
     prompt: str,
     *,
     draft: Optional[Dict[str, Any]] = None,
+    map_data: Dict[str, Any],
 ) -> Optional[EventBlueprint]:
     """四步规划：skeleton → world → cast → mechanics，再确定性修补。"""
     try:
@@ -1060,15 +1172,16 @@ def _llm_plan(
         logger.info("Director primary LLM not configured")
         return None
 
-    sk = _stage_skeleton(prompt, draft)
+    sk = _stage_skeleton(prompt, draft, map_data)
     if not sk:
         logger.warning("Director skeleton stage failed")
         return None
 
-    world = _stage_world(prompt, sk, draft)
+    world = _stage_world(prompt, sk, draft, map_data)
     if not world:
         logger.warning("Director world stage failed; using skeleton fallback world")
-        world = _fallback_world_from_skeleton(sk)
+        world = _fallback_world_from_skeleton(sk, map_data)
+    world = _with_backstory(world, sk)
 
     cast_patch = _stage_cast(prompt, world, sk)
     if cast_patch:
@@ -1132,6 +1245,8 @@ def plan_event(
     template_id: Optional[str] = None,
     world_id: Optional[str] = None,
     draft: Optional[Dict[str, Any]] = None,
+    map_id: Optional[str] = None,
+    world=None,
 ) -> EventBlueprint:
     """
     规划事件蓝图。
@@ -1155,7 +1270,12 @@ def plan_event(
         return out
 
     if not force_mock:
-        llm_bp = _llm_plan(prompt, draft=draft)
+        # 地图只来自手动配置：草稿自带地点则用草稿的，否则 map_id / 当前地图 / 默认地图
+        if draft and draft.get("locations"):
+            map_data = _map_part(draft, map_id="draft", source="draft")
+        else:
+            map_data = load_map(map_id, world=world)
+        llm_bp = _llm_plan(prompt, draft=draft, map_data=map_data)
         if llm_bp is not None:
             return llm_bp
 

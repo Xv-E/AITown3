@@ -249,6 +249,10 @@ def ensure_cast_quality(
                 sells=list(getattr(p, "sells", []) or []),
                 shop_stock=getattr(p, "shop_stock", 1),
                 secret=getattr(p, "secret", ""),
+                knows=dict(p.knows or {}),
+                desire=(p.desire or "").strip(),
+                fear=(p.fear or "").strip(),
+                bonds=dict(p.bonds or {}),
             )
         )
 
@@ -323,6 +327,7 @@ def ensure_cast_quality(
                 text=f.text,
                 secret_level=f.secret_level,
                 known_by=known or ([player] if player else []),
+                faction=f.faction,
             )
         )
     cleaned_rumors = []
@@ -351,6 +356,7 @@ def ensure_cast_quality(
         social=social,
         source=bp.source,
         terrain=getattr(bp, "terrain", None),
+        factions=list(bp.factions),
     )
 
 
@@ -548,6 +554,7 @@ def ensure_playable_mechanics(bp: EventBlueprint) -> EventBlueprint:
                 social=list(bp.social),
                 source=bp.source,
                 terrain=getattr(bp, "terrain", None),
+                factions=list(bp.factions),
             ),
             door,
         )
@@ -641,6 +648,7 @@ def ensure_playable_mechanics(bp: EventBlueprint) -> EventBlueprint:
         social=list(bp.social),
         source=bp.source,
         terrain=getattr(bp, "terrain", None),
+        factions=list(bp.factions),
     )
 
 

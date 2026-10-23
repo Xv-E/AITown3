@@ -1,0 +1,8 @@
+{
+  "archetype": "beer",
+  "name": "Beer",
+  "item_kind": "food",
+  "portable": true,
+  "value": 4,
+  "description": "A cold bottle of beer."
+}

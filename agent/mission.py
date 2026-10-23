@@ -77,12 +77,18 @@ def _quest_goal_locations(world: "Neo4jWorld", quest: str, door_locs: Set[str]) 
     return targets or locs
 
 
-def sync_quest_progress(world: "Neo4jWorld", character: str = "") -> str:
+def sync_quest_progress(world: "Neo4jWorld", character: str = "", memory=None) -> str:
     """根据世界状态轻量更新 Quest.stage/state，供 UI 显示。返回备注（可空）。
 
     不会宣布「角色停止行动」——是否继续规划由决策器按情境决定。
     """
     notes: List[str] = []
+    try:
+        from inner_life import settle_favors
+
+        notes.extend(settle_favors(world, memory=memory))
+    except Exception:
+        pass
     by_quest = _quests_with_doors(world)
     for qname, doors in by_quest.items():
         if not doors:
