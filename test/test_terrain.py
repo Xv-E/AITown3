@@ -68,7 +68,14 @@ def _reachable(names, edges):
 @pytest.mark.parametrize("world_id", sorted(p.stem for p in WORLDS.glob("*.json")))
 def test_the_map_connects_exactly_what_the_graph_connects(world_id):
     places, links, side = _world_spec(world_id)
-    t = generate(places, links, side)
+    data = json.loads((WORLDS / f"{world_id}.json").read_text(encoding="utf-8"))
+    if data.get("terrain"):
+        # 手画地图的世界不走自动布局：检查画出来的地图本身
+        raw = data["terrain"]
+        parents = {p.name: p.parent for p in places if p.indoor}
+        t = from_ascii(raw["rows"], raw["legend"], parents.keys(), parents, decor=raw.get("decor"))
+    else:
+        t = generate(places, links, side)
     for p in places:
         assert t.cells_of(p.name), f"{p.name} has ground"
     assert links_present(t) == set(links), "every link is a real passage; no other place touches without a wall"

@@ -426,6 +426,41 @@ def _faction_call(fn_name: str, faction: str, **kwargs):
     return fn(world, player["name"], faction, memory=get_web_memory(), **kwargs)
 
 
+@app.get("/api/factions")
+def api_factions():
+    """势力总览（客户端 Factions 面板）：每个势力的成员、地盘、关系、近况，以及玩家的身份 / 声望 / 能不能加入。"""
+    try:
+        import sys as _sys
+        agent_path = str(_AITOWN3 / "agent")
+        if agent_path not in _sys.path:
+            _sys.path.insert(0, agent_path)
+        import faction_sim
+        from factions import direct_members, player_faction_summary
+
+        world = get_world()
+        player = get_player(world)
+        name = player["name"] if player else ""
+        rows = player_faction_summary(world, name) if name else []
+        controls: Dict[str, List[str]] = {}
+        for r in world.run_query(
+            "MATCH (l:Location) WHERE l.controlled_by IS NOT NULL RETURN l.name AS l, l.controlled_by AS c"
+        ) or []:
+            controls.setdefault(r["c"], []).append(r["l"])
+        relations = faction_sim.relation_rows(world)
+        for f in rows:
+            fname = f["name"]
+            f["members"] = sorted(direct_members(world, fname), key=lambda m: -float(m.get("loyalty") or 0))
+            f["controls"] = sorted(controls.get(fname, []))
+            f["relations"] = [
+                {"with": r["b"] if r["a"] == fname else r["a"], "stance": r.get("stance"), "reason": r.get("reason") or ""}
+                for r in relations if fname in (r.get("a"), r.get("b"))
+            ]
+            f["events"] = faction_sim.recent_events(world, fname, 3)
+        return {"player": name, "factions": rows, "chronicle": faction_sim.chronicle(world, 8)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
 @app.post("/api/factions/{name}/join")
 def api_faction_join(name: str, req: FactionJoinRequest):
     """玩家向在场成员申请加入势力：joined | trial_started | refused。"""

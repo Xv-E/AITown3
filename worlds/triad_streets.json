@@ -6,224 +6,161 @@
     {
       "name": "TempleStreet",
       "description": "The night market spine: hawker lamps, fortune tellers, crowds until 2 a.m. Every side wants it.",
-      "tags": "hub,market,social",
-      "map": [
-        0,
-        0
-      ],
-      "grid": [
-        24,
-        13
-      ]
+      "tags": "hub,market,social"
     },
     {
       "name": "FishMarket",
       "description": "Wet market of tanks and ice. Big Ma's curry fish ball cart steams at the corner.",
-      "tags": "market,food",
-      "map": [
-        -3,
-        0
-      ],
-      "grid": [
-        20,
-        12
-      ]
+      "tags": "market,food"
     },
     {
       "name": "Wharf",
       "description": "Godowns and cranes. Ho's wholesale crates come off the boats here every day.",
-      "tags": "work,trade",
-      "map": [
-        -6,
-        0
-      ],
-      "grid": [
-        22,
-        12
-      ]
+      "tags": "work,trade"
     },
     {
       "name": "FerryPier",
       "description": "The night ferry lands newcomers with cardboard suitcases and nowhere to sleep.",
-      "tags": "arrival",
-      "map": [
-        -6,
-        3
-      ],
-      "grid": [
-        16,
-        10
-      ]
+      "tags": "arrival"
     },
     {
       "name": "Tenements",
       "description": "Six storeys of subdivided flats, washing on bamboo poles. Dragon Leung owns the building.",
       "tags": "home",
-      "map": [
-        -3,
-        3
-      ],
-      "grid": [
-        20,
-        12
-      ]
+      "indoor": true,
+      "parent": "NoodleAlley"
     },
     {
       "name": "Rooftops",
       "description": "A rooftop shrine and mahjong table above the tenements: the Silver Dragons' hall.",
       "tags": "hideout",
-      "map": [
-        -3,
-        6
-      ],
-      "grid": [
-        16,
-        10
-      ]
+      "indoor": true,
+      "parent": "NoodleAlley"
     },
     {
       "name": "NoodleAlley",
       "description": "A narrow lane of plastic stools around Mrs Lau's noodle stall.",
-      "tags": "food,social",
-      "map": [
-        0,
-        3
-      ],
-      "grid": [
-        18,
-        10
-      ]
+      "tags": "food,social"
     },
     {
       "name": "TeaHouseRow",
       "description": "Uncle Wing's cha chaan teng and its neighbours: milk tea, newspapers, gossip.",
-      "tags": "food,social",
-      "map": [
-        3,
-        3
-      ],
-      "grid": [
-        20,
-        12
-      ]
+      "tags": "food,social"
     },
     {
       "name": "NeonStrip",
       "description": "Karaoke signs and the Lucky Bar. Money, beer and trouble after dark.",
-      "tags": "nightlife,social",
-      "map": [
-        3,
-        0
-      ],
-      "grid": [
-        22,
-        12
-      ]
+      "tags": "nightlife,social"
     },
     {
       "name": "MahjongHall",
       "description": "Auntie Fong's mahjong parlour; the clack of tiles never stops.",
       "tags": "nightlife",
-      "map": [
-        6,
-        0
-      ],
-      "grid": [
-        18,
-        10
-      ]
+      "indoor": true,
+      "parent": "NeonStrip"
     },
     {
       "name": "BackAlley",
       "description": "Bins, steam vents and blind corners where arguments get settled.",
-      "tags": "danger",
-      "map": [
-        6,
-        3
-      ],
-      "grid": [
-        16,
-        10
-      ]
+      "tags": "danger"
     },
     {
       "name": "GarageYard",
       "description": "A car-repair yard behind roll-down shutters: the Black Tigers' den.",
-      "tags": "hideout",
-      "map": [
-        6,
-        6
-      ],
-      "grid": [
-        20,
-        12
-      ]
+      "tags": "hideout"
     },
     {
       "name": "TinHauTemple",
       "description": "Incense coils and the sea goddess's altar. Nobody fights in front of her — usually.",
       "tags": "temple,neutral",
-      "map": [
-        0,
-        6
-      ],
-      "grid": [
-        18,
-        10
-      ]
+      "indoor": true,
+      "parent": "TempleStreet"
     },
     {
       "name": "PoliceStation",
       "description": "A tired district station with one sergeant who knows everyone.",
       "tags": "police",
-      "map": [
-        3,
-        6
-      ],
-      "grid": [
-        18,
-        10
-      ]
+      "indoor": true,
+      "parent": "TempleStreet"
     },
     {
       "name": "HerbalLane",
       "description": "Dried roots and bitter brews. Mr Chow patches up whoever limps in.",
-      "tags": "medicine",
-      "map": [
-        3,
-        9
-      ],
-      "grid": [
-        16,
-        10
-      ]
+      "tags": "medicine"
     },
     {
       "name": "BuildingSite",
       "description": "Scaffolding for a new tower nobody owns yet. Day labour, no questions.",
-      "tags": "work",
-      "map": [
-        0,
-        9
-      ],
-      "grid": [
-        20,
-        12
-      ]
+      "tags": "work"
+    },
+    {
+      "name": "GoldenPhoenixClub",
+      "description": "The Golden Phoenix nightclub: red lanterns, a live band and private booths upstairs. Tiger Sze drinks here for free.",
+      "tags": "nightlife,social",
+      "indoor": true,
+      "parent": "NeonStrip"
+    },
+    {
+      "name": "KaraokeLounge",
+      "description": "Lucky Star Karaoke: little rooms with sticky microphones; whoever pays for the room hears all the gossip.",
+      "tags": "nightlife,social",
+      "indoor": true,
+      "parent": "NeonStrip"
+    },
+    {
+      "name": "PawnShop",
+      "description": "Wo Hing pawn shop behind an iron grille: watches, jade and IOUs, no questions asked.",
+      "tags": "trade,shop",
+      "indoor": true,
+      "parent": "TeaHouseRow"
+    },
+    {
+      "name": "CornerStore",
+      "description": "A cramped corner store (士多): cigarettes, soda, phone cards and credit for regulars.",
+      "tags": "shop,social",
+      "indoor": true,
+      "parent": "TeaHouseRow"
+    },
+    {
+      "name": "JadeBanquetHall",
+      "description": "The Jade Banquet Hall, where weddings, funerals and peace talks all get the same roast pig.",
+      "tags": "food,social",
+      "indoor": true,
+      "parent": "TeaHouseRow"
     }
   ],
   "adjacencies": [
     {
-      "a": "Wharf",
-      "b": "FishMarket"
+      "a": "BackAlley",
+      "b": "GarageYard"
     },
     {
-      "a": "Wharf",
-      "b": "FerryPier"
+      "a": "BackAlley",
+      "b": "NeonStrip"
+    },
+    {
+      "a": "BackAlley",
+      "b": "TeaHouseRow"
+    },
+    {
+      "a": "BuildingSite",
+      "b": "NoodleAlley"
+    },
+    {
+      "a": "CornerStore",
+      "b": "TeaHouseRow"
+    },
+    {
+      "a": "FerryPier",
+      "b": "NoodleAlley"
     },
     {
       "a": "FerryPier",
       "b": "Tenements"
+    },
+    {
+      "a": "FerryPier",
+      "b": "Wharf"
     },
     {
       "a": "FishMarket",
@@ -231,75 +168,71 @@
     },
     {
       "a": "FishMarket",
+      "b": "Wharf"
+    },
+    {
+      "a": "GoldenPhoenixClub",
+      "b": "NeonStrip"
+    },
+    {
+      "a": "HerbalLane",
+      "b": "NoodleAlley"
+    },
+    {
+      "a": "JadeBanquetHall",
+      "b": "TeaHouseRow"
+    },
+    {
+      "a": "KaraokeLounge",
+      "b": "NeonStrip"
+    },
+    {
+      "a": "MahjongHall",
+      "b": "NeonStrip"
+    },
+    {
+      "a": "NeonStrip",
+      "b": "TempleStreet"
+    },
+    {
+      "a": "NoodleAlley",
+      "b": "PoliceStation"
+    },
+    {
+      "a": "NoodleAlley",
+      "b": "TeaHouseRow"
+    },
+    {
+      "a": "NoodleAlley",
+      "b": "TempleStreet"
+    },
+    {
+      "a": "NoodleAlley",
+      "b": "Tenements"
+    },
+    {
+      "a": "PawnShop",
+      "b": "TeaHouseRow"
+    },
+    {
+      "a": "PoliceStation",
+      "b": "TempleStreet"
+    },
+    {
+      "a": "Rooftops",
       "b": "Tenements"
     },
     {
       "a": "TempleStreet",
-      "b": "NeonStrip"
+      "b": "Tenements"
     },
     {
       "a": "TempleStreet",
-      "b": "NoodleAlley"
-    },
-    {
-      "a": "NeonStrip",
-      "b": "MahjongHall"
-    },
-    {
-      "a": "NeonStrip",
-      "b": "TeaHouseRow"
-    },
-    {
-      "a": "MahjongHall",
-      "b": "BackAlley"
-    },
-    {
-      "a": "Tenements",
-      "b": "NoodleAlley"
-    },
-    {
-      "a": "NoodleAlley",
-      "b": "TeaHouseRow"
-    },
-    {
-      "a": "TeaHouseRow",
-      "b": "BackAlley"
-    },
-    {
-      "a": "Tenements",
-      "b": "Rooftops"
-    },
-    {
-      "a": "NoodleAlley",
       "b": "TinHauTemple"
     },
     {
-      "a": "TeaHouseRow",
-      "b": "PoliceStation"
-    },
-    {
-      "a": "BackAlley",
-      "b": "GarageYard"
-    },
-    {
-      "a": "TinHauTemple",
-      "b": "PoliceStation"
-    },
-    {
-      "a": "PoliceStation",
-      "b": "HerbalLane"
-    },
-    {
-      "a": "GarageYard",
-      "b": "HerbalLane"
-    },
-    {
-      "a": "TinHauTemple",
-      "b": "BuildingSite"
-    },
-    {
-      "a": "BuildingSite",
-      "b": "HerbalLane"
+      "a": "TempleStreet",
+      "b": "Wharf"
     }
   ],
   "persons": [
@@ -2823,7 +2756,10 @@
         "Tenements": 5,
         "NoodleAlley": 4,
         "FishMarket": 3,
-        "TeaHouseRow": 2
+        "TeaHouseRow": 2,
+        "PawnShop": 4,
+        "CornerStore": 2,
+        "KaraokeLounge": 2
       },
       "relations": [
         {
@@ -2879,7 +2815,9 @@
         "NeonStrip": 4,
         "MahjongHall": 4,
         "TeaHouseRow": 3,
-        "NoodleAlley": 2
+        "NoodleAlley": 2,
+        "GoldenPhoenixClub": 6,
+        "KaraokeLounge": 3
       },
       "traits": [
         {
@@ -2976,7 +2914,9 @@
         }
       ],
       "territory": {
-        "TempleStreet": 4
+        "TempleStreet": 4,
+        "CornerStore": 3,
+        "JadeBanquetHall": 4
       },
       "relations": [
         {
@@ -3055,5 +2995,128 @@
       ],
       "territory": {}
     }
-  ]
+  ],
+  "terrain": {
+    "legend": {
+      "W": "Wharf",
+      "P": "FerryPier",
+      "F": "FishMarket",
+      "T": "TempleStreet",
+      "N": "NeonStrip",
+      "A": "NoodleAlley",
+      "R": "TeaHouseRow",
+      "B": "BackAlley",
+      "G": "GarageYard",
+      "H": "HerbalLane",
+      "S": "BuildingSite",
+      "t": "Tenements",
+      "r": "Rooftops",
+      "m": "MahjongHall",
+      "h": "TinHauTemple",
+      "p": "PoliceStation",
+      "c": "GoldenPhoenixClub",
+      "k": "KaraokeLounge",
+      "w": "PawnShop",
+      "s": "CornerStore",
+      "j": "JadeBanquetHall"
+    },
+    "rows": [
+      "~~~~~~~~~~WWWWWWWWWWWWFFFFFFFFFFFFFFFF##################################################",
+      "~~~~~~~~~~WWWWWWWWWWWWFFFFFFFFFFFFFFFF#hhhhhhhhhhhhhh##mmmmmmmmmmm#cccccccccccc#kkkkkkk#",
+      "~~~~~~~~~~WWWWWWWWWWWWFFFFFFFFFFFFFFFF#hhhhhhhhhhhhhh##mmmmmmmmmmm#cccccccccccc#kkkkkkk#",
+      "~~~~~~~~~~WWWWWWWWWWWWFFFFFFFFFFFFFFFF#hhhhhhhhhhhhhh##mmmmmmmmmmm#cccccccccccc#kkkkkkk#",
+      "~~~~~~~~~~WWWWWWWWWWWWFFFFFFFFFFFFFFFF#hhhhhhhhhhhhhh##mmmmmmmmmmm#cccccccccccc#kkkkkkk#",
+      "~~~~~~~~~~WWWWWWWWWWWWFFFFFFFFFFFFFFFF#hhhhhhhhhhhhhh##mmmmmmmmmmm#cccccccccccc#kkkkkkk#",
+      "~~~~~~~~~~WWWWWWWWWWWWFFFFFFFFFFFFFFFF#hhhhhhhhhhhhhh##mmmmmmmmmmm#cccccccccccc#kkkkkkk#",
+      "~~~~~~~~~~WWWWWWWWWWWWFFFFFFFFFFFFFFFF#hhhhhhhhhhhhhh##mmmmmmmmmmm#cccccccccccc#kkkkkkk#",
+      "~~~~~~~~~~WWWWWWWWWWWWFFFFFFFFFFFFFFFF#hhhhhhhhhhhhhh##mmmmmmmmmmm#cccccccccccc#kkkkkkk#",
+      "~~~~~~~~~~WWWWWWWWWWWWFFFFFFFFFFFFFFFF#hhhhhhhhhhhhhh##mmmmmmmmmmm#cccccccccccc#kkkkkkk#",
+      "~~~~~~~~~~WWWWWWWWWWWWFFFFFFFFFFFFFFFF#hhhhhhhhhhhhhh##mmmmmmmmmmm#cccccccccccc#kkkkkkk#",
+      "~~~~~~~~~~WWWWWWWWWWWWFFFFFFFFFFFFFFFF#hhhhhhhhhhhhhh##mmmmmmmmmmm#cccccccccccc#kkkkkkk#",
+      "~~~~~~~~~~WWWWWWWWWWWWFFFFFFFFFFFFFFFF#######+##############+###########+##########+####",
+      "~~~~~~~~~~WWWWWWWWWWWWTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+      "~~~~~~~~~~WWWWWWWWWWWWTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+      "~~~~~~~~~~WWWWWWWWWWWWTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+      "~~~~~~~~~~WWWWWWWWWWWWTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+      "~~~~~~~~~~WWWWWWWWWWWW###########+####AAA######+######BBBB%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%",
+      "~~~~~~~~~~WWWWWWWWWWWW#rrrrrr#ttttttt#AAA#ppppppppppp#BBBB%GGGGGGGGGGGGGGGGGGGGGGGGGGGG%",
+      "~~~~~~~~~~WWWWWWWWWWWW#rrrrrr#ttttttt#AAA#ppppppppppp#BBBB%GGGGGGGGGGGGGGGGGGGGGGGGGGGG%",
+      "~~~~~~~~~~WWWWWWWWWWWW#rrrrrr#ttttttt#AAA#ppppppppppp#BBBB%GGGGGGGGGGGGGGGGGGGGGGGGGGGG%",
+      "~~~~~~~~~~WWWWWWWWWWWW#rrrrrr#ttttttt#AAA#ppppppppppp#BBBB%GGGGGGGGGGGGGGGGGGGGGGGGGGGG%",
+      "~~~~~~~~~~WWWWWWWWWWWW#rrrrrr#ttttttt#AAA#ppppppppppp#BBBB%GGGGGGGGGGGGGGGGGGGGGGGGGGGG%",
+      "~~~~~~~~~~WWWWWWWWWWWW####+###ttttttt#AAA#ppppppppppp#BBBB%GGGGGGGGGGGGGGGGGGGGGGGGGGGG%",
+      "~~~~~~~~~~PPPPPPPPPPPP#tttttttttttttt#AAA#ppppppppppp#BBBB%GGGGGGGGGGGGGGGGGGGGGGGGGGGG%",
+      "~~~~~~~~~~PPPPPPPPPPPP#tttttttttttttt#AAA#ppppppppppp#BBBB+GGGGGGGGGGGGGGGGGGGGGGGGGGGG%",
+      "~~~~~~~~~~PPPPPPPPPPPP#tttttttttttttt#AAA#ppppppppppp#BBBB%GGGGGGGGGGGGGGGGGGGGGGGGGGGG%",
+      "~~~~~~~~~~PPPPPPPPPPPP#tttttttttttttt#AAA#ppppppppppp#BBBB%GGGGGGGGGGGGGGGGGGGGGGGGGGGG%",
+      "~~~~~~~~~~PPPPPPPPPPPP+tttttttttttttt+AAA#ppppppppppp#BBBB%GGGGGGGGGGGGGGGGGGGGGGGGGGGG%",
+      "~~~PPPPPPPPPPPPPPPPPPP#tttttttttttttt#AAA#ppppppppppp#BBBB%GGGGGGGGGGGGGGGGGGGGGGGGGGGG%",
+      "~~~PPPPPPPPPPPPPPPPPPP#tttttttttttttt#AAA#ppppppppppp#BBBB%GGGGGGGGGGGGGGGGGGGGGGGGGGGG%",
+      "~~~PPPPPPPPPPPPPPPPPPP#tttttttttttttt#AAA#ppppppppppp#BBBB%GGGGGGGGGGGGGGGGGGGGGGGGGGGG%",
+      "~~~PPPPPPPPPPPPPPPPPPP################AAA######+######BBBB%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%",
+      "~~~~~~~~~~PPPPPPPPPPPPAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR",
+      "~~~~~~~~~~PPPPPPPPPPPPAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR",
+      "~~~~~~~~~~PPPPPPPPPPPPAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR",
+      "~~~~~~~~~~PPPPPPPPPPPP%%%%%%%%+%%%%%%%HHHHHHHHHHHHHHHH#####+##########+##########+######",
+      "~~~~~~~~~~PPPPPPPPPPPP%SSSSSSSSSSSSSS%HHHHHHHHHHHHHHHH#wwwwwwwwww#ssssssssss#jjjjjjjjjj#",
+      "~~~~~~~~~~PPPPPPPPPPPP%SSSSSSSSSSSSSS%HHHHHHHHHHHHHHHH#wwwwwwwwww#ssssssssss#jjjjjjjjjj#",
+      "~~~~~~~~~~PPPPPPPPPPPP%SSSSSSSSSSSSSS%HHHHHHHHHHHHHHHH#wwwwwwwwww#ssssssssss#jjjjjjjjjj#",
+      "~~~~~~~~~~PPPPPPPPPPPP%SSSSSSSSSSSSSS%HHHHHHHHHHHHHHHH#wwwwwwwwww#ssssssssss#jjjjjjjjjj#",
+      "~~~~~~~~~~PPPPPPPPPPPP%SSSSSSSSSSSSSS%HHHHHHHHHHHHHHHH#wwwwwwwwww#ssssssssss#jjjjjjjjjj#",
+      "~~~~~~~~~~PPPPPPPPPPPP%SSSSSSSSSSSSSS%HHHHHHHHHHHHHHHH#wwwwwwwwww#ssssssssss#jjjjjjjjjj#",
+      "~~~~~~~~~~PPPPPPPPPPPP%SSSSSSSSSSSSSS%HHHHHHHHHHHHHHHH#wwwwwwwwww#ssssssssss#jjjjjjjjjj#",
+      "~~~~~~~~~~PPPPPPPPPPPP%SSSSSSSSSSSSSS%HHHHHHHHHHHHHHHH#wwwwwwwwww#ssssssssss#jjjjjjjjjj#",
+      "~~~~~~~~~~PPPPPPPPPPPP%SSSSSSSSSSSSSS%HHHHHHHHHHHHHHHH#wwwwwwwwww#ssssssssss#jjjjjjjjjj#",
+      "~~~~~~~~~~PPPPPPPPPPPP%%%%%%%%%%%%%%%%HHHHHHHHHHHHHHHH##################################"
+    ],
+    "decor": [
+      "          ppppppppppppcccccccccccccccc                                                  ",
+      "          ppppppppppppcccccccccccccccc                                                  ",
+      "          ppppppppppppccsccsccsccsccsc                                                  ",
+      "          ppppppppppppcccccccccccccccc                                                  ",
+      "          ppppppppppppcccccccccccccccc                                                  ",
+      "          ppppppppppppccsccsccsccsccsc                                                  ",
+      "          ppppppppppppcccccccccccccccc                                                  ",
+      "          ppppppppppppcccccccccccccccc                                                  ",
+      "          ppppppppppppccsccsccsccsccsc                                                  ",
+      "          ppppppppppppcccccccccccccccc                                                  ",
+      "          ppppppppppppcccccccccccccccc                                                  ",
+      "          ppppppppppppcccccccccccccccc                                                  ",
+      "          ppppppppppppcccccccccccccccc                                                  ",
+      "          ppppppppppppcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "          ppppppppppppcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "          ppppppppppppcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "          ppppppppppppcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "          pppppppppppp                ccc             gggg                              ",
+      "          pppppppppppp                ccc             gggg gggggggggggggggggggggggggggg ",
+      "          pppppppppppp                ccc             gggg gggggggggggggggggggggggggggg ",
+      "          pppppppppppp                ccc             gggg gggggggggggggggggggggggggggg ",
+      "          pppppppppppp                ccc             gggg gggggggggggggggggggggggggggg ",
+      "          pppppppppppp                ccc             gggg gggggggggggggggggggggggggggg ",
+      "          pppppppppppp                ccc             gggg gggggggggggggggggggggggggggg ",
+      "          pppppppppppp                ccc             gggg gggggggggggggggggggggggggggg ",
+      "          pppppppppppp                ccc             gggg gggggggggggggggggggggggggggg ",
+      "          pppppppppppp                ccc             gggg gggggggggggggggggggggggggggg ",
+      "          pppppppppppp                ccc             gggg gggggggggggggggggggggggggggg ",
+      "          pppppppppppp                ccc             gggg gggggggggggggggggggggggggggg ",
+      "   ppppppppppppppppppp                ccc             gggg gggggggggggggggggggggggggggg ",
+      "   ppppppppppppppppppp                ccc             gggg gggggggggggggggggggggggggggg ",
+      "   ppppppppppppppppppp                ccc             gggg gggggggggggggggggggggggggggg ",
+      "   ppppppppppppppppppp                ccc             gggg                              ",
+      "          ppppppppppppcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "          ppppppppppppccccccccccccccccccccccccccccccccccscccccscccccscccccscccccscccccsc",
+      "          ppppppppppppcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "          pppppppppppp                ================                                  ",
+      "          pppppppppppp gggggggggggggg ================                                  ",
+      "          pppppppppppp gggggggggggggg ================                                  ",
+      "          pppppppppppp gggggggggggggg ================                                  ",
+      "          pppppppppppp gggggggggggggg ================                                  ",
+      "          pppppppppppp gggggggggggggg ================                                  ",
+      "          pppppppppppp gggggggggggggg ================                                  ",
+      "          pppppppppppp gggggggggggggg ================                                  ",
+      "          pppppppppppp gggggggggggggg ================                                  ",
+      "          pppppppppppp gggggggggggggg ================                                  ",
+      "          pppppppppppp                ================                                  "
+    ]
+  }
 }

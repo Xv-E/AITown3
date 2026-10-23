@@ -173,7 +173,9 @@ class TestTriadStreetsWorld(unittest.TestCase):
     def test_big_connected_hand_made_map(self):
         locs = {l.name for l in self.bp.locations}
         self.assertGreaterEqual(len(locs), 15)
-        self.assertTrue(all(l.map and l.grid for l in self.bp.locations))
+        # 手画的方正街区：每个地点在地图上都有自己的地
+        self.assertTrue(self.bp.terrain and self.bp.terrain.get("rows"))
+        self.assertEqual(set(self.bp.terrain["legend"].values()), locs)
         nb = {n: set() for n in locs}
         for e in self.bp.adjacencies:
             nb[e.a].add(e.b)

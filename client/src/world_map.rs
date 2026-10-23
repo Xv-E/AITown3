@@ -55,6 +55,12 @@ impl MapFrame {
     }
 }
 
+/// A steady colour per faction (the same name always gets the same colour).
+pub fn faction_color(name: &str) -> Color {
+    let hash = name.bytes().fold(5381u32, |h, b| h.wrapping_mul(33) ^ u32::from(b));
+    Color::hsl((hash % 360) as f32, 0.55, 0.40)
+}
+
 fn sorted_names(world: &WorldSnapshot) -> Vec<String> {
     let mut names: Vec<String> = world.world.regions.iter().map(|r| r.name.clone()).collect();
     names.sort();
@@ -181,8 +187,11 @@ pub fn render_world_map(
         label(parent, Vec2::new(0.0, 300.0), "WORLD MAP    click a region to walk there   right-click to close", 18.0);
         for region in &world.world.regions {
             let (center, size) = frame.region_rect(region);
+            // 有人控制的地按势力上色（选中的地点仍然高亮）
             let color = if region.name == view.selected {
                 Color::srgb(0.45, 0.38, 0.16)
+            } else if !region.controlled_by.is_empty() {
+                faction_color(&region.controlled_by)
             } else if region.name == here {
                 Color::srgb(0.12, 0.30, 0.42)
             } else {
@@ -211,6 +220,35 @@ pub fn render_world_map(
                 Transform::from_xyz(center.x, center.y, MAP_Z + 1.5),
                 WorldMapEntity,
             ));
+        }
+        // 地盘图例：哪种颜色是哪个势力
+        let mut holders: Vec<&str> = world
+            .world
+            .regions
+            .iter()
+            .map(|r| r.controlled_by.as_str())
+            .filter(|c| !c.is_empty())
+            .collect();
+        holders.sort();
+        holders.dedup();
+        if !holders.is_empty() {
+            let mut x = -440.0;
+            label(parent, Vec2::new(x + 20.0, 262.0), "Turf:", 14.0);
+            x += 50.0;
+            for holder in holders {
+                parent.spawn((
+                    Sprite {
+                        color: faction_color(holder),
+                        custom_size: Some(Vec2::splat(12.0)),
+                        ..default()
+                    },
+                    Transform::from_xyz(x, 262.0, MAP_Z + 2.0),
+                    WorldMapEntity,
+                ));
+                let width = holder.chars().count() as f32 * 7.5;
+                label(parent, Vec2::new(x + 12.0 + width / 2.0, 262.0), holder, 13.0);
+                x += width + 34.0;
+            }
         }
         for region in &world.world.regions {
             let mid = region.center();
@@ -244,7 +282,12 @@ pub fn render_world_map(
                 (true, true) => "  (indoors)".to_string(),
                 _ => String::new(),
             };
-            label(parent, Vec2::new(0.0, -300.0), &format!("{}{inside}\n{}", region.name, desc), 15.0);
+            let held = if region.controlled_by.is_empty() {
+                String::new()
+            } else {
+                format!("  - held by {}", region.controlled_by)
+            };
+            label(parent, Vec2::new(0.0, -300.0), &format!("{}{inside}{held}\n{}", region.name, desc), 15.0);
         }
     });
 }

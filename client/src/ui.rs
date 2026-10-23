@@ -7,7 +7,7 @@ use std::{
 };
 
 use crate::adapter::thought_line;
-use crate::net::{trim_line, Blueprint, MindData, RecipeView, RequestView, SaveInfo, WorldInfo, TradeGood, TradeView, DirectorData, DraftSummary, History, HistoryEntry, NetBridge, WorldSnapshot};
+use crate::net::{trim_line, Blueprint, MindData, RecipeView, RequestView, SaveInfo, WorldInfo, FactionInfo, FactionsData, TradeGood, TradeView, DirectorData, DraftSummary, History, HistoryEntry, NetBridge, WorldSnapshot};
 use crate::scene::{cell_at, cell_center, Interactive, PlayerAvatar, TargetKind, WalkGrid, ZoneGrid, TILE};
 
 const TOAST_DURATION: Duration = Duration::from_secs(4);
@@ -275,26 +275,54 @@ impl UiState {
         self.trading_with = Some(npc);
     }
 
+    /// Every faction: pick one for its members, turf, rivals and what it takes to join.
+    pub fn open_factions_menu(&mut self, data: FactionsData) {
+        let news: Vec<String> = data.chronicle.iter().take(2).map(|e| trim_line(&e.text, 90)).collect();
+        let subtitle = if news.is_empty() {
+            "Who runs these streets, and where you stand with each".to_string()
+        } else {
+            format!("Lately: {}", news.join(" / "))
+        };
+        let mut menu = Menu::new("Factions", subtitle);
+        for f in &data.factions {
+            let you = if f.member {
+                format!("you: {}", if f.role.is_empty() { "member" } else { f.role.as_str() })
+            } else {
+                format!("{} {:+.0}", f.label, f.standing.unwrap_or(0.0))
+            };
+            menu.add(
+                trim_line(&format!("{}  ({}) - {you}", f.name, f.kind), 44),
+                Command::Submenu(Box::new(faction_detail(f))),
+            );
+        }
+        if data.factions.is_empty() {
+            menu.subtitle = "No factions in this world.".to_string();
+        }
+        menu.add("Close", Command::Close);
+        self.open_menu(menu, None);
+    }
+
     /// Pick a template world; loading it (after a confirmation) clears the current one.
     pub fn open_worlds_menu(&mut self, worlds: Vec<WorldInfo>) {
         let mut menu = Menu::new(
             "Switch world",
-            "Loading a template clears the current world, NPC progress and memories - save first to keep them",
+            "Loading clears the current world, NPC progress and memories - save first to keep them",
         );
         for w in worlds {
             let title = if w.title.is_empty() { w.id.clone() } else { w.title.clone() };
+            // 简介放进确认页：列表里每项一行，十来个世界也不会溢出窗口
+            let premise = trim_line(&w.premise, 160);
             let mut confirm = Menu::new(
                 format!("Load {title}?"),
-                "This clears the current world, NPC progress and memories.",
+                if premise.is_empty() {
+                    "This clears the current world, NPC progress and memories.".to_string()
+                } else {
+                    format!("{premise}\n\nThis clears the current world, NPC progress and memories.")
+                },
             );
             confirm.add("Yes, load it", Command::LoadWorld(w.id.clone()));
             confirm.add("Back", Command::Back);
-            let label = if w.premise.is_empty() {
-                title
-            } else {
-                format!("{title}  -  {}", trim_line(&w.premise, 70))
-            };
-            menu.add(label, Command::Submenu(Box::new(confirm)));
+            menu.add(trim_line(&title, 34), Command::Submenu(Box::new(confirm)));
         }
         menu.add("Close", Command::Close);
         self.open_menu(menu, None);
@@ -446,6 +474,10 @@ enum Command {
     SaveGame(String),
     LoadGame(String),
     LoadWorld(String),
+    FactionOp {
+        name: String,
+        join: bool,
+    },
     Submenu(Box<Menu>),
     Back,
     Close,
@@ -1204,6 +1236,13 @@ fn choose_menu_option(index: usize, world: &WorldSnapshot, ui: &mut UiState, net
                 ui.toast(format!("Loading {slot}..."));
             }
         }
+        Command::FactionOp { name, join } => {
+            ui.menu = None;
+            if ensure_online(world, ui) {
+                net.faction_op(&name, join);
+                ui.toast(format!("{} {name}...", if join { "Asking to join" } else { "Leaving" }));
+            }
+        }
         Command::LoadWorld(id) => {
             ui.menu = None;
             ui.cancel_travel();
@@ -1253,6 +1292,66 @@ fn choose_menu_option(index: usize, world: &WorldSnapshot, ui: &mut UiState, net
             net.execute(action, params);
         }
     }
+}
+
+/// One faction's page: who is in it, what it holds, who it fights, and join / leave.
+fn faction_detail(f: &FactionInfo) -> Menu {
+    let mut lines: Vec<String> = Vec::new();
+    if !f.description.is_empty() {
+        lines.push(trim_line(&f.description, 140));
+    }
+    let mut kind = format!("{} {}", f.scale, f.kind).trim().to_string();
+    if !f.parent.is_empty() {
+        kind.push_str(&format!(", part of {}", f.parent));
+    }
+    lines.push(kind);
+    if !f.goal.is_empty() {
+        lines.push(format!("Goal: {}", trim_line(&f.goal, 110)));
+    }
+    if !f.members.is_empty() {
+        let names: Vec<String> = f.members.iter().take(8).map(|m| format!("{} ({})", m.name, m.role)).collect();
+        let more = if f.members.len() > 8 { format!(" +{} more", f.members.len() - 8) } else { String::new() };
+        lines.push(format!("Members: {}{more}", names.join(", ")));
+    }
+    lines.push(if f.controls.is_empty() {
+        "Holds: nowhere outright".to_string()
+    } else {
+        format!("Holds: {}", f.controls.join(", "))
+    });
+    let mut contested: Vec<(&String, &f64)> = f.territory.iter().filter(|(l, _)| !f.controls.contains(*l)).collect();
+    contested.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap_or(std::cmp::Ordering::Equal).then(a.0.cmp(b.0)));
+    if !contested.is_empty() {
+        let turf: Vec<String> = contested.iter().take(6).map(|(l, s)| format!("{l} {s:.0}")).collect();
+        lines.push(format!("Also present: {}", turf.join(", ")));
+    }
+    if !f.relations.is_empty() {
+        let rel: Vec<String> = f.relations.iter().map(|r| format!("{} with {}", r.stance, r.other)).collect();
+        lines.push(format!("Relations: {}", rel.join(", ")));
+    }
+    for e in f.events.iter().take(2) {
+        lines.push(format!("- {}", trim_line(&e.text, 100)));
+    }
+    if f.member {
+        lines.push(format!("You are {} here.", if f.role.is_empty() { "a member" } else { f.role.as_str() }));
+    } else {
+        lines.push(format!("Your standing: {:+.1} ({})", f.standing.unwrap_or(0.0), f.label));
+        if let Some(j) = &f.join {
+            if j.can_join && !j.trial_text.is_empty() {
+                lines.push(format!("Trial: {}", trim_line(&j.trial_text, 110)));
+            } else if !j.can_join {
+                let why = if j.blockers.is_empty() { format!("{} membership", j.policy) } else { j.blockers.join("; ") };
+                lines.push(format!("Can't join yet: {}", trim_line(&why, 110)));
+            }
+        }
+    }
+    let mut menu = Menu::new(f.name.clone(), lines.join("\n"));
+    if f.member && f.direct {
+        menu.add("Leave this faction", Command::FactionOp { name: f.name.clone(), join: false });
+    } else if !f.member && f.join.as_ref().is_some_and(|j| j.can_join) {
+        menu.add("Ask to join", Command::FactionOp { name: f.name.clone(), join: true });
+    }
+    menu.add("Back", Command::Back);
+    menu
 }
 
 fn ensure_online(world: &WorldSnapshot, ui: &mut UiState) -> bool {
@@ -1809,6 +1908,7 @@ pub enum UiAction {
     Requests,
     SaveMenu,
     Worlds,
+    Factions,
     Build,
     Map,
     History,
@@ -1918,6 +2018,11 @@ fn run_ui_action(action: UiAction, world: &WorldSnapshot, nearby: &NearbyInterac
         UiAction::SaveMenu => {
             if ensure_online(world, ui) {
                 net.fetch_saves();
+            }
+        }
+        UiAction::Factions => {
+            if ensure_online(world, ui) {
+                net.fetch_factions();
             }
         }
         UiAction::Worlds => {
@@ -2112,6 +2217,7 @@ pub fn update_toolbar(
         button(p, "Map", UiAction::Map, 15.0, false, false);
         button(p, "People", UiAction::History, 15.0, false, false);
         button(p, "Director", UiAction::TabDirector, 15.0, false, false);
+        button(p, "Factions", UiAction::Factions, 15.0, false, false);
         if ui.sim_running {
             button(p, "Pause NPCs", UiAction::Sim { llm: false }, 15.0, true, false);
         } else {

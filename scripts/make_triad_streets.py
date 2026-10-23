@@ -34,6 +34,118 @@ EDGES = [
     ("GarageYard", "HerbalLane"), ("TinHauTemple", "BuildingSite"), ("BuildingSite", "HerbalLane"),
 ]
 
+
+# ---------------------------------------------------------------------------
+# 手画街区地图（worlds/*.json 的 "terrain" 段；地点之间连不连通由地图决定）
+#
+#   x 向右、y 向下，88 × 47 格。西边是海港：码头（Wharf）和渡轮码头（FerryPier，有一条栈桥伸进海里）。
+#   两条东西向大街把城区切成方正的街区：
+#     北街  TempleStreet（西）+ NeonStrip（东）
+#     南街  NoodleAlley（西，另有一条小巷向北通到大街）+ TeaHouseRow（东）
+#   街区里是有墙有门的楼：天后庙、麻雀馆、夜总会、卡拉 OK、唐楼（楼顶是银龙的天台）、差馆、
+#   当铺、士多、酒楼；BackAlley 是夹在差馆和车房之间的后巷，GarageYard 是黑虎围着铁闸的车房，
+#   BuildingSite 是围起来的地盘，HerbalLane 是南边的凉茶药材巷。
+# ---------------------------------------------------------------------------
+
+MAP_W, MAP_H = 88, 47
+
+LEGEND = {
+    "W": "Wharf", "P": "FerryPier", "F": "FishMarket", "T": "TempleStreet", "N": "NeonStrip",
+    "A": "NoodleAlley", "R": "TeaHouseRow", "B": "BackAlley", "G": "GarageYard", "H": "HerbalLane",
+    "S": "BuildingSite",
+    "t": "Tenements", "r": "Rooftops", "m": "MahjongHall", "h": "TinHauTemple", "p": "PoliceStation",
+    "c": "GoldenPhoenixClub", "k": "KaraokeLounge", "w": "PawnShop", "s": "CornerStore", "j": "JadeBanquetHall",
+}
+# 室内地点 → 门开向的那块室外地
+INDOOR = {
+    "Tenements": "NoodleAlley", "Rooftops": "NoodleAlley", "MahjongHall": "NeonStrip", "TinHauTemple": "TempleStreet",
+    "PoliceStation": "TempleStreet", "GoldenPhoenixClub": "NeonStrip", "KaraokeLounge": "NeonStrip",
+    "PawnShop": "TeaHouseRow", "CornerStore": "TeaHouseRow", "JadeBanquetHall": "TeaHouseRow",
+}
+
+# 新加的店（只是地方；生意物品还是原来那几家）
+VENUES = [
+    ("GoldenPhoenixClub", "The Golden Phoenix nightclub: red lanterns, a live band and private booths upstairs. Tiger Sze drinks here for free.", "nightlife,social"),
+    ("KaraokeLounge", "Lucky Star Karaoke: little rooms with sticky microphones; whoever pays for the room hears all the gossip.", "nightlife,social"),
+    ("PawnShop", "Wo Hing pawn shop behind an iron grille: watches, jade and IOUs, no questions asked.", "trade,shop"),
+    ("CornerStore", "A cramped corner store (士多): cigarettes, soda, phone cards and credit for regulars.", "shop,social"),
+    ("JadeBanquetHall", "The Jade Banquet Hall, where weddings, funerals and peace talks all get the same roast pig.", "food,social"),
+]
+
+
+def draw_map():
+    grid = [[" "] * MAP_W for _ in range(MAP_H)]
+    decor = [[" "] * MAP_W for _ in range(MAP_H)]
+
+    def rect(x0, y0, x1, y1, ch, d=None):
+        for y in range(y0, y1 + 1):
+            for x in range(x0, x1 + 1):
+                grid[y][x] = ch
+                if d is not None:
+                    decor[y][x] = d
+
+    def building(x0, y0, x1, y1, ch, doors):
+        """墙围起来的楼，里面是 ch；doors 是墙上的门洞。"""
+        rect(x0, y0, x1, y1, "#")
+        rect(x0 + 1, y0 + 1, x1 - 1, y1 - 1, ch)
+        for x, y in doors:
+            grid[y][x] = "+"
+
+    def fenced(x0, y0, x1, y1, ch, gates, d=None):
+        rect(x0, y0, x1, y1, "%")
+        rect(x0 + 1, y0 + 1, x1 - 1, y1 - 1, ch, d)
+        for x, y in gates:
+            grid[y][x] = "+"
+
+    rect(0, 0, 9, MAP_H - 1, "~")                      # 海港
+    rect(10, 0, 21, 23, "W", "p")                      # 码头（木板）
+    rect(10, 24, 21, MAP_H - 1, "P", "p")              # 渡轮码头
+    rect(3, 29, 9, 32, "P", "p")                       # 伸进海里的栈桥
+    rect(22, 0, 37, 12, "F", "c")                      # 街市（石板地）
+    for x in range(24, 37, 3):
+        for y in (2, 5, 8):
+            decor[y][x] = "s"                          # 档口
+
+    # 北街
+    rect(22, 13, 53, 16, "T", "c")
+    rect(54, 13, MAP_W - 1, 16, "N", "c")
+    building(38, 0, 53, 12, "h", [(45, 12)])                                   # 天后庙
+    building(54, 0, 66, 12, "m", [(60, 12)])                                   # 麻雀馆
+    building(66, 0, 79, 12, "c", [(72, 12)])                                   # 夜总会
+    building(79, 0, MAP_W - 1, 12, "k", [(83, 12)])                            # 卡拉 OK
+
+    # 中间的街区
+    building(22, 17, 37, 32, "t", [(33, 17), (37, 28), (22, 28)])              # 唐楼
+    building(22, 17, 29, 23, "r", [(26, 23)])                                  # 楼顶天台（银龙堂口）
+    rect(38, 17, 40, 32, "A", "c")                                             # 小巷：北街 ↔ 南街
+    building(41, 17, 53, 32, "p", [(47, 17), (47, 32)])                        # 差馆
+    rect(54, 17, 57, 32, "B", "g")                                             # 后巷
+    fenced(58, 17, MAP_W - 1, 32, "G", [(58, 25)], d="g")                      # 黑虎车房（铁闸）
+
+    # 南街
+    rect(22, 33, 53, 35, "A", "c")
+    rect(54, 33, MAP_W - 1, 35, "R", "c")
+    for x in range(56, MAP_W - 1, 6):
+        decor[34][x] = "s"                                                     # 茶楼门口的摊位
+
+    # 南边的街区
+    fenced(22, 36, 37, MAP_H - 1, "S", [(30, 36)], d="g")                      # 地盘
+    rect(38, 36, 53, MAP_H - 1, "H", "=")                                      # 药材巷
+    building(54, 36, 65, MAP_H - 1, "w", [(59, 36)])                           # 当铺
+    building(65, 36, 76, MAP_H - 1, "s", [(70, 36)])                           # 士多
+    building(76, 36, MAP_W - 1, MAP_H - 1, "j", [(81, 36)])                    # 酒楼
+
+    return ["".join(r) for r in grid], ["".join(r) for r in decor]
+
+
+def map_links(rows):
+    """地图上实际连通的地点对（和 riverford 一样，用地形算）。"""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "actions"))
+    from terrain_gen import from_ascii, links_present
+
+    terrain = from_ascii(rows, LEGEND, INDOOR.keys(), INDOOR)
+    return sorted(tuple(sorted(p)) for p in links_present(terrain))
+
 # 生意：名字, 原型, 地点, 老板, 每日保护费, 描述
 SHOPS = [
     ("LauNoodleStall", "noodle_stall", "NoodleAlley", "MrsLau", 2, "Mrs Lau's noodle stall. One dollar a bowl of wonton noodles."),
@@ -314,7 +426,8 @@ FACTIONS = [
          join_policy="trial", join_standing=2,
          trial={"item": "cash", "text": "Hand Dragon Leung a red packet with your own money in it, and bow."},
          members=[M("DragonLeung", "boss", 9), M("Bones", "enforcer", 9), M("AhKit", "runner", 6)],
-         territory={"Rooftops": 7, "Tenements": 5, "NoodleAlley": 4, "FishMarket": 3, "TeaHouseRow": 2},
+         territory={"Rooftops": 7, "Tenements": 5, "NoodleAlley": 4, "FishMarket": 3, "TeaHouseRow": 2,
+                    "PawnShop": 4, "CornerStore": 2, "KaraokeLounge": 2},
          relations=[R("BlackTigers", "hostile", "the garage fire, and the night Bones' brother was cut in BackAlley")],
          traits=[T("zealous", "sworn brothers who burned incense together at Tin Hau"),
                  T("expansionist", "Leung wants the whole district secured before his heart gives out")]),
@@ -324,7 +437,8 @@ FACTIONS = [
          join_policy="trial", join_standing=2,
          trial={"item": "beer", "text": "Bring Tiger Sze a cold beer and drink it with him in front of the boys."},
          members=[M("TigerSze", "boss", 9), M("MadDogWai", "enforcer", 8), M("AhFai", "runner", 4)],
-         territory={"GarageYard": 7, "BackAlley": 5, "NeonStrip": 4, "MahjongHall": 4, "TeaHouseRow": 3, "NoodleAlley": 2},
+         territory={"GarageYard": 7, "BackAlley": 5, "NeonStrip": 4, "MahjongHall": 4, "TeaHouseRow": 3, "NoodleAlley": 2,
+                    "GoldenPhoenixClub": 6, "KaraokeLounge": 3},
          traits=[T("militant", "Sze came up through the boxing gyms and settles everything with fists"),
                  T("vengeful", "they still blame the Dragons for the garage fire")]),
     dict(name="DistrictPolice", kind="authority", scale="medium",
@@ -339,7 +453,7 @@ FACTIONS = [
          goal="Stop paying two gangs for the same street", join_policy="sponsor", join_standing=3,
          members=[M("UncleWing", "chairman", 8), M("MrsLau", "member", 7), M("BigMa", "member", 7),
                   M("AuntieFong", "member", 6), M("MrChow", "member", 5), M("MissChoi", "member", 4), M("DockerHo", "member", 5)],
-         territory={"TempleStreet": 4},
+         territory={"TempleStreet": 4, "CornerStore": 3, "JadeBanquetHall": 4},
          relations=[R("BlackTigers", "rival", "the Tigers smashed Big Ma's cart last winter"),
                     R("DistrictPolice", "friendly", "the sergeant at least eats at their stalls")],
          traits=[T("mercantile", "they hold together by trading favours and credit"),
@@ -402,6 +516,17 @@ def build(repo: Path) -> None:
             p.pop("works_at", None)
         persons.append(p)
 
+    rows, decor = draw_map()
+    links = map_links(rows)
+    places = [(n, d, t) for n, d, t, _, _ in LOCATIONS] + VENUES
+    assert sorted(n for n, _, _ in places) == sorted(set(LEGEND.values())), "legend / places mismatch"
+    locations = []
+    for name, desc, tags in places:
+        loc = {"name": name, "description": desc, "tags": tags}
+        if name in INDOOR:
+            loc.update(indoor=True, parent=INDOOR[name])
+        locations.append(loc)
+
     world = {
         "id": "triad_streets",
         "title": "Neon Streets of Sam Shui",
@@ -412,11 +537,8 @@ def build(repo: Path) -> None:
             "whoever holds their street, and the gangsters spend it again at the same stalls and bars. A newcomer "
             "has just stepped off the night ferry with four dollars."
         ),
-        "locations": [
-            {"name": n, "description": d, "tags": t, "map": [x * S, y * S], "grid": list(g)}
-            for n, d, t, (x, y), g in LOCATIONS
-        ],
-        "adjacencies": [{"a": a, "b": b} for a, b in EDGES],
+        "locations": locations,
+        "adjacencies": [{"a": a, "b": b} for a, b in links],
         "persons": persons,
         "items": items,
         "quests": [{
@@ -430,10 +552,14 @@ def build(repo: Path) -> None:
         "rumors": RUMORS,
         "social": [{"a": a, "rel": r, "b": b} for a, r, b in SOCIAL],
         "factions": FACTIONS,
+        "terrain": {"legend": LEGEND, "rows": rows, "decor": decor},
     }
     out = repo / "worlds" / "triad_streets.json"
     out.write_text(json.dumps(world, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print(f"wrote {out}: {len(LOCATIONS)} places, {len(persons)} people, {n} dollars, {len(items)} items")
+    print(f"wrote {out}: {len(locations)} places, {len(persons)} people, {n} dollars, {len(items)} items")
+    for a, b in links:
+        print(f"  {a} <-> {b}")
+    print("\n".join(rows))
 
 
 if __name__ == "__main__":

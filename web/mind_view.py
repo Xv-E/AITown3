@@ -158,6 +158,14 @@ def profile_view(world, name: str) -> Dict[str, Any]:
         text = str(value or "").strip()
         if text:
             fields.append({"label": label, "value": text})
+    try:
+        from factions import membership_summary
+
+        factions = membership_summary(world, name)
+    except Exception:  # noqa: BLE001
+        factions = ""
+    if factions:
+        fields.append({"label": "Factions", "value": factions})
     status = [f"At {pretty(rows[0].get('loc'))}" if rows[0].get("loc") else "Somewhere unknown"]
     if props.get("hp") is not None:
         status.append(f"HP {props.get('hp')}")

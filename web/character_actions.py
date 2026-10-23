@@ -737,6 +737,11 @@ def world_view(world, viewer: Optional[str]) -> Dict[str, Any]:
     except Exception:  # noqa: BLE001
         pass
     shapes = region_shapes(world, areas)
+    # 谁控制这块地（势力；地图按它上色）
+    controlled = {
+        r["n"]: r["c"]
+        for r in world.run_query("MATCH (l:Location) WHERE l.controlled_by IS NOT NULL RETURN l.name AS n, l.controlled_by AS c") or []
+    }
     regions = []
     items: List[Dict[str, Any]] = []
     owners = {
@@ -754,6 +759,7 @@ def world_view(world, viewer: Optional[str]) -> Dict[str, Any]:
             "tags": info.get("tags") or "",
             "indoor": bool(terrain and name in terrain.indoor),
             "parent": (terrain.parents.get(name, "") if terrain else ""),
+            "controlled_by": controlled.get(name) or "",
             # 标签 / 走过去的落脚处：地点中间的一格
             "cx": mid[0] if mid else None,
             "cy": mid[1] if mid else None,

@@ -188,6 +188,16 @@ impl NetBridge {
         self.send(NetRequestKind::LoadGame { slot: slot.to_string() });
     }
 
+    /// Every faction: members, turf, relations, and where the player stands with each.
+    pub fn fetch_factions(&self) {
+        self.send(NetRequestKind::FetchFactions);
+    }
+
+    /// Ask to join (join = true) or leave a faction as the player.
+    pub fn faction_op(&self, name: &str, join: bool) {
+        self.send(NetRequestKind::FactionOp { name: name.to_string(), join });
+    }
+
     /// Template worlds the server can build (worlds/*.json).
     pub fn fetch_worlds(&self) {
         self.send(NetRequestKind::FetchWorlds);
@@ -271,6 +281,11 @@ enum NetRequestKind {
     LoadWorld {
         id: String,
     },
+    FetchFactions,
+    FactionOp {
+        name: String,
+        join: bool,
+    },
     FetchCrafting,
     FetchRequests,
     Social {
@@ -336,6 +351,8 @@ enum NetResponse {
     Saved(Result<String, String>),
     Loaded(Result<String, String>),
     Worlds(Result<Vec<WorldInfo>, String>),
+    Factions(Result<FactionsData, String>),
+    FactionDone(Result<String, String>),
     Draft(Result<DraftSummary, String>),
     Applied(Result<String, String>),
 }
@@ -464,6 +481,31 @@ fn handle_request(request: NetRequest) -> NetResponse {
             http_json(server, "POST", &format!("/api/saves/{slot}/load"), Some("{}".to_string()))
                 .map(|v| v.get("message").and_then(Value::as_str).unwrap_or("Loaded.").to_string()),
         ),
+        NetRequestKind::FetchFactions => NetResponse::Factions(
+            http_json(server, "GET", "/api/factions", None)
+                .and_then(|v| serde_json::from_value::<FactionsData>(v).map_err(|err| format!("Bad factions JSON: {err}"))),
+        ),
+        NetRequestKind::FactionOp { name, join } => {
+            let path = format!("/api/factions/{}/{}", url_encode(&name), if join { "join" } else { "leave" });
+            NetResponse::FactionDone(http_json(server, "POST", &path, Some("{}".to_string())).map(|v| {
+                let notes: Vec<String> = v
+                    .get("notes")
+                    .and_then(Value::as_array)
+                    .map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect())
+                    .unwrap_or_default();
+                let ok = v.get("ok").and_then(Value::as_bool).unwrap_or(false);
+                let outcome = v
+                    .get("outcome")
+                    .and_then(Value::as_str)
+                    .map(|s| s.replace('_', " "))
+                    .unwrap_or_else(|| if ok { "done".to_string() } else { "refused".to_string() });
+                if notes.is_empty() {
+                    format!("{name}: {outcome}")
+                } else {
+                    format!("{name}: {outcome} - {}", notes.join(" "))
+                }
+            }))
+        }
         NetRequestKind::FetchWorlds => NetResponse::Worlds(
             http_json(server, "GET", "/api/worlds", None).and_then(|v| {
                 serde_json::from_value::<Vec<WorldInfo>>(v.get("worlds").cloned().unwrap_or(Value::Array(Vec::new())))
@@ -771,6 +813,18 @@ pub fn receive_network_messages(
             NetResponse::Blueprints(Ok(list)) => ui.open_build_menu(list),
             NetResponse::Saves(Ok(list)) => ui.open_save_menu(list),
             NetResponse::Worlds(Ok(list)) => ui.open_worlds_menu(list),
+            NetResponse::Factions(Ok(data)) => ui.open_factions_menu(data),
+            NetResponse::Factions(Err(err)) => ui.toast(format!("Can't load factions: {err}")),
+            NetResponse::FactionDone(result) => {
+                net.refresh_now();
+                match result {
+                    Ok(msg) => {
+                        ui.toast(msg);
+                        net.fetch_factions();
+                    }
+                    Err(err) => ui.toast(format!("Failed: {err}")),
+                }
+            }
             NetResponse::Worlds(Err(err)) => ui.toast(format!("Can't list worlds: {err}")),
             NetResponse::Crafting(Ok(list)) => ui.open_craft_menu(list),
             NetResponse::Requests(Ok(list)) => ui.open_requests_menu(list),
@@ -1155,6 +1209,9 @@ pub struct RegionView {
     /// The outdoor place an indoor room's building stands in.
     #[serde(default, deserialize_with = "lenient_string")]
     pub parent: String,
+    /// The faction that holds this place (empty = nobody does).
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub controlled_by: String,
     /// A cell in the middle of this place's ground (label / where to walk to).
     #[serde(default)]
     pub cx: Option<i32>,
@@ -1987,6 +2044,93 @@ pub struct SaveInfo {
     pub clock: String,
     #[serde(default, deserialize_with = "lenient_string")]
     pub player: String,
+}
+
+/// GET /api/factions (the Factions menu).
+#[derive(Deserialize, Clone, Default)]
+pub struct FactionsData {
+    #[serde(default)]
+    pub factions: Vec<FactionInfo>,
+    /// Recent faction events, newest first.
+    #[serde(default)]
+    pub chronicle: Vec<FactionEvent>,
+}
+
+#[derive(Deserialize, Clone, Default)]
+pub struct FactionInfo {
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub name: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub kind: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub scale: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub goal: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub description: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub parent: String,
+    /// The player belongs to it (directly, or through a smaller faction inside it).
+    #[serde(default)]
+    pub member: bool,
+    /// Directly (so the player can leave it).
+    #[serde(default)]
+    pub direct: bool,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub role: String,
+    #[serde(default)]
+    pub standing: Option<f64>,
+    /// "member" or how they regard the player (e.g. "trusted", "wary").
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub label: String,
+    #[serde(default)]
+    pub join: Option<FactionJoin>,
+    #[serde(default)]
+    pub members: Vec<FactionMember>,
+    /// Places it holds outright.
+    #[serde(default)]
+    pub controls: Vec<String>,
+    /// Presence everywhere it has some: place -> strength.
+    #[serde(default)]
+    pub territory: HashMap<String, f64>,
+    #[serde(default)]
+    pub relations: Vec<FactionRelation>,
+    #[serde(default)]
+    pub events: Vec<FactionEvent>,
+}
+
+#[derive(Deserialize, Clone, Default)]
+pub struct FactionJoin {
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub policy: String,
+    #[serde(default)]
+    pub can_join: bool,
+    #[serde(default, deserialize_with = "lenient_vec")]
+    pub blockers: Vec<String>,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub trial_text: String,
+}
+
+#[derive(Deserialize, Clone, Default)]
+pub struct FactionMember {
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub name: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub role: String,
+}
+
+#[derive(Deserialize, Clone, Default)]
+pub struct FactionRelation {
+    #[serde(default, rename = "with", deserialize_with = "lenient_string")]
+    pub other: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub stance: String,
+}
+
+#[derive(Deserialize, Clone, Default)]
+pub struct FactionEvent {
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub text: String,
 }
 
 /// One template world (what the Worlds menu shows).
