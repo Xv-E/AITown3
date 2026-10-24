@@ -424,17 +424,22 @@ class WorldSimulator:
         if state is None:
             return {}
         try:
-            from narration import plan_view
+            from narration import doing_line, plan_view
 
             view = plan_view(state, loop.sim_time, loop.world)
         except Exception:  # noqa: BLE001
             return {}
+        try:
+            doing = doing_line(state, loop.sim_time, loop.world, view)
+        except Exception:  # noqa: BLE001
+            doing = ""
         current = next((s["line"] for s in view["steps"] if s["state"] == "current"), "")
         return {
             "plan_step": view["step"],
             "plan_len": len(view["steps"]),
             "step_line": current,
             "now_label": view["now"]["label"],
+            "doing": doing,
         }
 
     def story(self) -> Dict[str, Any]:

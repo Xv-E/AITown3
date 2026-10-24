@@ -228,3 +228,30 @@ def test_every_step_in_the_history_keeps_the_reason_it_was_done():
     decision = {"kind": "decision", "goal": {"goal": "Gain information", "target_entity": "Sage"},
                 "triggers": ["Sage arrived"]}
     assert entry_reason(decision) == {"for": "talk to Sage", "why": "Sage arrived"}
+
+
+def _doing_state(**kw):
+    from types import SimpleNamespace
+
+    base = dict(agent=SimpleNamespace(name="MrsLau", location="NoodleAlley"), current_plan=[], plan_index=0,
+                pending_action=None, status="idle", plan_error=None, replan_reason=None, held_state=None,
+                engaged_by=None, waiting_for=None)
+    base.update(kw)
+    return SimpleNamespace(**base)
+
+
+def test_under_the_name_says_what_they_are_doing():
+    from game_loop import PendingAction
+    from narration import doing_line
+    from registry import act
+
+    assert doing_line(_doing_state(held_state="asleep"), 10.0) == "Asleep"
+    walk = PendingAction(act("travel"), ["MrsLau", "NoodleAlley", "TeaHouse"], started_at=9.0, duration=4.0,
+                         completes_at=13.0, walk_seconds=4.0)
+    state = _doing_state(current_plan=[(act("travel"), walk.args)], pending_action=walk, status="acting")
+    assert doing_line(state, 10.0) == "Walking to Tea House"
+    talk = PendingAction(act("converse"), ["MrsLau", "AhKit", "NoodleAlley"], started_at=9.0, duration=2.0,
+                         completes_at=11.0)
+    state = _doing_state(current_plan=[(act("converse"), talk.args)], pending_action=talk, status="acting")
+    assert doing_line(state, 10.0) == "Talking with Ah Kit"
+    assert doing_line(_doing_state(), 10.0) == "", "nothing to say when they're idle and there's no routine"

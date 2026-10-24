@@ -1509,6 +1509,9 @@ pub struct NpcActivity {
     pub state: String,
     #[serde(default, deserialize_with = "lenient_string")]
     pub state_label: String,
+    /// What they are doing right now, in plain words (shown under the name).
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub doing: String,
     #[serde(default, deserialize_with = "lenient_string")]
     pub trigger: String,
 }

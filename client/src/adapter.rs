@@ -21,8 +21,6 @@ const BUBBLE_COLOR: Color = Color::srgb(1.0, 0.92, 0.55);
 const MUTTER_COLOR: Color = Color::srgb(0.84, 0.86, 0.92);
 const SECRET_COLOR: Color = Color::srgb(1.0, 0.66, 0.30);
 const MIN_WALK_SECS: f32 = 0.2;
-/// Show "goal -> target" under NPC names (off: they say what they're doing instead).
-const SHOW_GOALS: bool = false;
 /// Further than this from where they should be (cells) is a jump, not a walk (e.g. world reload).
 const TELEPORT_TILES: f32 = 25.0;
 
@@ -392,16 +390,16 @@ pub fn update_npc_bubbles(
             .activity(&avatar.name)
             .map(|a| a.state_label.clone())
             .unwrap_or_default();
-        let mutter = mutters.current(&avatar.name).filter(|m| !m.text.trim().is_empty());
+        // Lines they say as they set off ("Heading for ...") aren't shown: what they are doing is under the name.
+        let mutter = mutters
+            .current(&avatar.name)
+            .filter(|m| !m.text.trim().is_empty() && m.kind != "action");
         let (next, tint) = if speech.is_speaking(&avatar.name) {
             (String::new(), BUBBLE_COLOR) // the speech bubble is up; don't stack the action text on it
         } else if let Some(m) = mutter {
             // Something important the player was close enough to catch stands out.
             if m.important && m.overheard {
                 (format!("! {} !", trim_line(&m.text, 44)), SECRET_COLOR)
-            } else if m.kind == "action" {
-                // What they say as they set about something (instead of showing their goal).
-                (format!("\"{}\"", trim_line(&m.text, 44)), BUBBLE_COLOR)
             } else {
                 (format!("~ {} ~", trim_line(&m.text, 44)), MUTTER_COLOR)
             }
@@ -430,7 +428,7 @@ pub fn update_npc_bubbles(
     }
 }
 
-/// "goal -> target" for the line under an NPC's name.
+/// The line under an NPC's name: what they are doing right now ("Cook noodles", "Talking with Tom").
 pub fn thought_line(activity: &NpcActivity) -> String {
     // A posted request shows first: "! needs stone (3c)".
     if !activity.request.is_empty() {
@@ -439,23 +437,7 @@ pub fn thought_line(activity: &NpcActivity) -> String {
     if activity.thinking_hard {
         return "(thinking it over...)".to_string();
     }
-    // Goals are no longer shown under the name: NPCs say a short line when they start
-    // something instead (see the bubble above their head).
-    if !SHOW_GOALS {
-        return String::new();
-    }
-    // The server keeps the last goal after the plan is done; only show it while they're working on it.
-    let working = !activity.pending_action.is_empty()
-        || matches!(activity.status.as_str(), "acting" | "ready");
-    if !working {
-        return String::new();
-    }
-    let goal = match (activity.goal.as_str(), activity.target.as_str()) {
-        ("", _) => return String::new(),
-        (goal, "") => goal.to_string(),
-        (goal, target) => format!("{goal} -> {target}"),
-    };
-    trim_line(&goal, 34)
+    trim_line(&activity.doing, 34)
 }
 
 #[cfg(test)]
@@ -463,7 +445,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn under_the_name_only_requests_and_deep_thought_not_goals() {
+    fn under_the_name_what_they_are_doing_not_goals() {
         let mut a = crate::net::NpcActivity {
             goal: "Go to location".into(),
             target: "Tavern".into(),
@@ -471,7 +453,9 @@ mod tests {
             pending_action: "move".into(),
             ..Default::default()
         };
-        assert_eq!(thought_line(&a), "", "goals aren't shown: they say what they're doing instead");
+        assert_eq!(thought_line(&a), "", "goals aren't shown");
+        a.doing = "Walking to Tavern".into();
+        assert_eq!(thought_line(&a), "Walking to Tavern");
         a.thinking_hard = true;
         assert_eq!(thought_line(&a), "(thinking it over...)");
         a.request = "needs stone (3c)".into();

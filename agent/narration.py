@@ -185,6 +185,64 @@ def plan_step_line(action: Any, args: List[Any], viewer: str, world: Any = None)
         return f"{action}({', '.join(str(a) for a in args or [])})"
 
 
+def _cap(text: str) -> str:
+    text = str(text or "").strip()
+    return text[:1].upper() + text[1:]
+
+
+def doing_line(state: Any, sim_time: float, world: Any = None, view: Optional[Dict[str, Any]] = None) -> str:
+    """名字下面那行：他此刻在干什么（睡觉、跟谁说话、走去哪、照日程在做的事）。说不清就留空。"""
+    view = view or plan_view(state, sim_time, world)
+    now = view["now"]
+    name = state.agent.name
+    if getattr(state, "held_state", None):
+        return _cap(pretty(state.held_state))
+    pending = state.pending_action
+    if pending is not None and pending.hold:
+        return now["label"]  # 等人有空 / 把话说完
+    if getattr(state, "engaged_by", None) and now["status"] == "waiting":
+        return now["label"]
+
+    slot = None
+    here = None
+    if world is not None:
+        try:
+            from routine import current_slot, load_person_routine
+
+            slots = load_person_routine(world, name)
+            slot = current_slot(slots, sim_time) if slots else None
+            here = state.agent.location
+        except Exception:  # noqa: BLE001
+            slot = None
+    at_slot = bool(slot and slot.activity and here and slot.location == here)
+    current = next((s["line"] for s in view["steps"] if s["state"] == "current"), "")
+
+    if pending is not None and pending.duration > 0:
+        action, args = pending.name, [str(a) for a in (pending.args or [])]
+        cap = ""
+        try:
+            from content import get_content
+
+            cap = get_content().capability_of(action) or ""
+        except Exception:  # noqa: BLE001
+            pass
+        other = (args[1] if args and args[0] == name else args[0]) if len(args) >= 2 else ""
+        if now["phase"] == "walking":
+            if cap == "travel" and len(args) >= 3:
+                return f"Walking to {pretty(args[2])}"
+            if cap == "converse" and other:
+                return f"Going over to talk with {pretty(other)}"
+            return _cap(current)
+        if cap == "converse" and other:
+            return f"Talking with {pretty(other)}"
+        if at_slot:
+            return _cap(slot.activity)
+        return _cap(current)
+    if at_slot:
+        return _cap(slot.activity)
+    return ""
+
+
 def plan_view(state: Any, sim_time: float, world: Any = None) -> Dict[str, Any]:
     """当前计划（每步：已完成 / 正在做 / 待做）+ 此刻在干什么、做到几成。"""
     name = state.agent.name
