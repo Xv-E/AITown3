@@ -195,8 +195,9 @@ def doing_line(state: Any, sim_time: float, world: Any = None, view: Optional[Di
     view = view or plan_view(state, sim_time, world)
     now = view["now"]
     name = state.agent.name
-    if getattr(state, "held_state", None):
-        return _cap(pretty(state.held_state))
+    held = getattr(state, "held_state", None)
+    if held and held != "working":
+        return _cap(pretty(held))
     pending = state.pending_action
     if pending is not None and pending.hold:
         return now["label"]  # 等人有空 / 把话说完
@@ -216,6 +217,9 @@ def doing_line(state: Any, sim_time: float, world: Any = None, view: Optional[Di
             slot = None
     at_slot = bool(slot and slot.activity and here and slot.location == here)
     current = next((s["line"] for s in view["steps"] if s["state"] == "current"), "")
+    if held == "working":
+        # 在岗：写班次在做的事（"Cook noodles"），说不出就只说在干活
+        return _cap(slot.activity) if at_slot else "Working"
 
     if pending is not None and pending.duration > 0:
         action, args = pending.name, [str(a) for a in (pending.args or [])]

@@ -1,0 +1,13 @@
+{
+  "name": "work",
+  "description": "Get on with the job at your post until the shift ends (customers and urgent trouble still get your attention)",
+  "duration": 1.0,
+  "params": [
+    { "name": "c", "type": "Person", "source": "self" }
+  ],
+  "requires": [
+    { "op": "prop_gte", "entity": "@c", "label": "Person", "prop": "hp", "value": 1, "message": "@c is dead" }
+  ],
+  "effects": [],
+  "enter_state": "working"
+}

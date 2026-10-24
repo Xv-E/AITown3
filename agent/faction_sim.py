@@ -443,14 +443,31 @@ def tick_once(world, now: float, tick_no: int, *, memory=None, rng: Optional[ran
     return events
 
 
+def private_homes(world) -> Dict[str, str]:
+    """只是住人的地方（标签只有 home 的室内地点，比如唐楼里的一户户）→ 楼外那块地。
+    这些地方不算地盘：成员睡在自己家不等于势力占了它，外来势力也不会住进别人家。"""
+    rows = _rows(world, "MATCH (l:Location) RETURN l.name AS l, coalesce(l.tags, '') AS t, coalesce(l.parent, '') AS p")
+    return {
+        r["l"]: r["p"] for r in rows
+        if r.get("l") and {t.strip().lower() for t in str(r["t"]).split(",") if t.strip()} == {"home"}
+    }
+
+
+def _public(world, loc: str, homes: Optional[Dict[str, str]] = None) -> str:
+    """在别人家里发生的事算到楼外那块地上。"""
+    homes = private_homes(world) if homes is None else homes
+    return homes.get(loc, loc) if loc in homes else loc
+
+
 def _tick_territory(world) -> Tuple[Dict[frozenset, str], Dict[str, List[str]]]:
     """地盘结算。返回（共处一地的势力对 → 地点，{势力: 本轮丢掉的地点}）。"""
     strength: Dict[Tuple[str, str], float] = {
         (r["faction"], r["location"]): float(r["strength"]) for r in control_rows(world)
     }
     presence: Dict[Tuple[str, str], float] = {}
+    homes = private_homes(world)
     for r in presence_rows(world):
-        if r.get("location"):
+        if r.get("location") and r["location"] not in homes:
             key = (r["faction"], r["location"])
             weight = 0.5 if r.get("role") == "recruit" else 1.0
             presence[key] = presence.get(key, 0.0) + weight * float(r["loyalty"]) / 10.0
@@ -617,7 +634,7 @@ def _try_emerge(world, now: float, control: Dict[str, Optional[str]], rng: rando
             and pair_view(world, x["person"], founder).score >= 1.0
         ]
         ctx = {"type": "splinter", "parent": parent, "parent_kind": kinds.get(parent, {}).get("kind", "other"),
-               "founders": [founder] + followers[:2], "location": r.get("location") or ""}
+               "founders": [founder] + followers[:2], "location": _public(world, r.get("location") or "")}
         return _found(world, now, ctx, rng, memory=memory)
 
     # 结盟：两个对各自势力都不太忠诚、彼此投缘的人
@@ -642,12 +659,13 @@ def _try_emerge(world, now: float, control: Dict[str, Optional[str]], rng: rando
                 continue
             if not _personally_close(world, a, b):
                 continue
-            ctx = {"type": "coalition", "founders": [a, b], "location": where.get(a) or "",
+            ctx = {"type": "coalition", "founders": [a, b], "location": _public(world, where.get(a) or ""),
                    "from": sorted(direct[a] | direct[b])}
             return _found(world, now, ctx, rng, memory=memory)
 
     # 外来者：一伙新人进驻无人控制的地点
-    free = sorted(loc for loc, ctl in control.items() if not ctl)
+    homes = private_homes(world)
+    free = sorted(loc for loc, ctl in control.items() if not ctl and loc not in homes)
     chance = _env_float("FACTION_ARRIVAL_CHANCE", 0.15)
     if free and rng.random() < chance:
         ctx = {"type": "arrival", "founders": [], "location": rng.choice(free)}

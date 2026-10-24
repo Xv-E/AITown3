@@ -451,7 +451,8 @@
           "location": "Rooftops",
           "activity": "hold court with his brothers",
           "goal": "Go to location",
-          "social": true
+          "social": true,
+          "action": "work"
         },
         {
           "start": 18,
@@ -555,7 +556,8 @@
           "end": 18,
           "location": "Rooftops",
           "activity": "guard the hall",
-          "goal": "Go to location"
+          "goal": "Go to location",
+          "action": "work"
         },
         {
           "start": 18,
@@ -810,7 +812,8 @@
           "location": "GarageYard",
           "activity": "hold court",
           "goal": "Go to location",
-          "social": true
+          "social": true,
+          "action": "work"
         },
         {
           "start": 18,
@@ -1027,7 +1030,8 @@
           "end": 12,
           "location": "BuildingSite",
           "activity": "carry bricks for day wages",
-          "goal": "Go to location"
+          "goal": "Go to location",
+          "action": "work"
         },
         {
           "start": 12,
@@ -1119,7 +1123,8 @@
           "location": "NoodleAlley",
           "activity": "cook noodles",
           "goal": "Go to location",
-          "social": true
+          "social": true,
+          "action": "work"
         },
         {
           "start": 14,
@@ -1148,7 +1153,8 @@
           "location": "NoodleAlley",
           "activity": "cook noodles",
           "goal": "Go to location",
-          "social": true
+          "social": true,
+          "action": "work"
         },
         {
           "start": 21,
@@ -1196,7 +1202,8 @@
           "location": "TeaHouse",
           "activity": "open the tea house",
           "goal": "Go to location",
-          "social": true
+          "social": true,
+          "action": "work"
         },
         {
           "start": 12,
@@ -1225,7 +1232,8 @@
           "location": "TeaHouse",
           "activity": "run the tea house",
           "goal": "Go to location",
-          "social": true
+          "social": true,
+          "action": "work"
         },
         {
           "start": 20,
@@ -1301,7 +1309,8 @@
           "location": "LuckyBar",
           "activity": "run the Lucky Bar",
           "goal": "Go to location",
-          "social": true
+          "social": true,
+          "action": "work"
         }
       ]
     },
@@ -1355,7 +1364,8 @@
           "location": "MahjongHall",
           "activity": "run the parlour",
           "goal": "Go to location",
-          "social": true
+          "social": true,
+          "action": "work"
         },
         {
           "start": 23,
@@ -1401,7 +1411,8 @@
           "location": "HerbalShop",
           "activity": "brew remedies",
           "goal": "Go to location",
-          "social": true
+          "social": true,
+          "action": "work"
         },
         {
           "start": 12,
@@ -1430,7 +1441,8 @@
           "location": "HerbalShop",
           "activity": "see patients",
           "goal": "Go to location",
-          "social": true
+          "social": true,
+          "action": "work"
         },
         {
           "start": 20,
@@ -1470,7 +1482,8 @@
           "location": "FishMarket",
           "activity": "sell fish balls",
           "goal": "Go to location",
-          "social": true
+          "social": true,
+          "action": "work"
         },
         {
           "start": 19,
@@ -1530,7 +1543,8 @@
           "location": "Wharf",
           "activity": "run the wholesale crates",
           "goal": "Go to location",
-          "social": true
+          "social": true,
+          "action": "work"
         },
         {
           "start": 18,
@@ -1641,14 +1655,16 @@
           "location": "Wharf",
           "activity": "carry crates",
           "goal": "Go to location",
-          "social": true
+          "social": true,
+          "action": "work"
         },
         {
           "start": 17,
           "end": 18,
           "location": "BuildingSite",
           "activity": "pick up extra day work",
-          "goal": "Go to location"
+          "goal": "Go to location",
+          "action": "work"
         },
         {
           "start": 18,
@@ -1737,7 +1753,8 @@
           "end": 12,
           "location": "PoliceStation",
           "activity": "paperwork",
-          "goal": "Go to location"
+          "goal": "Go to location",
+          "action": "work"
         },
         {
           "start": 12,
@@ -1768,7 +1785,8 @@
           "end": 18,
           "location": "PoliceStation",
           "activity": "paperwork",
-          "goal": "Go to location"
+          "goal": "Go to location",
+          "action": "work"
         },
         {
           "start": 18,

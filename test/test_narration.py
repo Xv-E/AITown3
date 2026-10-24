@@ -255,3 +255,10 @@ def test_under_the_name_says_what_they_are_doing():
     state = _doing_state(current_plan=[(act("converse"), talk.args)], pending_action=talk, status="acting")
     assert doing_line(state, 10.0) == "Talking with Ah Kit"
     assert doing_line(_doing_state(), 10.0) == "", "nothing to say when they're idle and there's no routine"
+
+
+def test_at_work_it_shows_the_shift_not_just_working():
+    from narration import doing_line
+
+    assert doing_line(_doing_state(held_state="working"), 10.0) == "Working"   # 没有世界可查日程时
+    assert doing_line(_doing_state(held_state="asleep"), 10.0) == "Asleep"

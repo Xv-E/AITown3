@@ -1,0 +1,9 @@
+{
+  "name": "working",
+  "label": "",
+  "description": "is at work",
+  "targetable": true,
+  "wake_priority": 0.8,
+  "ends_on_routine_change": true,
+  "on_exit": []
+}

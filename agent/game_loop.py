@@ -32,6 +32,8 @@ IDLE_REDECIDE_HOURS = 2.0
 PLAN_WORKERS = int(os.environ.get("AITOWN3_PLAN_WORKERS", "4"))
 # 一拍最多等决策（PDDL / LLM）这么多真实秒；默认不等：决策在后台算，做完后的下一拍再收，别人照常行动
 DECISION_WAIT_SEC = float(os.environ.get("AITOWN3_DECISION_WAIT", "0"))
+# 日程里这些动作到点必做（上班、睡觉），优先于临时起意
+SHIFT_ACTIONS = ("work", "sleep")
 
 PERSON_FLAGS_QUERY = """
 MATCH (p:Person {name: $n})
@@ -2671,6 +2673,18 @@ class GameLoop:
             assessed = assess_goal(self.world, agent.name, errand_goal, engines=self.plan_engines)
             if assessed.ok and not assessed.already_satisfied and assessed.plan:
                 picked = assessed
+        # 上班、睡觉是日程里定死的：到点就去（之后进入 working / asleep，只有急事打断），
+        # 不让临时起意（看到有人来、听到新闻）把人从岗位上一趟趟叫走
+        if picked is None and not any(
+            (rc or {}).get("source") in ("item_script", "fire_emergency") for rc in routine_cands
+        ):
+            for rc in routine_cands:
+                if (rc or {}).get("source") != "routine" or rc.get("goal") != "Perform action"                         or rc.get("target_entity") not in SHIFT_ACTIONS:
+                    continue
+                assessed = assess_goal(self.world, agent.name, rc, engines=self.plan_engines)
+                if assessed.ok and not assessed.already_satisfied and assessed.plan:
+                    picked = assessed
+                    break
         if picked is None and not self._rule_based(state):
             # LLM 自己的选择优先；与当前目标相同则继续原计划
             for c in candidates:

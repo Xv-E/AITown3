@@ -272,3 +272,21 @@ class TestTraits(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_flats_are_private_homes_not_turf():
+    from unittest.mock import MagicMock
+
+    import faction_sim
+
+    world = MagicMock()
+    world.run_query.return_value = [
+        {"l": "LauFlat", "t": "home", "p": "NoodleAlley"},
+        {"l": "HerbalShop", "t": "medicine,work,home", "p": "HerbalLane"},
+        {"l": "TigerDen", "t": "hideout,home", "p": "GarageYard"},
+        {"l": "TeaHouse", "t": "food,social,work", "p": "TeaHouseRow"},
+    ]
+    homes = faction_sim.private_homes(world)
+    assert homes == {"LauFlat": "NoodleAlley"}, "shops and dens people sleep in are still turf"
+    assert faction_sim._public(world, "LauFlat", homes) == "NoodleAlley"
+    assert faction_sim._public(world, "TeaHouse", homes) == "TeaHouse"
