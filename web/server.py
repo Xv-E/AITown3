@@ -855,7 +855,7 @@ def api_character_mind(name: str, query: str = "", kind: str = "", limit: int = 
 
 @app.delete("/api/characters/{name}/memories")
 def api_clear_character_memories(name: str):
-    """Clear Chroma memories for the specified character."""
+    """Clear the specified character's memories."""
     try:
         result = clear_character_memories(name.strip())
         if not result.get("ok"):
@@ -869,7 +869,7 @@ def api_clear_character_memories(name: str):
 
 @app.post("/api/memories/clear")
 def api_clear_all_memories():
-    """Clear all Chroma memories."""
+    """Clear all NPC memories."""
     try:
         result = clear_all_memories()
         if not result.get("ok"):
@@ -1310,7 +1310,7 @@ def api_simulation_status():
 
 
 def _clear_memories_on_rebuild() -> Dict[str, Any]:
-    """Clear Chroma memories when rebuilding/clearing the world."""
+    """Clear NPC memories when rebuilding/clearing the world."""
     try:
         result = clear_all_memories()
         return {

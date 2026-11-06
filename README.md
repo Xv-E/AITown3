@@ -8,13 +8,13 @@ A small open-world play sandbox: locations, people, and items live in **Neo4j**;
 - **Template worlds** — JSON scenarios under `worlds/`
 - **Director** — sketch an event; AI places people, items, quests and factions on a hand-configured map
 - **Living factions** — families, gangs and guilds hold territory, feud, split and rise on their own
-- **NPC loop** — goals → PDDL/rule plans → timed actions; dialogue + Chroma memory
+- **NPC loop** — goals → PDDL/rule plans → timed actions; dialogue + long-term memory (`:Memory` nodes in Neo4j)
 - **LLM inspect** — `/inspect` shows Qwen / local GBNF / PDDL traces
 
 ## Requirements
 
 - Python 3.11+ (3.13 works)
-- [Neo4j](https://neo4j.com/) reachable over Bolt (default `bolt://localhost:7687`)
+- [Neo4j](https://neo4j.com/) 5.18+ reachable over Bolt (default `bolt://localhost:7687`) — NPC memory uses its vector functions
 - Optional: DashScope / OpenAI-compatible key for Qwen (primary LLM)
 - Optional: local GGUF + `llama-cpp-python` for GBNF JSON repair
 
@@ -45,9 +45,7 @@ OPENAI_CREATIVE_MODEL=qwen-plus    # Director / Storyteller / object actions: ra
 # Optional local LlamaCpp (GBNF repair only)
 # DEFAULT_MODEL_PATH=Models/your-model.gguf
 
-# NPC memory backend: chroma (default) | neo4j (:Memory nodes in the world DB)
-# MEMORY_BACKEND=chroma
-CHROMA_PATH=data/chroma
+# NPC memory lives in the same Neo4j DB as :Memory nodes (vectors computed locally)
 DEFAULT_EMBEDDING_MODEL_PATH=sentence-transformers/all-MiniLM-L6-v2
 ```
 
@@ -222,7 +220,7 @@ AITown3/
 ├── director/      # Blueprint plan / validate / materialize
 ├── neo4j/         # Neo4jWorld graph access
 ├── planner/       # PDDL / unified-planning / BFS pathfinding
-├── memory/        # Chroma NPC memory
+├── memory/        # NPC memory (:Memory nodes in Neo4j)
 ├── utility/       # LLM router, GBNF, env loading
 └── test/          # Pytest suite
 ```
@@ -236,7 +234,7 @@ pytest test/ -v
 
 Some tests skip if Neo4j or `llama_cpp` is unavailable.
 
-> ⚠️ Graph-backed tests **clear and rebuild the Neo4j database** they connect to. Reload a template world in the UI afterwards. Chroma memory tests use a temporary directory and never touch `data/chroma`.
+> ⚠️ Graph-backed tests **clear and rebuild the Neo4j database** they connect to. Reload a template world in the UI afterwards. Memory tests also need Neo4j (they only touch their own test NPCs' `:Memory` nodes).
 
 `test/test_sim_regression.py` runs the campfire world for 40 ticks (rule mode, serial and parallel planning) and checks invariants: no errors, every NPC acts, the player never auto-acts.
 
@@ -365,7 +363,7 @@ Browser UI ──HTTP──► web/server.py
 - **State** — people, items, locations, facts, quests in Neo4j
 - **Interactions** — item `effects_on` × target `accepts_from` compile to temporary `use_on` ops
 - **Planning** — goal terms → rule pathfinding and/or PDDL; feasibility gate before commit
-- **Memory** — Chroma embeddings for recent actions / dialogue per character
+- **Memory** — per-character `:Memory` nodes (actions, dialogue, observations) in Neo4j, stamped with game time; semantic search via local embeddings
 
 ## License
 

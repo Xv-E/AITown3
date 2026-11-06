@@ -5,7 +5,7 @@ LLM Agent 决策循环端到端测试
   1. 构建 Neo4j 世界
   2. 创建 Agent + MultiStepDecider + GameLoop
   3. 运行 N 回合（THINK → PLAN → EXECUTE → EVALUATE）
-  4. 校验 Neo4j 状态变化或 Chroma 记忆写入
+  4. 校验 Neo4j 状态变化或记忆写入
 
 运行（仓库根目录）：
     python AITown3/test/test_agent_loop.py
@@ -19,7 +19,6 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-import tempfile
 from typing import List
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -33,7 +32,7 @@ from neo4j_world import Neo4jWorld  # noqa: E402
 from agent_profile import AgentProfile  # noqa: E402
 from game_loop import GameLoop  # noqa: E402
 from multi_step_decider import MultiStepDecider  # noqa: E402
-from chroma_memory import ChromaMemory  # noqa: E402
+from neo4j_memory import Neo4jMemory  # noqa: E402
 
 import test_build_neo4j as builder  # noqa: E402
 
@@ -62,7 +61,6 @@ def run_agent_loop(
     turns: int = 3,
     no_llm: bool = False,
     verbose: bool = False,
-    chroma_path: str | None = None,
 ) -> int:
     ok_all = True
 
@@ -75,10 +73,8 @@ def run_agent_loop(
     setup_world(world)
     start_loc = _get_location(world, npc_name)
 
-    if chroma_path is None:
-        chroma_path = tempfile.mkdtemp(prefix="aitown3_agent_test_")
-    ChromaMemory._instance = None  # type: ignore[attr-defined]
-    memory = ChromaMemory.get_instance(persist_path=chroma_path)
+    Neo4jMemory._instance = None  # type: ignore[attr-defined]
+    memory = Neo4jMemory.get_instance(world.driver)
     memory.clear(npc_name)
 
     agent = AgentProfile.from_world(world, npc_name)
@@ -144,14 +140,12 @@ def main() -> int:
     parser.add_argument("--npc", default="Alice")
     parser.add_argument("--no-llm", action="store_true", help="强制 mock 决策")
     parser.add_argument("--verbose", action="store_true")
-    parser.add_argument("--chroma-path", default=None)
     args = parser.parse_args()
     return run_agent_loop(
         npc_name=args.npc,
         turns=args.turns,
         no_llm=args.no_llm,
         verbose=args.verbose,
-        chroma_path=args.chroma_path,
     )
 
 

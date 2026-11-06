@@ -1,8 +1,11 @@
 """
-Neo4jMemory：把 NPC 语义记忆存进 Neo4j（与 ChromaMemory 同接口）
+Neo4jMemory：NPC 的长期记忆，存在世界库里
 
 设计：
-  - 一条记忆 = (:Memory {id, owner, text, timestamp, type, ..., embedding})
+  - 一条记忆 = (:Memory {id, owner, text, type, ..., t, seq, timestamp, embedding})
+        t         : 游戏时间（写入时 WorldMeta.sim_time；世界还没跑时没有）
+        seq       : 写入顺序（纳秒），list() 按它从旧到新排
+        timestamp : 现实时间 ISO 字符串，只作展示 / 兜底
   - 只靠 owner 属性归属，不连 (:Person)-[:REMEMBERS]->：
     世界里大量 `(a)-[r]-(b)` 不限关系类型的查询，连了边就会把记忆带进提示词 / 图谱
   - 向量仍由本地 STEmbedder 计算，Neo4j 只存与算相似度（不需要 GenAI 插件）
@@ -10,10 +13,12 @@ Neo4jMemory：把 NPC 语义记忆存进 Neo4j（与 ChromaMemory 同接口）
     不用 db.index.vector.queryNodes：后者是全局 top-k 再过滤，多 NPC 时会漏召回
   - world.clear_all()（MATCH (n) DETACH DELETE n）会顺带清掉记忆，与重建世界同步
 
-API 与 ChromaMemory 一致：
+API：
     mem = Neo4jMemory.get_instance()
     mem.add(npc, "Alice 在 Tavern 见到了 Bob", type="observation", location="Tavern")
     hits = mem.search(npc, "我在 Tavern 见过谁？", top_k=3, where={"type": "observation"})
+    mem.list(npc)          # 从旧到新
+    mem.clear(npc) / mem.clear_all()
 """
 
 from __future__ import annotations
@@ -21,6 +26,7 @@ from __future__ import annotations
 import os
 import re
 import threading
+import time
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -60,7 +66,7 @@ def _item(node: Dict[str, Any], score: Optional[float] = None) -> Dict[str, Any]
     text = props.pop("text", "")
     out: Dict[str, Any] = {"id": mid, "text": text, "metadata": props}
     if score is not None:
-        # vector.similarity.cosine 返回 (1+cos)/2；换回 Chroma 的 cosine distance = 1-cos
+        # vector.similarity.cosine 返回 (1+cos)/2；换成 cosine distance = 1-cos（越小越近）
         out["distance"] = 2.0 * (1.0 - score)
     return out
 
@@ -72,7 +78,7 @@ class Neo4jMemory:
     _lock = threading.Lock()
 
     def __init__(self, driver=None, *, database: Optional[str] = None,
-                 embedding_model_path: Optional[str] = None):
+                 embedding_model_path: Optional[str] = None, embedder=None):
         if Neo4jMemory._instance is not None:
             raise RuntimeError("Neo4jMemory 是单例，请用 get_instance()")
         if driver is None:
@@ -81,20 +87,26 @@ class Neo4jMemory:
         self.driver = driver
         self.database = database or os.getenv("MEMORY_NEO4J_DATABASE") or None
 
-        from embedder import STEmbedder
-        self.embedder = STEmbedder(model_path=embedding_model_path)
+        if embedder is None:
+            from embedder import STEmbedder
+            embedder = STEmbedder(model_path=embedding_model_path)
+        self.embedder = embedder  # texts -> vectors；测试可换成假的
         self._schema_ready = False
+        self._seq_lock = threading.Lock()
+        self._last_seq = 0
         Neo4jMemory._instance = self
 
     # ---------- 单例 / 生命周期 ----------
 
     @classmethod
     def get_instance(cls, driver=None, *, database: Optional[str] = None,
-                     embedding_model_path: Optional[str] = None) -> "Neo4jMemory":
+                     embedding_model_path: Optional[str] = None,
+                     embedder=None) -> "Neo4jMemory":
         with cls._lock:
             if cls._instance is None:
                 Neo4jMemory(driver, database=database,
-                            embedding_model_path=embedding_model_path)
+                            embedding_model_path=embedding_model_path,
+                            embedder=embedder)
             return cls._instance  # type: ignore[return-value]
 
     def close(self) -> None:
@@ -102,6 +114,10 @@ class Neo4jMemory:
         Neo4jMemory._instance = None
 
     # ---------- helpers ----------
+
+    def ensure_ready(self) -> None:
+        """建约束 / 索引并试算一次向量；Neo4j 或嵌入模型有问题时在这里抛出。"""
+        self._ensure_schema()
 
     def _run(self, cypher: str, **params: Any) -> List[Dict[str, Any]]:
         self._ensure_schema()
@@ -117,6 +133,8 @@ class Neo4jMemory:
                         "FOR (m:Memory) REQUIRE m.id IS UNIQUE")
             session.run("CREATE INDEX memory_owner_type IF NOT EXISTS "
                         "FOR (m:Memory) ON (m.owner, m.type)")
+            session.run("CREATE INDEX memory_owner_seq IF NOT EXISTS "
+                        "FOR (m:Memory) ON (m.owner, m.seq)")
             # 现在 search 不走它；单个 NPC 记忆量很大时再切到索引检索
             session.run(
                 f"CREATE VECTOR INDEX {_VECTOR_INDEX} IF NOT EXISTS "
@@ -125,6 +143,13 @@ class Neo4jMemory:
                 dims=dims,
             )
         self._schema_ready = True
+
+    def _next_seqs(self, n: int) -> List[int]:
+        """单调递增的写入序号（纳秒时间戳，同一纳秒内顺延）。"""
+        with self._seq_lock:
+            start = max(time.time_ns(), self._last_seq + 1)
+            self._last_seq = start + n - 1
+        return list(range(start, start + n))
 
     def _embed(self, texts: List[str]) -> List[List[float]]:
         return [list(map(float, v)) for v in self.embedder(texts)]
@@ -147,15 +172,20 @@ class Neo4jMemory:
         now = datetime.now().isoformat(timespec="seconds")
         vectors = self._embed(texts)  # 先算向量，事务里只写
         rows = []
-        for mid, text, meta, vec in zip(ids, texts, metadatas, vectors):
+        for mid, text, meta, vec, seq in zip(ids, texts, metadatas, vectors,
+                                             self._next_seqs(len(texts))):
             props = _sanitize_props(meta)
             props.setdefault("timestamp", now)
+            props.setdefault("seq", seq)  # 读档时沿用存档里的顺序
             rows.append({"id": mid, "text": text, "props": props, "embedding": vec})
         self._run(
             """
+            OPTIONAL MATCH (w:WorldMeta {name: 'WorldMeta'})
+            WITH w.sim_time AS now_t
             UNWIND $rows AS row
             MERGE (m:Memory {id: row.id})
-            SET m = row.props, m.id = row.id, m.owner = $npc, m.text = row.text
+            SET m = row.props, m.id = row.id, m.owner = $npc, m.text = row.text,
+                m.t = coalesce(row.props.t, now_t)
             WITH m, row
             CALL db.create.setNodeVectorProperty(m, 'embedding', row.embedding)
             """,
@@ -185,9 +215,10 @@ class Neo4jMemory:
         return [_item(r["m"], r["s"]) for r in rows]
 
     def list(self, npc: str) -> List[Dict[str, Any]]:
-        """列出某 NPC 的所有记忆，按 timestamp 从旧到新。"""
+        """列出某 NPC 的所有记忆，按写入顺序从旧到新。"""
         rows = self._run(
-            "MATCH (m:Memory {owner: $npc}) RETURN m ORDER BY m.timestamp, elementId(m)",
+            "MATCH (m:Memory {owner: $npc}) RETURN m "
+            "ORDER BY m.seq, m.timestamp, elementId(m)",
             npc=npc,
         )
         return [_item(r["m"]) for r in rows]

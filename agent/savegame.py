@@ -4,7 +4,7 @@
   world   Neo4j 里的整张图（所有节点 + 关系，原样；:Memory 节点除外，记忆走下面的 memory）
   sim     GameLoop 内存里的进度：时间、每个 NPC 的计划 / 正在做的事 / 触发器 / 历史、
           冲突、大事记、对话、剧情导演
-  memory  每个 NPC 的长期记忆（Chroma 或 Neo4j，见 MEMORY_BACKEND；不存向量，读档时重算）
+  memory  每个 NPC 的长期记忆（:Memory 节点；不存向量，读档时重算）
 
 读档 = 清空图 → 原样建回 → 重建 GameLoop 并把进度填回去 → 记忆换成存档里的。
 """

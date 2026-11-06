@@ -31,16 +31,36 @@ def world(neo4j_world):
     return neo4j_world
 
 
-@pytest.fixture(scope="session")
-def mem(tmp_path_factory):
-    """ChromaMemory 单例指向临时目录，不碰 data/chroma。"""
-    from chroma_memory import ChromaMemory
+class BagOfWordsEmbedder:
+    """测试用的假嵌入：词袋哈希，共享的词越多越近；不下载模型。"""
 
-    previous = ChromaMemory._instance
-    ChromaMemory._instance = None
-    instance = ChromaMemory.get_instance(persist_path=str(tmp_path_factory.mktemp("chroma")))
+    dims = 64
+
+    def __call__(self, texts):
+        import math
+        import re
+
+        out = []
+        for text in texts:
+            vec = [0.0] * self.dims
+            for word in re.findall(r"[a-z0-9]+", str(text).lower()):
+                vec[sum(map(ord, word)) % self.dims] += 1.0
+            norm = math.sqrt(sum(x * x for x in vec)) or 1.0
+            out.append([x / norm if any(vec) else 1.0 / math.sqrt(self.dims) for x in vec])
+        return out
+
+
+@pytest.fixture
+def mem(neo4j_world):
+    """Neo4jMemory 单例，换成假嵌入；测试结束清掉 test_ 开头的 NPC 的记忆。"""
+    from neo4j_memory import Neo4jMemory
+
+    previous = Neo4jMemory._instance
+    Neo4jMemory._instance = None
+    instance = Neo4jMemory.get_instance(neo4j_world.driver, embedder=BagOfWordsEmbedder())
     yield instance
-    ChromaMemory._instance = previous
+    neo4j_world.run_query("MATCH (m:Memory) WHERE m.owner STARTS WITH 'test_' DETACH DELETE m")
+    Neo4jMemory._instance = previous
 
 
 # ---------- 脚本式测试 ----------

@@ -72,3 +72,18 @@ def test_routine_marks_the_current_slot_and_what_is_done():
                      "notes": "once a day", "now": True, "done": True}
     assert not lunch["now"] and lunch["notes"] == "chats with people around"
     assert night["hours"] == "21:00-06:00" and night["what"] == "sleep"
+
+
+def test_memories_show_game_time_when_they_have_it():
+    from mind_view import memories_view
+    from routine import format_clock
+
+    mem = FakeMemory([
+        {"id": "a", "text": "Old one.", "metadata": {"type": "action", "timestamp": "2026-10-17T08:00:00", "seq": 1}},
+        {"id": "b", "text": "Same second, later.", "metadata": {"type": "action", "timestamp": "2026-10-17T08:00:00",
+                                                               "seq": 2, "t": 90.0}},
+    ])
+    view = memories_view(mem, "Sage")
+    assert [m["text"] for m in view["memories"]] == ["Same second, later.", "Old one."]
+    assert view["memories"][0]["time"] == format_clock(90.0).split(" (")[0]
+    assert view["memories"][1]["time"] == "10-17 08:00"

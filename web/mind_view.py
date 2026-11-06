@@ -14,6 +14,25 @@ def _short_time(ts: Any) -> str:
     return text.replace("T", " ")[5:16] if len(text) >= 16 else text
 
 
+def _recency(m: Dict[str, Any]):
+    """新旧排序键：现实时间到秒，同一秒内按写入顺序 seq。"""
+    meta = m.get("metadata") or {}
+    return (str(meta.get("timestamp") or ""), meta.get("seq") or 0)
+
+
+def _memory_time(meta: Dict[str, Any]) -> str:
+    """有游戏时间就显示「Day 2 08:30」，否则退回现实时间。"""
+    t = meta.get("t")
+    if isinstance(t, (int, float)):
+        try:
+            from routine import format_clock
+
+            return format_clock(float(t)).split(" (")[0]
+        except Exception:
+            pass
+    return _short_time(meta.get("timestamp"))
+
+
 def memories_view(memory, name: str, *, query: str = "", kind: str = "", limit: int = 80) -> Dict[str, Any]:
     if memory is None:
         return {"available": False, "total": 0, "types": {}, "memories": []}
@@ -24,7 +43,7 @@ def memories_view(memory, name: str, *, query: str = "", kind: str = "", limit: 
         hits = memory.search(name, query.strip(), top_k=max(1, min(limit, 50)), where=where) or []
     else:
         hits = [m for m in every if not kind or (m.get("metadata") or {}).get("type") == kind]
-        hits.sort(key=lambda m: str((m.get("metadata") or {}).get("timestamp") or ""), reverse=True)
+        hits.sort(key=_recency, reverse=True)
         hits = hits[:limit]
     out = []
     for m in hits:
@@ -33,7 +52,7 @@ def memories_view(memory, name: str, *, query: str = "", kind: str = "", limit: 
             "text": str(m.get("text") or ""),
             "type": str(meta.get("type") or "other"),
             "location": str(meta.get("location") or ""),
-            "time": _short_time(meta.get("timestamp")),
+            "time": _memory_time(meta),
         })
     return {"available": True, "total": len(every), "types": dict(types), "memories": out}
 

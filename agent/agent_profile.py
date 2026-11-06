@@ -61,7 +61,7 @@ class AgentProfile:
         self.values = values or ["honor", "friendship", "courage"]
         self.mood = mood
         self._goal_manager: Optional[GoalManager] = None
-        self._memory = None  # ChromaMemory，由 GameLoop 注入
+        self._memory = None  # Neo4jMemory，由 GameLoop 注入
 
     @classmethod
     def from_world(cls, world: "Neo4jWorld", name: str) -> "AgentProfile":

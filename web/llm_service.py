@@ -1,5 +1,5 @@
 """
-Web LLM decision service — wraps MultiStepDecider + NPC memory (Chroma or Neo4j, see MEMORY_BACKEND).
+Web LLM decision service — wraps MultiStepDecider + NPC memory (:Memory nodes in Neo4j).
 """
 
 from __future__ import annotations
@@ -27,8 +27,7 @@ def get_web_memory():
                 sys.path.insert(0, mem_path)
             from memory_backend import get_memory
 
-            persist = os.getenv("CHROMA_PATH", str(_AITOWN3 / "data" / "chroma"))
-            _memory = get_memory(persist_path=persist)
+            _memory = get_memory()
         except Exception:
             _memory = False  # type: ignore[assignment]
     return _memory if _memory is not False else None
@@ -298,7 +297,10 @@ def get_character_memories(
     else:
         raw = memory.list(character)
         raw.sort(
-            key=lambda x: (x.get("metadata") or {}).get("timestamp", ""),
+            key=lambda x: (
+                (x.get("metadata") or {}).get("timestamp", ""),
+                (x.get("metadata") or {}).get("seq") or 0,
+            ),
             reverse=True,
         )
         raw = raw[: max(1, min(limit, 200))]

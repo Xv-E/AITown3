@@ -1,5 +1,5 @@
 """
-Prompt 构建器 — Neo4j 上下文 + Chroma 语义记忆。
+Prompt 构建器 — Neo4j 上下文 + NPC 语义记忆。
 """
 
 from __future__ import annotations
@@ -620,7 +620,13 @@ Respond with a JSON object:
         if mem is not None:
             try:
                 talks = [m for m in mem.list(agent.name) if (m.get("metadata") or {}).get("type") == "dialogue"]
-                talks.sort(key=lambda m: str((m.get("metadata") or {}).get("timestamp") or ""), reverse=True)
+                talks.sort(
+                    key=lambda m: (
+                        str((m.get("metadata") or {}).get("timestamp") or ""),
+                        (m.get("metadata") or {}).get("seq") or 0,
+                    ),
+                    reverse=True,
+                )
                 for m in talks[:6]:
                     _add(m.get("text") or "")
             except Exception:
