@@ -367,7 +367,7 @@ Browser UI ──HTTP──► web/server.py
 - **Interactions** — item `effects_on` × target `accepts_from` compile to temporary `use_on` ops
 - **Planning** — goal terms → rule pathfinding and/or PDDL; feasibility gate before commit
 - **Memory** — per-character `:Memory` nodes (actions, dialogue, observations) in Neo4j, stamped with game time; semantic search via local embeddings
-- **Rules** — content packs add Prolog rules (`content/<pack>/rules/*.pl`, format in `content/README.md`). The engine only reads the graph into facts, asks the rules, and writes back the effects they return as ordinary graph ops; `base` uses this for hostility (with reasons), theft and its consequences, and forecasts NPCs see before acting
+- **Rules** — content packs add Prolog rules (`content/<pack>/rules/*.pl`, format in `content/README.md`). The engine only reads the graph into facts, asks the rules, and writes back the effects they return as ordinary graph ops; `base` uses this for every action's aftermath (ownership, gifts, trades, theft, assault) as well as hostility with reasons and the forecasts NPCs see before acting
 
 ## License
 

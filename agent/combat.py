@@ -13,8 +13,8 @@
 
 一击（strike）：伤害 = 力量（power_level）+ 手上最好的武器（Item.damage）- 对方的护甲（Item.armor），至少 1。
 HP 掉到 0 就死了：手上的东西掉在地上，名下的东西都没主了（谁捡归谁）。
-打人之后：挨打的人好感 -4，他的盟友 -3；看见的人 -2——除非挨打的本来就是看的人的敌人。
-没被惹就先动手（对方不是你的敌人）算犯罪，看见的人记下来，守卫会来找你。
+打人之后谁怎么看、没被惹就动手算不算犯罪：内容包规则（content/base/rules/combat.pl）；
+strike 只在打人的人身上记下 strike_provoked（动手前的敌对标签，'' = 没被惹）供规则用。
 不打仗的时候 HP 慢慢回来（regen）。
 
 NPC 的反应见 react()：打得过就打（不在一个地点就先走过去），快不行了就逃到旁边没敌人的地点。
@@ -25,9 +25,6 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 
 AGGRESSIVE = {"attacked me", "fighting", "faction", "criminal"}
-HURT_VICTIM = -4
-HURT_ALLY = -3
-HURT_WITNESS = -2
 FLEE_AT = 0.3             # HP 掉到最大值的这么多以下，又打不过，就逃
 BRAVE_RATIO = 1.3         # 只是讨厌（不是被打）的话，强出这么多才动手
 REGEN = 8                 # 每两个游戏小时回这么多 HP（最近没挨打的人）
@@ -178,32 +175,6 @@ def strike(world, attacker: str, target: str, *, at: Optional[float] = None) -> 
         out["killed"] = True
         out["dropped"] = die(world, target, at=at)
     return out
-
-
-def after_attack(world, attacker: str, target: str, *, at: float = 0.0, provoked: Optional[str] = None) -> Dict[str, Any]:
-    """打完人之后：谁对打人的人有看法、算不算犯罪。provoked：动手前打人的人有没有理由（hostility）。"""
-    from ownership import record_crime, witnesses
-    from relations import adjust, allies_of
-
-    adjust(world, target, attacker, HURT_VICTIM, reason="attacked me", at=at)
-    for ally in allies_of(world, target):
-        if ally != attacker:
-            adjust(world, ally, attacker, HURT_ALLY, reason=f"attacked {target}", at=at)
-    seen = [w for w in witnesses(world, attacker) if w != target]
-    for w in seen:
-        if not hostility(world, w, target, at=at):
-            adjust(world, w, attacker, HURT_WITNESS, reason=f"saw them attack {target}", at=at)
-    crime = False
-    if provoked is None:
-        rows = world.run_query(
-            "MATCH (a:Person {name: $a}) RETURN coalesce(a.strike_provoked, '') AS why", a=attacker
-        ) or []
-        provoked = str(rows[0]["why"]) if rows else ""
-    if not provoked:
-        # 没被惹就动手：看见的人（包括挨打的）都记下来
-        record_crime(world, attacker, "assault", victim=target, seen_by=seen + [target], at=at)
-        crime = True
-    return {"witnesses": seen, "crime": crime}
 
 
 def regen(world, *, at: float = 0.0) -> int:

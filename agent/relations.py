@@ -10,8 +10,8 @@
 
 NPC 对玩家的好感就是原来的 trust_toward_player（同一个数，不另记一份）。
 
-会改变好感的事：送东西 +3、做成一笔买卖 +1、对话里的语气（LLM 给的 -1..+2）、
-东西被对方抢先拿走 -2。每过两个游戏小时，所有好感朝 0 回落 1 点（盟友不低于 ALLY_FLOOR），
+会改变好感的事：动作之后的（送礼、买卖、偷窃、打人……）都是内容包规则（content/base/rules/），
+经 feel op 走 adjust()；对话里的语气（LLM 给的 -1..+2）；东西被对方抢先拿走 -2。每过两个游戏小时，所有好感朝 0 回落 1 点（盟友不低于 ALLY_FLOOR），
 矛盾（TENSION）也降 1 级。互相好感都 ≥ AUTO_ALLY 的两人自动结盟；好感跌破 0 的盟约破裂。
 """
 
@@ -20,8 +20,6 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 
 MIN_FEEL, MAX_FEEL = -10, 10
-GIFT = 3
-TRADE = 1
 TAKEN = -2
 ALLY_MIN = 4        # 提出结盟时，对方对你的好感至少这么多
 AUTO_ALLY = 6       # 互相好感都到这么高就自然成了盟友
@@ -288,13 +286,8 @@ def after_action(world, actor: str, action: str, params: Dict[str, str], *, at: 
     from content import get_content
 
     cap = get_content().capability_of(action) or action
-    if action in ("buy", "sell"):
-        other = params.get("seller") or params.get("buyer") or ""
-        adjust(world, other, actor, TRADE, reason="a fair deal", at=at)
-        adjust(world, actor, other, TRADE, reason="a fair deal", at=at)
-    elif cap == "give":
+    if cap == "give":  # 送礼、买卖带来的好感见 content/base/rules/ownership.pl
         receiver = params.get("receiver") or ""
-        adjust(world, receiver, actor, GIFT, reason=f"gave me {params.get('i', 'something')}", at=at)
         from job_board import on_give
 
         if world is not None:
@@ -312,19 +305,11 @@ def after_action(world, actor: str, action: str, params: Dict[str, str], *, at: 
 
 
 def consequences(world, actor: str, action: str, params: Dict[str, str], *, at: float = 0.0) -> Dict[str, Any]:
-    """任何动作做完之后：先按内容包规则结算（after/2，如偷窃，见 content/*/rules），
-    再是东西易手 / 认领（ownership.py）、打人的后果（combat.py）。"""
-    from content import get_content
-    from ownership import after_action as ownership_after
+    """任何动作做完之后的后果：全部由内容包规则给出（after/2，见 content/*/rules），引擎照着写图。
+    返回规则的 report 合并结果，以及 notes（要告诉做的人的话）。"""
     from rulebook import after as rule_after
 
-    out = dict(rule_after(world, action, params, at=at) or {})  # 归属还没改：规则读到的是动作前的主人
-    out.update(ownership_after(world, actor, action, params, at=at) or {})
-    if (get_content().capability_of(action) or action) == "attack" and params.get("target"):
-        from combat import after_attack
-
-        out.update(after_attack(world, actor, params["target"], at=at))
-    return out
+    return dict(rule_after(world, action, params, at=at) or {})
 
 
 # ----- 联盟（一伙人）-----

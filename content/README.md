@@ -476,5 +476,13 @@ after(take(A, I, _), _{op: link, a: W, a_label: 'Person', b: A, b_label: 'Person
     night, \+ owner(I, _), sees(W, A).
 ```
 
-`base` 包的 `rules/social.pl` 是完整的例子（敌对的原因与优先级、偷窃、偷后的后果、拿之前的提示）。
+`base` 包的规则就是完整的例子：
+
+| 文件 | 内容 |
+|---|---|
+| `social.pl` | 词汇（person / alive / owner / feeling…）、敌对的原因与优先级、偷窃、偷后的后果、拿之前的提示 |
+| `ownership.pl` | 手上没主的东西归谁、送礼（转手、好感、还给失主）、买卖（转手、双方好感） |
+| `combat.pl` | 打人之后：挨打的人、盟友、旁观者的好感，没被惹就动手算犯罪，告诉玩家对方还剩多少 HP |
+
+动作之后的一切后果都从这里来：引擎的 `relations.consequences` 只是问 `after/2` 并照着写图。
 

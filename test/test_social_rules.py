@@ -201,3 +201,66 @@ def test_a_new_rule_is_just_a_file(camp, tmp_path, monkeypatch):
     finally:
         monkeypatch.undo()
         content.reload_content()
+
+
+# ---------------------------------------------------------------------
+# 东西易手、送礼、买卖、打人之后（content/base/rules/ownership.pl、combat.pl）
+# ---------------------------------------------------------------------
+
+def _effects(facts, event):
+    return answers(facts, "E", f"after({event}, E)")
+
+
+def _feels(effects):
+    return sorted((e["a"], e["b"], e["delta"]) for e in effects if e["op"] == "feel")
+
+
+def test_what_you_hold_and_nobody_owns_becomes_yours():
+    facts = person("Ash") + rel("HAS_ITEM", "Ash", "Axe") + rel("HAS_ITEM", "Ash", "Knife") + rel("OWNS", "Sage", "Knife")
+    owns = [e for e in _effects(facts, "wait('Ash')") if e["op"] == "link"]
+    assert [(e["a"], e["b"], e["rel"]) for e in owns] == [("Ash", "Axe", "OWNS")]
+
+
+def test_gifts_hand_over_what_is_yours_and_warm_the_receiver():
+    facts = person("Ash") + person("Sage") + rel("OWNS", "Ash", "Pie")
+    eff = _effects(facts, "give('Ash', 'Pie', 'Sage', 'Camp')")
+    assert [(e["op"], e["a"]) for e in eff if e["op"] in ("link", "unlink")] == [("unlink", "Ash"), ("link", "Sage")]
+    assert _feels(eff) == [("Sage", "Ash", 3)]
+    # 偷来的东西转手还是原主的；还给失主再加一笔
+    back = _effects(person("Ash") + person("Sage") + rel("OWNS", "Sage", "Pie"), "give('Ash', 'Pie', 'Sage', 'Camp')")
+    assert not [e for e in back if e["op"] in ("link", "unlink")]
+    assert _feels(back) == [("Sage", "Ash", 3), ("Sage", "Ash", 3)]
+
+
+def test_a_players_gift_is_trust_and_says_so():
+    facts = person("Hero", is_player=True) + person("Sage", trust_toward_player=1)
+    eff = _effects(facts, "give('Hero', 'Pie', 'Sage', 'Camp')")
+    assert _feels(eff) == [("Sage", "Hero", 2)]
+    assert [e["text"] for e in eff if e["op"] == "note"] == ["Sage trust → 3"]
+
+
+def test_a_deal_moves_the_thing_and_both_sides_like_it():
+    facts = person("Ash") + person("Reed") + rel("OWNS", "Reed", "Axe")
+    eff = _effects(facts, "buy('Ash', 'Axe', 'Reed', 'Market')")
+    assert [(e["op"], e["a"], e["b"]) for e in eff if e["op"] in ("link", "unlink")] == [
+        ("unlink", "Reed", "Axe"), ("link", "Ash", "Axe")]
+    assert _feels(eff) == [("Ash", "Reed", 1), ("Reed", "Ash", 1)]
+
+
+def test_an_unprovoked_attack_is_seen_and_remembered():
+    from prolog_engine import fact
+
+    facts = (person("Ash") + person("Bram", hp=30) + person("Cole") + person("Dana")
+             + rel("ALLY", "Bram", "Cole") + [fact("sees", "Dana", "Ash")])
+    eff = _effects(facts, "attack('Ash', 'Bram', 'Camp')")
+    assert _feels(eff) == [("Bram", "Ash", -4), ("Cole", "Ash", -3), ("Dana", "Ash", -2)]
+    assert sorted(e["a"] for e in eff if e["op"] == "link") == ["Bram", "Dana"]
+    report = next(e for e in eff if e["op"] == "report")
+    assert report == {"op": "report", "crime": True, "witnesses": ["Dana"]}
+    assert [e["text"] for e in eff if e["op"] == "note"] == [
+        "Bram has 30 HP left", "an unprovoked attack: witnesses will remember"]
+    # 被惹了才还手：不算犯罪
+    provoked = person("Ash", strike_provoked="attacked me") + person("Bram", hp=30)
+    eff = _effects(provoked, "attack('Ash', 'Bram', 'Camp')")
+    assert next(e for e in eff if e["op"] == "report")["crime"] is False
+    assert not [e for e in eff if e["op"] == "link"]

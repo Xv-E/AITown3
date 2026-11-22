@@ -1,25 +1,16 @@
 """
-物品归属：谁的东西、怎么易手、拿别人的东西就是偷。
+物品归属与目击的读写小工具，以及引擎的感知 witnesses()（离得够近、没隔着墙）。
 
   (:Person)-[:OWNS]->(:Item)                     这件东西是他的（拿在谁手上、放在哪都不变）
   (:Person)-[:WITNESSED {crime, victim, item, at}]->(:Person)   亲眼看见谁干了坏事
 
-怎么变成谁的：
-  · 捡起没主的东西、采集、做出来、一开始就拿着 → 归拿着的人（claim_held 一扫就有）
-  · 送人 / 卖掉 / 买来 → 归新主人（前提是原来就是给的人的；偷来的东西转手还是原主的）
-  · 主人死了 → 他的东西都没主了，谁捡归谁
-
-什么算偷、偷了之后谁记下、好感怎么变，都是内容包规则（content/base/rules/social.pl 的 theft/3、
-after(take(...), ...)）；看得见的人由 witnesses() 给出（离得够近、没隔着墙）。
-把东西还给失主（give）好感会回来一些。
+东西怎么变成谁的、什么算偷、谁记下什么，都是内容包规则（content/base/rules/ownership.pl、social.pl）。
+主人死了（combat.die）→ 他的东西都没主了。
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
-
-RETURNED = 3
-
+from typing import Any, Dict, List
 
 def owner_of(world, item: str) -> str:
     rows = world.run_query(
@@ -34,20 +25,6 @@ def set_owner(world, item: str, person: str) -> None:
         world.run_query(
             "MATCH (p:Person {name: $p}), (i:Item {name: $i}) MERGE (p)-[:OWNS]->(i)", p=person, i=item
         )
-
-
-def claim_held(world, person: str) -> List[str]:
-    """手上没主的东西归他（采集、做出来、捡到的）。返回新认领的。"""
-    rows = world.run_query(
-        """
-        MATCH (p:Person {name: $p})-[:HAS_ITEM]->(i:Item)
-        WHERE NOT (:Person)-[:OWNS]->(i)
-        MERGE (p)-[:OWNS]->(i)
-        RETURN i.name AS i
-        """,
-        p=person,
-    ) or []
-    return [r["i"] for r in rows]
 
 
 def release_all(world, person: str) -> None:
@@ -74,25 +51,6 @@ def witnesses(world, actor: str) -> List[str]:
     return [n for n in near if n != actor]
 
 
-def record_crime(world, culprit: str, crime: str, *, victim: str = "", item: str = "",
-                 seen_by: Optional[List[str]] = None, at: float = 0.0) -> List[str]:
-    """记下谁看见了这件坏事；返回看见的人。"""
-    seen = list(seen_by) if seen_by is not None else witnesses(world, culprit)
-    for w in seen:
-        world.run_query(
-            """
-            MATCH (w:Person {name: $w}), (c:Person {name: $c})
-            CREATE (w)-[:WITNESSED {crime: $crime, victim: $victim, item: $item, at: $at}]->(c)
-            """,
-            w=w, c=culprit, crime=crime, victim=victim, item=item, at=float(at),
-        )
-    if seen:
-        world.run_query(
-            "MATCH (c:Person {name: $c}) SET c.crimes = coalesce(c.crimes, 0) + 1", c=culprit
-        )
-    return seen
-
-
 def crimes_seen(world, observer: str, culprit: str) -> List[Dict[str, Any]]:
     rows = world.run_query(
         """
@@ -102,29 +60,6 @@ def crimes_seen(world, observer: str, culprit: str) -> List[Dict[str, Any]]:
         o=observer, c=culprit,
     ) or []
     return [dict(r) for r in rows]
-
-
-def after_action(world, actor: str, action: str, params: Dict[str, str], *, at: float = 0.0) -> Dict[str, Any]:
-    """动作做完之后：东西易手、认领（偷窃由规则先结算，见 relations.consequences）。"""
-    from content import get_content
-    from relations import adjust
-
-    out: Dict[str, Any] = {}
-    cap = get_content().capability_of(action) or action
-    item = params.get("i") or ""
-    before = owner_of(world, item) if item else ""
-    if cap == "give" and item:
-        receiver = params.get("receiver") or ""
-        if before == actor:
-            set_owner(world, item, receiver)
-        elif before and before == receiver:
-            adjust(world, receiver, actor, RETURNED, reason=f"gave my {item} back", at=at)
-    elif action in ("buy", "sell") and item:
-        buyer = actor if action == "buy" else params.get("buyer") or ""
-        if buyer:
-            set_owner(world, item, buyer)
-    claim_held(world, actor)
-    return out
 
 
 def item_owners(world, items: List[str]) -> Dict[str, str]:

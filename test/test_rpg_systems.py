@@ -95,14 +95,10 @@ def test_who_joins_your_party_and_who_allies_with_you(monkeypatch):
     assert ok and any("MERGE (x)-[r1:ALLY]->(y)" in q for q, _ in world.queries)
 
 
-def test_gifts_and_deals_change_how_people_feel(monkeypatch):
+def test_feelings_have_words():
+    # 送礼、买卖带来的好感是内容包规则，见 test_social_rules.py
     import relations
 
-    changes = []
-    monkeypatch.setattr(relations, "adjust", lambda w, a, b, d, **k: changes.append((a, b, d)))
-    relations.after_action(None, "Ash", "give", {"giver": "Ash", "i": "Berry1", "receiver": "Sage"})
-    relations.after_action(None, "Ash", "buy", {"c": "Ash", "i": "Axe", "seller": "Reed"})
-    assert changes == [("Sage", "Ash", relations.GIFT), ("Reed", "Ash", relations.TRADE), ("Ash", "Reed", relations.TRADE)]
     assert relations.you_feel(8) == "really like" and relations.you_feel(-4) == "dislike"
 
 

@@ -241,22 +241,15 @@ def _note_player_action(me: str, action: str, target: str) -> None:
         pass
 
 
-def _player_consequences(world, action: str, params: Dict[str, str], capability: Optional[str], message: str) -> str:
-    """玩家做完任何动作：偷窃被看见、打人的后果、东西归属（见 agent/ownership.py、agent/combat.py）。"""
+def _player_consequences(world, action: str, params: Dict[str, str], message: str) -> str:
+    """玩家做完任何动作：按内容包规则结算后果（relations.consequences），规则要告诉玩家的话接在后面。"""
     try:
         from relations import consequences
 
         actor = next(iter(params.values()), "")
         out = consequences(world, actor, action, params, at=get_world_simulator().sim_time) or {}
-        if capability == "attack" and params.get("target"):
-            from combat import stats
-
-            st = stats(world, params["target"])
-            message = f"{message} — {params['target']} " + ("is dead" if not st.get("alive") else f"has {st.get('hp')} HP left")
-        for note in out.get("notes") or []:  # 内容包规则要告诉玩家的话（after/2 的 note）
+        for note in out.get("notes") or []:
             message = f"{message} — {note}"
-        if out.get("crime"):
-            message = f"{message} — an unprovoked attack: witnesses will remember"
     except Exception as e:  # noqa: BLE001
         print(f"[WARN] consequences of {action}: {e}")
     return message
@@ -609,7 +602,7 @@ async def api_execute(req: ExecuteActionRequest):
         dialogue = None
         capability = get_content().capability_of(req.action)
         if ok:
-            reason = _player_consequences(world, req.action, kwargs, capability, reason)
+            reason = _player_consequences(world, req.action, kwargs, reason)
         # 按能力签名的参数位置取值（内容包可自由命名参数）
         positional = [kwargs.get(p.name, "") for p in reg.get(req.action).parameters] if ok else []
         if ok and positional:
@@ -656,30 +649,13 @@ async def api_execute(req: ExecuteActionRequest):
                     "error": str(e),
                 }
         elif ok and capability == "give":
-            # Giving gifts increases receiver trust toward the player
+            # 送礼带来的信任见 content/base/rules/ownership.pl（已在 _player_consequences 里结算）
             try:
                 import sys as _sys
                 agent_path = str(_AITOWN3 / "agent")
                 if agent_path not in _sys.path:
                     _sys.path.insert(0, agent_path)
-                from npc_knowledge import adjust_trust, get_trust
-
                 giver, _item, receiver = positional[:3]
-                # Only increase trust when the giver is the player
-                rows = world.run_query(
-                    """
-                    MATCH (p:Person {name: $n})
-                    RETURN coalesce(p.is_player, false) AS is_player,
-                           coalesce(p.role, '') AS role
-                    """,
-                    n=giver,
-                )
-                is_player = False
-                if rows:
-                    is_player = bool(rows[0].get("is_player")) or rows[0].get("role") == "player"
-                if is_player and receiver:
-                    adjust_trust(world, receiver, 2)
-                    reason = f"{reason} ({receiver} trust → {get_trust(world, receiver)})"
                 # 交的是他委托要的东西：完成委托、他付酬劳
                 from job_board import on_give
 
