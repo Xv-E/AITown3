@@ -138,8 +138,30 @@ def tick(world, prev: float, now: float) -> Dict[str, Any]:
     periods = _periods(rule_files())
     if periods and not any(math.floor(now / p) > math.floor(prev / p) for p in periods if p > 0):
         return {}
-    effects = ask(world, "E", "tick(E)", at=now, extra=[fact("g_tick", float(prev), float(now))])
-    return apply_effects(world, effects)
+    window = [fact("g_tick", float(prev), float(now))]
+    out = apply_effects(world, ask(world, "E", "tick(E)", at=now, extra=window))
+    for phase in _phases(rule_files()):  # 每一步之前重读世界：后一步看得到前一步的结果
+        out.update(apply_effects(world, ask(world, "E", f"tick({atom(phase)}, E)", at=now, extra=window)))
+    return out
+
+
+def _phases(files: Tuple[str, ...]) -> List[str]:
+    key = ("tick_phase",) + files
+    if key not in _reads_cache:
+        rows = solve(files, [], "answers_json([O, P], tick_phase(O, P), J)")
+        _reads_cache[key] = ([p for _, p in sorted(json.loads(rows[0]["J"]) if rows else [])], [])
+    return _reads_cache[key][0]
+
+
+def holds(world, goal: str) -> bool:
+    """规则里的 goal 现在成立吗（动作条件的 holds op 用）。"""
+    return bool(ask(world, "x", goal))
+
+
+def pure(template: str, goal: str) -> List[Any]:
+    """只用规则、不读世界的提问（如把数值说成词）。"""
+    rows = solve(rule_files(), [], f"answers_json({template}, ({goal}), J)")
+    return json.loads(rows[0]["J"]) if rows else []
 
 
 def apply_effects(world, effects: List[Any]) -> Dict[str, Any]:

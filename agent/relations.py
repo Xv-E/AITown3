@@ -13,7 +13,7 @@ NPC 对玩家的好感就是原来的 trust_toward_player（同一个数，不�
 会改变好感的事：动作之后的（送礼、买卖、偷窃、打人……）都是内容包规则（content/base/rules/），
 经 feel op 走 adjust()；对话里的语气（LLM 给的 -1..+2）；东西被对方抢先拿走 -2。
 好感随时间回落、矛盾消退：规则 tick/1（content/base/rules/time.pl）。
-每过两个游戏小时（update_bonds）：互相好感都 ≥ AUTO_ALLY 的两人自动结盟；好感跌破 0 的盟约破裂。
+结盟 / 散伙 / 联盟成员与立场：规则（content/base/rules/alliances.pl）；这里只剩读图的小工具和界面文字。
 """
 
 from __future__ import annotations
@@ -22,11 +22,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 MIN_FEEL, MAX_FEEL = -10, 10
 TAKEN = -2
-ALLY_MIN = 4        # 提出结盟时，对方对你的好感至少这么多
-AUTO_ALLY = 6       # 互相好感都到这么高就自然成了盟友
 PARTY_MIN = 2       # 邀请同行时，对方对你的好感至少这么多（盟友总会答应）
-DECAY_EVERY = 25.0  # 模拟秒（= 两个游戏小时）
-FRIENDLY, RIVAL, HOSTILE = 4, -2, -5   # 联盟之间：友好 / 对立 / 敌对（敌对就不做买卖）
 
 
 def _is_player(world, name: str) -> bool:
@@ -86,36 +82,23 @@ def are_allies(world, a: str, b: str) -> bool:
     return b in allies_of(world, a)
 
 
-def _link_allies(world, a: str, b: str, at: float) -> None:
-    world.run_query(
-        """
-        MATCH (x:Person {name: $a}), (y:Person {name: $b})
-        MERGE (x)-[r1:ALLY]->(y) ON CREATE SET r1.since = $at
-        MERGE (y)-[r2:ALLY]->(x) ON CREATE SET r2.since = $at
-        """,
-        a=a, b=b, at=float(at),
-    )
-
-
 def propose_alliance(world, me: str, other: str, *, at: float = 0.0) -> Tuple[bool, str]:
-    """me 向 other 提出结盟：other 对 me 的好感够高就答应。"""
-    if me == other:
-        return False, "You can't ally with yourself"
+    """me 向 other 提出结盟：就是做一次内容包的 propose_alliance 动作（条件、效果、之后的事都在内容里）。"""
+    from graph_ops import render_text
+    from registry import get_registry
+
     if are_allies(world, me, other):
         return True, f"You and {other} are already allies."
-    f = feeling(world, other, me)
-    if f < ALLY_MIN:
-        return False, f"{other} doesn't trust you enough yet (feeling {f}, needs {ALLY_MIN})."
-    _link_allies(world, me, other, at)
-    adjust(world, other, me, 1, reason="became allies", at=at)
-    group = join_together(world, me, other, at=at)
-    return True, f"{other} agrees: you are allies now ({group})."
+    rows = world.run_query("MATCH (:Person {name: $n})-[:LOCATED_AT]->(l:Location) RETURN l.name AS l", n=me) or []
+    params = {"c": me, "other": other, "l": rows[0]["l"] if rows else ""}
+    ok, why = get_registry().execute(world, "propose_alliance", **params)
+    if not ok:
+        return False, why
+    consequences(world, me, "propose_alliance", params, at=at)
+    from content import get_content
 
-
-def break_alliance(world, a: str, b: str) -> None:
-    world.run_query(
-        "MATCH (:Person {name: $a})-[r:ALLY]-(:Person {name: $b}) DELETE r", a=a, b=b
-    )
+    spec = get_content().actions.get("propose_alliance") or {}
+    return True, render_text(str(spec.get("narrative") or f"{other} agrees: you are allies now."), params)
 
 
 # ----- 组队 -----
@@ -152,36 +135,6 @@ def leave(world, member: str) -> str:
 
 
 # ----- 随时间回落；够亲近的自然结盟 -----
-
-def update_bonds(world, *, at: float = 0.0) -> Dict[str, int]:
-    """够亲近的人自然结盟，好感跌破 0 的盟约破裂，联盟重算（好感回落、矛盾消退是规则 tick/1）。"""
-    formed_rows = world.run_query(
-        """
-        MATCH (a:Person)-[r1:FEELS]->(b:Person)-[r2:FEELS]->(a)
-        WHERE a.name < b.name AND r1.value >= $auto AND r2.value >= $auto AND NOT (a)-[:ALLY]->(b)
-        MERGE (a)-[x:ALLY]->(b) ON CREATE SET x.since = $at
-        MERGE (b)-[y:ALLY]->(a) ON CREATE SET y.since = $at
-        RETURN a.name AS a, b.name AS b
-        """,
-        auto=AUTO_ALLY, at=float(at),
-    ) or []
-    for r in formed_rows:
-        join_together(world, r["a"], r["b"], at=at)
-    broken = world.run_query(
-        """
-        MATCH (a:Person)-[al:ALLY]->(b:Person)
-        OPTIONAL MATCH (a)-[r:FEELS]->(b)
-        WITH a, b, al, r
-        WHERE r IS NOT NULL AND r.value < 0
-        DELETE al
-        RETURN a.name AS a, b.name AS b
-        """
-    ) or []
-    update_alliances(world)
-    return {"formed": len(formed_rows), "broken": len(broken)}
-
-
-# ----- 给决策 prompt / 客户端看的 -----
 
 def relations_of(world, name: str) -> List[Dict[str, Any]]:
     """name 对别人的好感（以及别人对 name 的），带上盟友 / 同行。"""
@@ -274,10 +227,6 @@ def after_action(world, actor: str, action: str, params: Dict[str, str], *, at: 
 
         if world is not None:
             on_give(world, actor, receiver, params.get("i") or "", at=at)  # 交的是他求的东西：委托完成、付酬劳
-    elif action == "propose_alliance":
-        other = params.get("other") or ""
-        adjust(world, other, actor, 1, reason="became allies", at=at)
-        join_together(world, actor, other, at=at)
     if action == "buy" and params.get("i") and world is not None:
         from economy import add_demand, kind_of
 
@@ -310,33 +259,6 @@ def members(world, alliance: str) -> List[str]:
     return [r["n"] for r in rows]
 
 
-def join_together(world, a: str, b: str, *, at: float = 0.0) -> str:
-    """a、b 刚结盟：都没有联盟就新成立一个；一方有就把另一方拉进来；两边各有联盟就让两个联盟更亲近。"""
-    ga, gb = alliance_of(world, a), alliance_of(world, b)
-    if ga and gb:
-        if ga != gb:
-            set_stance(world, ga, gb, max(stance(world, ga, gb), FRIENDLY))
-        return ga
-    if ga or gb:
-        group, newcomer = (ga, b) if ga else (gb, a)
-        world.run_query(
-            "MATCH (p:Person {name: $n}), (g:Alliance {name: $g}) MERGE (p)-[:MEMBER_OF]->(g)", n=newcomer, g=group
-        )
-        return group
-    group = f"{a}'s Band"
-    world.run_query(
-        """
-        MERGE (g:Alliance {name: $g}) ON CREATE SET g.founded = $at, g.founder = $a
-        WITH g
-        MATCH (x:Person {name: $a}), (y:Person {name: $b})
-        MERGE (x)-[:MEMBER_OF]->(g)
-        MERGE (y)-[:MEMBER_OF]->(g)
-        """,
-        g=group, a=a, b=b, at=float(at),
-    )
-    return group
-
-
 def stance(world, a: str, b: str) -> int:
     rows = world.run_query(
         "MATCH (:Alliance {name: $a})-[r:STANCE]->(:Alliance {name: $b}) RETURN coalesce(r.value, 0) AS v", a=a, b=b
@@ -344,55 +266,13 @@ def stance(world, a: str, b: str) -> int:
     return int(rows[0]["v"]) if rows else 0
 
 
-def set_stance(world, a: str, b: str, value: int) -> None:
-    value = max(MIN_FEEL, min(MAX_FEEL, int(value)))
-    world.run_query(
-        """
-        MATCH (x:Alliance {name: $a}), (y:Alliance {name: $b})
-        MERGE (x)-[r1:STANCE]->(y) SET r1.value = $v
-        MERGE (y)-[r2:STANCE]->(x) SET r2.value = $v
-        """,
-        a=a, b=b, v=value,
-    )
-
-
 def stance_word(value: int) -> str:
-    if value >= FRIENDLY:
-        return "friendly"
-    if value <= HOSTILE:
-        return "hostile"
-    if value <= RIVAL:
-        return "rivals"
-    return "neutral"
+    """联盟之间的立场说成词（阈值是规则 stance_word/2，见 content/base/rules/alliances.pl）。"""
+    from prolog_engine import atom
+    from rulebook import pure
 
-
-def hostile(world, a: str, b: str) -> bool:
-    """a、b 属于互相敌对的两个联盟。"""
-    ga, gb = alliance_of(world, a), alliance_of(world, b)
-    return bool(ga and gb and ga != gb and stance(world, ga, gb) <= HOSTILE)
-
-
-def update_alliances(world) -> None:
-    """不再喜欢同伴的人退出；少于两人的联盟解散；联盟之间的关系 = 两边成员互相好感的平均。"""
-    for g in [r["g"] for r in world.run_query("MATCH (g:Alliance) RETURN g.name AS g") or []]:
-        people = members(world, g)
-        for p in people:
-            others = [o for o in people if o != p]
-            if others and sum(feeling(world, p, o) for o in others) / len(others) < 0:
-                world.run_query(
-                    "MATCH (:Person {name: $p})-[m:MEMBER_OF]->(:Alliance {name: $g}) DELETE m", p=p, g=g
-                )
-        if len(members(world, g)) < 2:
-            world.run_query("MATCH (g:Alliance {name: $g}) DETACH DELETE g", g=g)
-    groups = {r["g"]: members(world, r["g"]) for r in world.run_query("MATCH (g:Alliance) RETURN g.name AS g") or []}
-    names = sorted(groups)
-    for i, a in enumerate(names):
-        for b in names[i + 1:]:
-            pairs = [(x, y) for x in groups[a] for y in groups[b]]
-            if not pairs:
-                continue
-            mean = sum(feeling(world, x, y) + feeling(world, y, x) for x, y in pairs) / (2 * len(pairs))
-            set_stance(world, a, b, round(mean))
+    words = pure("W", f"stance_word({atom(int(value))}, W)")
+    return str(words[0]) if words else "neutral"
 
 
 def alliances_view(world) -> List[Dict[str, Any]]:

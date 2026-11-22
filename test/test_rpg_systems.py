@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 
 class FakeWorld:
     """只认 rpg_content 用到的几条查询。"""
@@ -76,7 +78,7 @@ class Recorder:
         return []
 
 
-def test_who_joins_your_party_and_who_allies_with_you(monkeypatch):
+def test_who_joins_your_party(monkeypatch):
     import relations
 
     feel = {("Sage", "Ash"): 3, ("Reed", "Ash"): 0}
@@ -88,11 +90,7 @@ def test_who_joins_your_party_and_who_allies_with_you(monkeypatch):
     assert ok and any("SET p.follows" in q for q, _ in world.queries)
     ok, msg = relations.invite(world, "Ash", "Reed")
     assert not ok and "rather not" in msg
-    ok, msg = relations.propose_alliance(world, "Ash", "Sage")
-    assert not ok and "doesn't trust you enough" in msg, "needs a feeling of ALLY_MIN"
-    feel[("Sage", "Ash")] = relations.ALLY_MIN
-    ok, msg = relations.propose_alliance(world, "Ash", "Sage")
-    assert ok and any("MERGE (x)-[r1:ALLY]->(y)" in q for q, _ in world.queries)
+    # 结盟是内容包规则，见 test_social_rules.py
 
 
 def test_feelings_have_words():
@@ -141,16 +139,12 @@ def test_an_empty_shop_becomes_the_traders_own_goal(monkeypatch):
     assert goal["goal"] == "Collect item" and goal["target_entity"] == "kind:axe" and goal["source"] == "shop"
 
 
-def test_alliance_groups_and_their_stances(monkeypatch):
+def test_alliance_stances_have_words():
+    pytest.importorskip("pyswip")
     import relations
 
     assert relations.stance_word(6) == "friendly" and relations.stance_word(-6) == "hostile"
     assert relations.stance_word(-3) == "rivals" and relations.stance_word(0) == "neutral"
-    groups = {"Ash": "Ash's Band", "Rook": "Rook's Band"}
-    monkeypatch.setattr(relations, "alliance_of", lambda w, n: groups.get(n, ""))
-    monkeypatch.setattr(relations, "stance", lambda w, a, b: -7)
-    assert relations.hostile(None, "Ash", "Rook")
-    assert not relations.hostile(None, "Ash", "Sage"), "not in an alliance: never hostile"
 
 
 def test_npcs_can_set_out_to_form_an_alliance():
@@ -159,10 +153,10 @@ def test_npcs_can_set_out_to_form_an_alliance():
 
     assert "Form alliance" in get_all_goal_terms()
     action = get_content().actions["propose_alliance"]
-    assert {"op": "feels_gte", "a": "@other", "b": "@c", "value": 4,
-            "message": "@other doesn't trust you enough to be allies yet"} in action["requires"]
+    assert any(r.get("op") == "holds" and "would_ally(@other, @c)" in r["goal"] for r in action["requires"])
     buy = get_content().actions["buy"]
-    assert any(r.get("op") == "not_hostile" for r in buy["requires"]), "no deals across hostile alliances"
+    assert any(r.get("op") == "holds" and "alliances_at_war" in r["goal"] for r in buy["requires"]), \
+        "no deals across hostile alliances"
 
 
 def test_a_stuck_background_npc_posts_a_request_then_thinks_with_the_llm(monkeypatch):

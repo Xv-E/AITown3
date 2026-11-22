@@ -20,6 +20,9 @@
 %   after(Event, Effect)               事件发生后的效果；Effect 是和动作 JSON 一样的 op（SWI dict）
 %   tick(Effect)                       时间过去后的效果（回落、回血……）；用 every(Period) 限定多久一次
 %   tick_period(Period)                tick/1 用到的周期：引擎只在跨过某个周期时才问（不声明就每拍都问）
+%   tick_phase(Order, Phase) + tick(Phase, Effect)
+%                                      分步的时间效果：先 tick/1，再按 Order 逐步问，每步之前重读世界
+%                                      （后一步要看到前一步的结果时用，如先结盟、再算联盟成员）
 %   forecast(Event, Text)              做之前提示会怎样
 %   label/2  explain/4                 原因的标签 / 一句话解释（引擎原样转给提示词与界面）
 %   const(Name, Value)                 引擎在别处也要用的常量
@@ -31,9 +34,9 @@
 :- use_module(library(lists)).
 
 :- dynamic g_node/2, g_prop/3, g_rel/4, g_now/1, g_tick/2, sees/2, hyp/1.
-:- multifile reads/1, after/2, tick/1, tick_period/1, forecast/2, label/2, explain/4, const/2.
-:- dynamic reads/1, after/2, tick/1, tick_period/1, forecast/2, label/2, explain/4, const/2.
-:- discontiguous reads/1, after/2, tick/1, tick_period/1, forecast/2, label/2, explain/4, const/2.
+:- multifile reads/1, after/2, tick/1, tick/2, tick_phase/2, tick_period/1, forecast/2, label/2, explain/4, const/2.
+:- dynamic reads/1, after/2, tick/1, tick/2, tick_phase/2, tick_period/1, forecast/2, label/2, explain/4, const/2.
+:- discontiguous reads/1, after/2, tick/1, tick/2, tick_phase/2, tick_period/1, forecast/2, label/2, explain/4, const/2.
 
 load_facts(Facts) :-
     retractall(g_node(_, _)), retractall(g_prop(_, _, _)), retractall(g_rel(_, _, _, _)),

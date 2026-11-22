@@ -231,24 +231,16 @@ def _check_condition(world, cond: Dict[str, Any], ctx: Dict[str, str]) -> Tuple[
                 return False, cond.get("message") or f"{entity}.{prop}={got_n} > {want}"
             return True, "ok"
 
-        if op == "feels_gte":
-            # a 对 b 的好感 ≥ value（relations.py）；规划时当作成立，执行时才真正检查
-            from relations import feeling
+        if op == "holds":
+            # 内容包规则里的 goal 成立吗（Prolog，@参数 换成名字）；规划时当作成立，执行时才真正检查
+            import re
 
-            a_name, b_name = resolve_token(cond["a"], ctx), resolve_token(cond["b"], ctx)
-            want = float(resolve_token(cond.get("value") or 0, ctx) or 0)
-            got = feeling(world, a_name, b_name)
-            if got < want:
-                return False, f"{a_name} doesn't feel close enough to {b_name} ({got} < {want:g})"
-            return True, "ok"
+            from prolog_engine import atom
+            from rulebook import holds
 
-        if op == "not_hostile":
-            # a、b 不属于互相敌对的联盟
-            from relations import hostile
-
-            a_name, b_name = resolve_token(cond["a"], ctx), resolve_token(cond["b"], ctx)
-            if hostile(world, a_name, b_name):
-                return False, f"{a_name} and {b_name} belong to hostile alliances"
+            goal = re.sub(r"@([A-Za-z_][A-Za-z0-9_.]*)", lambda m: atom(resolve_token(m.group(0), ctx)), cond["goal"])
+            if not holds(world, goal):
+                return False, render_text(cond.get("message") or f"not true: {cond['goal']}", ctx)
             return True, "ok"
 
         if op == "count":
@@ -351,6 +343,32 @@ def apply_op(world, op_spec: Dict[str, Any], ctx: Dict[str, str]) -> None:
         from combat import strike
 
         strike(world, str(resolve_token(op_spec["attacker"], ctx)), str(resolve_token(op_spec["target"], ctx)))
+        return
+
+    if op == "merge_node":
+        # 有就沿用、没有就新建一个节点（如联盟）；props 只在新建时写
+        label = str(op_spec.get("label") or "Entity")
+        world.run_query(
+            f"MERGE (n:{label} {{name: $n}}) ON CREATE SET n += $props",
+            n=resolve_token(op_spec["name"], ctx),
+            props={k: resolve_token(v, ctx) for k, v in dict(op_spec.get("props") or {}).items()},
+        )
+        return
+
+    if op == "set_rel_prop":
+        # 关系上的属性设为 value（关系没有就建一条），如联盟之间的立场 STANCE.value
+        import re
+
+        a_label = op_spec.get("a_label") or "Person"
+        b_label = op_spec.get("b_label") or "Person"
+        rel, prop = str(op_spec["rel"]), str(op_spec["prop"])
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", prop):
+            raise ValueError(f"bad property name: {prop}")
+        world.run_query(
+            f"MATCH (a:{a_label} {{name: $a}}), (b:{b_label} {{name: $b}}) MERGE (a)-[r:{rel}]->(b) SET r.`{prop}` = $v",
+            a=resolve_token(op_spec["a"], ctx), b=resolve_token(op_spec["b"], ctx),
+            v=resolve_token(op_spec.get("value"), ctx),
+        )
         return
 
     if op == "add_rel_prop":

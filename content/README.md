@@ -110,6 +110,7 @@ AITOWN_CONTENT_PACKS=base,my_mod
 | `has_rel` / `not_has_rel` | a, b, rel, [a_label], [b_label], [directed] | 存在 / 不存在关系（默认 `ADJACENT_TO`） |
 | `neq` | a, b | 两个值不同（如不能攻击自己） |
 | `any` | of: [条件...] | 任一成立 |
+| `holds` | goal | 内容包规则（`rules/*.pl`）里的 goal 成立，如 `"would_ally(@other, @c)"`；规划时当作成立，执行时才检查 |
 
 ### 操作（`effects`、`effects_on[].ops`、`on_exit`）
 
@@ -122,7 +123,10 @@ AITOWN_CONTENT_PACKS=base,my_mod
 | `spawn_item` | name 或 archetype, held_by / located_at, … | 生成物品（重名自动加后缀；原型的 `script`、`effects_on` 一并带上，`script.initial_state` 写成初始属性） |
 | `spawn_location` | name, adjacent_to（一个或列表）, [description], [tags], [bidirectional=true] | 新建地点并连到已有地点（已存在则只补连接） |
 | `delete_entity` | entity, [label] | 删除实体 |
-| `link` / `unlink` | a, b, rel, [a_label], [b_label], [bidirectional] | 建 / 删关系 |
+| `link` / `unlink` | a, b, rel, [a_label], [b_label], [bidirectional], [props] | 建 / 删关系（带 `props` 时每次新建一条带属性的边，用来记一件事） |
+| `set_rel_prop` / `add_rel_prop` | a, b, rel, prop, value / delta, [min], [max], [a_label], [b_label] | 关系上的属性设为 / 加减（设值时关系不存在就建） |
+| `merge_node` | label, name, [props] | 有就沿用、没有就新建节点（props 只在新建时写） |
+| `feel` | a, b, delta, [reason] | a 对 b 的好感加减（范围、对玩家的信任、自动结盟由引擎处理） |
 | `relocate` | entity, to, [label] | 移到某地（解除持有） |
 | `set_state` | entity, state | 设置人物状态（`null` 清除） |
 
@@ -429,7 +433,7 @@ Routine 里用 `"action": "sleep"` 让角色在该时段去执行这个动作：
 ### 联盟
 
 - 结盟的人聚成联盟（`(:Person)-[:MEMBER_OF]->(:Alliance)`），联盟之间的关系（`STANCE`，-10..10）= 两边成员互相好感的平均，每两个游戏小时重算：≥4 友好，≤-2 对立，≤-5 敌对（敌对联盟之间不做买卖）。
-- NPC 可以自己去结盟：目标 `Form alliance`（target = 人），规划器让他走过去 `propose_alliance`；对方好感 ≥ 4 才答应（条件 `feels_gte`，当面才知道）。
+- NPC 可以自己去结盟：目标 `Form alliance`（target = 人），规划器让他走过去 `propose_alliance`；对方好感够高才答应（条件 `holds` 问规则 `would_ally/2`，当面才知道）。
 
 ---
 
@@ -485,6 +489,7 @@ after(take(A, I, _), _{op: link, a: W, a_label: 'Person', b: A, b_label: 'Person
 | `ownership.pl` | 手上没主的东西归谁、送礼（转手、好感、还给失主）、买卖（转手、双方好感） |
 | `combat.pl` | 打人之后：挨打的人、盟友、旁观者的好感，没被惹就动手算犯罪，告诉玩家对方还剩多少 HP |
 | `time.pl` | 时间过去：好感朝 0 回落（盟友有下限）、矛盾消退、没在打架的人回血 |
+| `alliances.pl` | 互相喜欢就结盟、聚成一伙；闹翻就散；联盟之间的立场 = 成员互相好感的平均（分四步的 tick/2） |
 
 动作之后的一切后果都从这里来：引擎的 `relations.consequences` 只是问 `after/2` 并照着写图；
 游戏主循环每拍调用 `rulebook.tick`，同样只是问 `tick/1` 并照着写图。

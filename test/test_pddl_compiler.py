@@ -287,4 +287,4 @@ def test_an_npc_walks_over_to_propose_an_alliance():
     _, plan = _solve(c)
     assert plan[0] == ("move", ["Kai", "Forest", "River"]), plan
     assert plan[-1] == ("propose_alliance", ["Kai", "Reed", "River"]), plan
-    assert "feels_gte" in c.report.text(), "whether they agree is only known face to face"
+    assert "holds" in c.report.text(), "whether they agree (a rule) is only known face to face"

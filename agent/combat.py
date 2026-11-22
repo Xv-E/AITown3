@@ -8,7 +8,7 @@
   · "faction"       两人阵营不同，而且有一方是见人就打的阵营（social.pl 的 hostile_faction，比如 monster / bandit）
   · "criminal"      a 是守卫（Person.guard），亲眼看见 b 偷过东西 / 无故打人
   · "hatred"        a 对 b 的好感 ≤ 仇恨线（social.pl 的 hatred_threshold）
-  · "war"           两人的联盟互相敌对（relations.hostile）
+  · "war"           两人的联盟互相敌对（规则常量 alliance_hostile）
 前四种会主动动手（AGGRESSIVE）；后两种只在自己明显更强时才动手，否则躲着走。
 
 一击（strike）：伤害 = 力量（power_level）+ 手上最好的武器（Item.damage）- 对方的护甲（Item.armor），至少 1。

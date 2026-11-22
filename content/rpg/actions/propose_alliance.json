@@ -49,10 +49,8 @@
       "message": "You are already allies"
     },
     {
-      "op": "feels_gte",
-      "a": "@other",
-      "b": "@c",
-      "value": 4,
+      "op": "holds",
+      "goal": "would_ally(@other, @c)",
       "message": "@other doesn't trust you enough to be allies yet"
     }
   ],

@@ -73,9 +73,8 @@
       "message": "You can't afford @i (@i.price coins)"
     },
     {
-      "op": "not_hostile",
-      "a": "@c",
-      "b": "@seller",
+      "op": "holds",
+      "goal": "\\+ alliances_at_war(@c, @seller)",
       "message": "@seller won't trade with someone from a hostile alliance"
     },
     {
