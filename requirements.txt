@@ -2,6 +2,7 @@
 neo4j>=5.0.0
 sentence-transformers>=2.2.0
 unified-planning>=1.0.0
+pyswip>=0.3.0          # needs SWI-Prolog installed (see README)
 python-dotenv>=1.0.0
 langchain-community>=0.0.20
 llama-cpp-python>=0.2.0

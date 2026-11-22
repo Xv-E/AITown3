@@ -396,16 +396,22 @@ Respond with a JSON object:
                 me=name,
             ) or []
             if people:
-                from combat import hostility
+                from social_rules import hostilities
 
+                names = [r["n"] for r in people if r.get("n")]
+                try:
+                    hostile = hostilities(self.world, [(name, n) for n in names] + [(n, name) for n in names])
+                except Exception:
+                    hostile = {}
                 bits = []
                 for r in people:
                     if not r.get("n"):
                         continue
-                    why = hostility(self.world, name, r["n"])
-                    against = hostility(self.world, r["n"], name)
-                    tag = f", YOUR ENEMY ({why})" if why else ""
-                    tag += f", hostile to you ({against})" if against and against != why else ""
+                    why = hostile.get((name, r["n"]))
+                    against = hostile.get((r["n"], name))
+                    tag = f", YOUR ENEMY ({why['text']})" if why else ""
+                    if against and (not why or against["label"] != why["label"]):
+                        tag += f", hostile to you ({against['text']})"
                     bits.append(f"{r['n']}(hp={r.get('hp')}, mood={r.get('mood') or '-'}, role={r.get('role')}{tag})")
                 lines.append("People here: " + "; ".join(bits))
             else:
@@ -437,7 +443,8 @@ Respond with a JSON object:
                     if kind == "door":
                         extra = " locked" if r.get("locked") else " open"
                     if r.get("owner") and r["owner"] != name:
-                        extra += f", {r['owner']}'s: taking it is stealing"
+                        extra += f", {r['owner']}'s"
+                        extra += self._take_consequence(name, r["n"])
                     elif r.get("owner") == name:
                         extra += ", yours"
                     bits.append(f"{r['n']}[{kind}{extra}]")
@@ -604,6 +611,21 @@ Respond with a JSON object:
             return text
         except Exception as e:
             return f"(no routine info: {e})"
+
+    def _take_consequence(self, me: str, item: str) -> str:
+        """拿走别人的东西会怎样（rules/social.pl 推演）：算不算偷、谁会因此敌视我。"""
+        try:
+            from social_rules import foresee_take
+
+            out = foresee_take(self.world, me, item)
+        except Exception:
+            return ": taking it may be stealing"
+        if not out["theft"]:
+            return ": you may take it (not stealing)"
+        text = ": taking it is stealing"
+        if out["turns_hostile"]:
+            text += "; then " + "; ".join(h["text"] for h in out["turns_hostile"])
+        return text
 
     def _get_memories_text(self, agent: "AgentProfile", limit: int = 16) -> str:
         mem = self.memory or getattr(agent, "_memory", None)

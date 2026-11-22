@@ -416,6 +416,16 @@ def _heart_blocks(world, me: str, other: str, knowledge=None) -> tuple[str, str]
     if fblock:
         heart = f"{heart}\n{fblock}" if heart else fblock
     try:
+        from social_rules import why_hostile
+
+        enemy = why_hostile(world, me, other)
+    except Exception as e:
+        logger.debug("hostility rules failed: %s", e)
+        enemy = None
+    if enemy:
+        line = f"You see {other} as an enemy: {enemy['text']}."
+        heart = f"{heart}\n{line}" if heart else line
+    try:
         from street_economy import economy_text
 
         money = economy_text(world, me)

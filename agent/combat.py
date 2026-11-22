@@ -1,12 +1,13 @@
 """
 战斗与敌对。
 
-敌对（hostility(a, b) 返回 a 为什么把 b 当敌人，"" = 不是）：
+敌对（hostility(a, b) 返回 a 为什么把 b 当敌人，"" = 不是）——规则写在 rules/social.pl（Prolog），
+按下面的顺序取第一个原因；why_hostile / social_rules.explain 给出细节和一句话解释：
   · "attacked me"   b 刚打过 a（COMBAT_MEMORY 之内）
   · "fighting"      a 刚打过 b，还在打
-  · "faction"       两人阵营不同，而且有一方是见人就打的阵营（HOSTILE_FACTIONS，比如 monster / bandit）
+  · "faction"       两人阵营不同，而且有一方是见人就打的阵营（social.pl 的 hostile_faction，比如 monster / bandit）
   · "criminal"      a 是守卫（Person.guard），亲眼看见 b 偷过东西 / 无故打人
-  · "hatred"        a 对 b 的好感 ≤ HATRED
+  · "hatred"        a 对 b 的好感 ≤ 仇恨线（social.pl 的 hatred_threshold）
   · "war"           两人的联盟互相敌对（relations.hostile）
 前四种会主动动手（AGGRESSIVE）；后两种只在自己明显更强时才动手，否则躲着走。
 
@@ -23,9 +24,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
-HOSTILE_FACTIONS = {"monster", "monsters", "bandit", "bandits", "beast", "beasts", "undead", "raider", "raiders"}
 AGGRESSIVE = {"attacked me", "fighting", "faction", "criminal"}
-HATRED = -6
 COMBAT_MEMORY = 25.0      # 模拟秒（两个游戏小时）：这么久之内打过你的人还是敌人
 HURT_VICTIM = -4
 HURT_ALLY = -3
@@ -79,36 +78,13 @@ def now(world) -> float:
     return float(rows[0]["t"] or 0.0) if rows and rows[0].get("t") is not None else 0.0
 
 
-def _recent(when: Any, at: float) -> bool:
-    return when is not None and at - float(when) <= COMBAT_MEMORY
-
-
 def hostility(world, a: str, b: str, *, at: Optional[float] = None) -> str:
+    """a 为什么把 b 当敌人（标签），"" = 不是。规则见 rules/social.pl。"""
     if not a or not b or a == b:
         return ""
-    at = now(world) if at is None else float(at)
-    sa, sb = stats(world, a), stats(world, b)
-    if not sa or not sb or not sa["alive"] or not sb["alive"]:
-        return ""
-    if sa.get("attacked_by") == b and _recent(sa.get("attacked_at"), at):
-        return "attacked me"
-    if sa.get("fighting") == b and _recent(sa.get("fighting_at"), at):
-        return "fighting"
-    fa, fb = str(sa.get("faction") or ""), str(sb.get("faction") or "")
-    if fa != fb and (fa in HOSTILE_FACTIONS or fb in HOSTILE_FACTIONS):
-        return "faction"
-    if sa.get("guard"):
-        from ownership import crimes_seen
+    from social_rules import hostility as rule_hostility
 
-        if crimes_seen(world, a, b):
-            return "criminal"
-    from relations import feeling, hostile
-
-    if feeling(world, a, b) <= HATRED:
-        return "hatred"
-    if hostile(world, a, b):
-        return "war"
-    return ""
+    return rule_hostility(world, a, b, at=at)
 
 
 def _drop_everything(world, name: str, location: str) -> List[str]:
@@ -241,11 +217,11 @@ def enemies_near(world, me: str, *, at: float = 0.0) -> List[Tuple[str, str]]:
     """看得见的敌人：[(名字, 为什么)]，最近打过我的排前面。"""
     from ownership import witnesses
 
-    out = []
-    for other in witnesses(world, me):  # 看得见我的人 = 我看得见的人
-        why = hostility(world, me, other, at=at)
-        if why:
-            out.append((other, why))
+    from social_rules import hostilities
+
+    seen = witnesses(world, me)  # 看得见我的人 = 我看得见的人
+    found = hostilities(world, [(me, other) for other in seen], at=at)
+    out = [(other, found[(me, other)]["label"]) for other in seen if (me, other) in found]
     out.sort(key=lambda p: (p[1] != "attacked me", p[1] != "fighting", p[0]))
     return out
 
@@ -262,7 +238,9 @@ def _hostiles_at(world, me: str, place: str, *, at: float) -> int:
         "MATCH (p:Person)-[:LOCATED_AT]->(:Location {name: $l}) WHERE p.name <> $me RETURN p.name AS n",
         l=place, me=me,
     ) or []
-    return sum(1 for r in rows if hostility(world, r["n"], me, at=at))
+    from social_rules import hostilities
+
+    return len(hostilities(world, [(r["n"], me) for r in rows], at=at))
 
 
 def react(world, me: str, *, at: float = 0.0) -> Optional[Dict[str, Any]]:

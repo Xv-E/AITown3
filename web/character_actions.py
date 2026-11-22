@@ -781,13 +781,16 @@ def world_view(world, viewer: Optional[str]) -> Dict[str, Any]:
                 entry["actions"] = list(entry.get("actions") or []) + gather_options(world, viewer, it["name"])
             items.append(entry)
     persons = []
-    from combat import hostility
+    from social_rules import hostilities
 
-    for c in list_characters(world):
+    characters = list_characters(world)
+    # 这个人为什么把看的人当敌人（没有 = 不是敌人）：一次算完所有人
+    against_viewer = hostilities(world, [(c["name"], viewer) for c in characters]) if viewer else {}
+    for c in characters:
         cell = person_cell(world, c["name"])
-        # 这个人为什么把看的人当敌人（"" = 不是敌人）
-        hostile = hostility(world, c["name"], viewer) if viewer and viewer != c["name"] else ""
-        persons.append({**c, "x": cell[0] if cell else None, "y": cell[1] if cell else None, "hostile": hostile})
+        why = against_viewer.get((c["name"], viewer))
+        persons.append({**c, "x": cell[0] if cell else None, "y": cell[1] if cell else None,
+                        "hostile": why["label"] if why else "", "hostile_why": why["text"] if why else ""})
     if terrain is not None:
         width, height = terrain.width, terrain.height
         # 整张地形的格子种类：'.' 室外地 ',' 室内地板 '+' 门洞 '#' 墙 '%' 篱笆 '~' 水 ' ' 荒野

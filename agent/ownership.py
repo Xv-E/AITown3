@@ -57,14 +57,6 @@ def release_all(world, person: str) -> None:
     world.run_query("MATCH (:Person {name: $p})-[r:OWNS]->(:Item) DELETE r", p=person)
 
 
-def _alive(world, name: str) -> bool:
-    rows = world.run_query(
-        "MATCH (p:Person {name: $n}) RETURN coalesce(p.dead, false) = false AND coalesce(p.hp, 0) > 0 AS ok",
-        n=name,
-    ) or []
-    return bool(rows and rows[0].get("ok"))
-
-
 def witnesses(world, actor: str) -> List[str]:
     """看得见 actor 的人（不算他自己）。"""
     try:
@@ -115,18 +107,10 @@ def crimes_seen(world, observer: str, culprit: str) -> List[Dict[str, Any]]:
 
 
 def is_theft(world, taker: str, item: str) -> str:
-    """taker 拿走 item 算不算偷：算的话返回失主。"""
-    owner = owner_of(world, item)
-    if not owner or owner == taker or not _alive(world, owner):
-        return ""
-    try:
-        from relations import are_allies
+    """taker 拿走 item 算不算偷：算的话返回失主。规则见 rules/social.pl（theft/3）。"""
+    from social_rules import is_theft as rule_is_theft
 
-        if are_allies(world, owner, taker):
-            return ""
-    except Exception:  # noqa: BLE001
-        pass
-    return owner
+    return rule_is_theft(world, taker, item)
 
 
 def after_action(world, actor: str, action: str, params: Dict[str, str], *, at: float = 0.0) -> Dict[str, Any]:
@@ -139,15 +123,7 @@ def after_action(world, actor: str, action: str, params: Dict[str, str], *, at: 
     item = params.get("i") or ""
     before = owner_of(world, item) if item else ""
     if cap == "take" and item:
-        victim = before if before and before != actor and _alive(world, before) else ""
-        if victim:
-            try:
-                from relations import are_allies
-
-                if are_allies(world, victim, actor):
-                    victim = ""
-            except Exception:  # noqa: BLE001
-                pass
+        victim = is_theft(world, actor, item)  # 归属还没改，读到的是动作前的主人
         if victim:
             seen = record_crime(world, actor, "theft", victim=victim, item=item, at=at)
             if victim in seen:

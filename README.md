@@ -15,6 +15,9 @@ A small open-world play sandbox: locations, people, and items live in **Neo4j**;
 
 - Python 3.11+ (3.13 works)
 - [Neo4j](https://neo4j.com/) 5.18+ reachable over Bolt (default `bolt://localhost:7687`) — NPC memory uses its vector functions
+- [SWI-Prolog](https://www.swi-prolog.org/Download.html) 9+ — social rules (who is hostile and why, what counts as theft) live in `rules/*.pl`
+  - Windows: `winget install SWI-Prolog.SWI-Prolog` (or the installer; let it add `swipl` to `PATH`)
+  - macOS: `brew install swi-prolog` · Debian/Ubuntu: `apt install swi-prolog-nox`
 - Optional: DashScope / OpenAI-compatible key for Qwen (primary LLM)
 - Optional: local GGUF + `llama-cpp-python` for GBNF JSON repair
 
@@ -221,6 +224,7 @@ AITown3/
 ├── neo4j/         # Neo4jWorld graph access
 ├── planner/       # PDDL / unified-planning / BFS pathfinding
 ├── memory/        # NPC memory (:Memory nodes in Neo4j)
+├── rules/         # Prolog rules (social.pl: hostility, theft, foreseeing consequences)
 ├── utility/       # LLM router, GBNF, env loading
 └── test/          # Pytest suite
 ```
@@ -364,6 +368,7 @@ Browser UI ──HTTP──► web/server.py
 - **Interactions** — item `effects_on` × target `accepts_from` compile to temporary `use_on` ops
 - **Planning** — goal terms → rule pathfinding and/or PDDL; feasibility gate before commit
 - **Memory** — per-character `:Memory` nodes (actions, dialogue, observations) in Neo4j, stamped with game time; semantic search via local embeddings
+- **Rules** — `rules/social.pl` (Prolog) decides who is hostile to whom and why, what counts as theft, and who would turn hostile if someone took a thing; facts are read fresh from Neo4j for every query, and the reasons go into NPC decision and dialogue prompts
 
 ## License
 
