@@ -15,7 +15,7 @@
 HP 掉到 0 就死了：手上的东西掉在地上，名下的东西都没主了（谁捡归谁）。
 打人之后谁怎么看、没被惹就动手算不算犯罪：内容包规则（content/base/rules/combat.pl）；
 strike 只在打人的人身上记下 strike_provoked（动手前的敌对标签，'' = 没被惹）供规则用。
-不打仗的时候 HP 慢慢回来（regen）。
+不打仗的时候 HP 慢慢回来：规则 tick/1（content/base/rules/time.pl）。
 
 NPC 的反应见 react()：打得过就打（不在一个地点就先走过去），快不行了就逃到旁边没敌人的地点。
 """
@@ -27,7 +27,6 @@ from typing import Any, Dict, List, Optional, Tuple
 AGGRESSIVE = {"attacked me", "fighting", "faction", "criminal"}
 FLEE_AT = 0.3             # HP 掉到最大值的这么多以下，又打不过，就逃
 BRAVE_RATIO = 1.3         # 只是讨厌（不是被打）的话，强出这么多才动手
-REGEN = 8                 # 每两个游戏小时回这么多 HP（最近没挨打的人）
 
 
 def stats(world, name: str) -> Dict[str, Any]:
@@ -175,24 +174,6 @@ def strike(world, attacker: str, target: str, *, at: Optional[float] = None) -> 
         out["killed"] = True
         out["dropped"] = die(world, target, at=at)
     return out
-
-
-def regen(world, *, at: float = 0.0) -> int:
-    """没在打仗的活人回一点 HP（最近 combat_memory 之内挨过打的不回）。返回回了血的人数。"""
-    from rulebook import const
-
-    rows = world.run_query(
-        """
-        MATCH (p:Person)
-        WHERE coalesce(p.dead, false) = false AND coalesce(p.hp, 0) > 0
-          AND coalesce(p.hp, 0) < coalesce(p.max_hp, 100)
-          AND (p.attacked_at IS NULL OR $at - p.attacked_at > $mem)
-        SET p.hp = CASE WHEN p.hp + $r > coalesce(p.max_hp, 100) THEN coalesce(p.max_hp, 100) ELSE p.hp + $r END
-        RETURN count(p) AS n
-        """,
-        at=float(at), mem=float(const("combat_memory", 25.0)), r=REGEN,
-    ) or []
-    return int(rows[0]["n"]) if rows else 0
 
 
 # ---------------------------------------------------------------------

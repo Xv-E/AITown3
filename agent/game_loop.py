@@ -572,7 +572,7 @@ class GameLoop:
                 print(f"[WARN] world_systems: {e}")
         self._record_announcements(world_report)
         self._story_step()
-        self._relations_step()
+        self._rules_step()
         self._economy_step()
         self._run_hooks()
         if self.verbose:
@@ -2091,9 +2091,20 @@ class GameLoop:
         self._start_next_step(state)
         return True
 
-    def _relations_step(self) -> None:
-        """每两个游戏小时：好感回落、矛盾消退，够亲近的人自然结盟。"""
-        from relations import DECAY_EVERY, decay
+    def _rules_step(self) -> None:
+        """时间过去：问内容包规则 tick/1（好感回落、回血……见 content/*/rules）；之后是结盟 / 散伙。"""
+        prev = getattr(self, "_rules_tick_at", None)
+        self._rules_tick_at = self.sim_time
+        if prev is None:
+            return
+        try:
+            from rulebook import tick
+
+            tick(self.world, prev, self.sim_time)
+        except Exception as e:  # noqa: BLE001
+            if self.verbose:
+                print(f"[WARN] rules tick: {e}")
+        from relations import DECAY_EVERY, update_bonds
 
         due = getattr(self, "_next_relations_at", None)
         if due is None:
@@ -2103,17 +2114,10 @@ class GameLoop:
             return
         self._next_relations_at = self.sim_time + DECAY_EVERY
         try:
-            from combat import regen
-
-            regen(self.world, at=self.sim_time)  # 没在打仗的人慢慢回血
+            update_bonds(self.world, at=self.sim_time)
         except Exception as e:  # noqa: BLE001
             if self.verbose:
-                print(f"[WARN] regen: {e}")
-        try:
-            decay(self.world, at=self.sim_time)
-        except Exception as e:  # noqa: BLE001
-            if self.verbose:
-                print(f"[WARN] relations decay: {e}")
+                print(f"[WARN] relations bonds: {e}")
 
     def _story_step(self) -> None:
         """到点就让 Storyteller 出一拍剧情；LLM 在线程池里写，下一拍生效，不卡模拟。"""

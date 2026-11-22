@@ -7,6 +7,7 @@
 %   g_prop(Id, Key, Value).         节点属性（字符串 → 原子，布尔 → true/false）
 %   g_rel(Type, A, B, Props).       有向边；Props = [Key-Value, ...]
 %   g_now(T).                       模拟时钟
+%   g_tick(Prev, Now).              时间钩子：上一次和这一次（只在问 tick/1 时给）
 %   sees(W, P).                     W 看得见 P（引擎的感知，只对事件的发起人给）
 % 读哪些标签 / 关系由规则声明：reads(label('Person')). reads(rel('FEELS')).
 %
@@ -17,6 +18,8 @@
 % 内容包提供（都可以分散在多个包里）：
 %   reads/1                            要读的标签 / 关系
 %   after(Event, Effect)               事件发生后的效果；Effect 是和动作 JSON 一样的 op（SWI dict）
+%   tick(Effect)                       时间过去后的效果（回落、回血……）；用 every(Period) 限定多久一次
+%   tick_period(Period)                tick/1 用到的周期：引擎只在跨过某个周期时才问（不声明就每拍都问）
 %   forecast(Event, Text)              做之前提示会怎样
 %   label/2  explain/4                 原因的标签 / 一句话解释（引擎原样转给提示词与界面）
 %   const(Name, Value)                 引擎在别处也要用的常量
@@ -27,14 +30,14 @@
 :- use_module(library(apply)).
 :- use_module(library(lists)).
 
-:- dynamic g_node/2, g_prop/3, g_rel/4, g_now/1, sees/2, hyp/1.
-:- multifile reads/1, after/2, forecast/2, label/2, explain/4, const/2.
-:- dynamic reads/1, after/2, forecast/2, label/2, explain/4, const/2.
-:- discontiguous reads/1, after/2, forecast/2, label/2, explain/4, const/2.
+:- dynamic g_node/2, g_prop/3, g_rel/4, g_now/1, g_tick/2, sees/2, hyp/1.
+:- multifile reads/1, after/2, tick/1, tick_period/1, forecast/2, label/2, explain/4, const/2.
+:- dynamic reads/1, after/2, tick/1, tick_period/1, forecast/2, label/2, explain/4, const/2.
+:- discontiguous reads/1, after/2, tick/1, tick_period/1, forecast/2, label/2, explain/4, const/2.
 
 load_facts(Facts) :-
     retractall(g_node(_, _)), retractall(g_prop(_, _, _)), retractall(g_rel(_, _, _, _)),
-    retractall(g_now(_)), retractall(sees(_, _)), retractall(hyp(_)),
+    retractall(g_now(_)), retractall(g_tick(_, _)), retractall(sees(_, _)), retractall(hyp(_)),
     forall(member(F, Facts), assertz(F)).
 
 % ---------------------------------------------------------------------
@@ -73,6 +76,9 @@ rel_prop(T, A, B, K, V) :- rel(T, A, B, Props), memberchk(K-V, Props).
 
 now(T) :- g_now(T), !.
 now(0).
+
+% 这一拍跨过了周期 P 的边界（每 P 模拟秒一次；跳时间也只算一次）
+every(P) :- g_tick(Prev, Now), floor(Now / P) > floor(Prev / P).
 
 assumed(E) :- hyp(E).
 assumed_op(Op, E) :- hyp(E), is_dict(E), get_dict(op, E, Op).

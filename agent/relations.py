@@ -11,8 +11,9 @@
 NPC 对玩家的好感就是原来的 trust_toward_player（同一个数，不另记一份）。
 
 会改变好感的事：动作之后的（送礼、买卖、偷窃、打人……）都是内容包规则（content/base/rules/），
-经 feel op 走 adjust()；对话里的语气（LLM 给的 -1..+2）；东西被对方抢先拿走 -2。每过两个游戏小时，所有好感朝 0 回落 1 点（盟友不低于 ALLY_FLOOR），
-矛盾（TENSION）也降 1 级。互相好感都 ≥ AUTO_ALLY 的两人自动结盟；好感跌破 0 的盟约破裂。
+经 feel op 走 adjust()；对话里的语气（LLM 给的 -1..+2）；东西被对方抢先拿走 -2。
+好感随时间回落、矛盾消退：规则 tick/1（content/base/rules/time.pl）。
+每过两个游戏小时（update_bonds）：互相好感都 ≥ AUTO_ALLY 的两人自动结盟；好感跌破 0 的盟约破裂。
 """
 
 from __future__ import annotations
@@ -23,7 +24,6 @@ MIN_FEEL, MAX_FEEL = -10, 10
 TAKEN = -2
 ALLY_MIN = 4        # 提出结盟时，对方对你的好感至少这么多
 AUTO_ALLY = 6       # 互相好感都到这么高就自然成了盟友
-ALLY_FLOOR = 3      # 盟友之间的好感不会回落到这以下
 PARTY_MIN = 2       # 邀请同行时，对方对你的好感至少这么多（盟友总会答应）
 DECAY_EVERY = 25.0  # 模拟秒（= 两个游戏小时）
 FRIENDLY, RIVAL, HOSTILE = 4, -2, -5   # 联盟之间：友好 / 对立 / 敌对（敌对就不做买卖）
@@ -153,26 +153,8 @@ def leave(world, member: str) -> str:
 
 # ----- 随时间回落；够亲近的自然结盟 -----
 
-def decay(world, *, at: float = 0.0) -> Dict[str, int]:
-    """好感朝 0 回落 1 点（盟友不低于 ALLY_FLOOR），矛盾降 1 级；结盟 / 散伙。"""
-    world.run_query(
-        """
-        MATCH (a:Person)-[r:FEELS]->(b:Person)
-        OPTIONAL MATCH (a)-[al:ALLY]->(b)
-        WITH r, al, coalesce(r.value, 0) AS v
-        SET r.value = CASE
-              WHEN v > 0 AND (al IS NULL OR v > $floor) THEN v - 1
-              WHEN v < 0 THEN v + 1
-              ELSE v END
-        """,
-        floor=ALLY_FLOOR,
-    )
-    world.run_query(
-        """
-        MATCH (:Person)-[t:TENSION]->(:Person) WHERE coalesce(t.level, 0) > 0
-        SET t.level = t.level - 1
-        """
-    )
+def update_bonds(world, *, at: float = 0.0) -> Dict[str, int]:
+    """够亲近的人自然结盟，好感跌破 0 的盟约破裂，联盟重算（好感回落、矛盾消退是规则 tick/1）。"""
     formed_rows = world.run_query(
         """
         MATCH (a:Person)-[r1:FEELS]->(b:Person)-[r2:FEELS]->(a)

@@ -264,3 +264,31 @@ def test_an_unprovoked_attack_is_seen_and_remembered():
     eff = _effects(provoked, "attack('Ash', 'Bram', 'Camp')")
     assert next(e for e in eff if e["op"] == "report")["crime"] is False
     assert not [e for e in eff if e["op"] == "link"]
+
+
+# ---------------------------------------------------------------------
+# 时间过去（content/base/rules/time.pl）
+# ---------------------------------------------------------------------
+
+def _tick(facts, prev, now):
+    from prolog_engine import fact
+
+    return answers(facts + [fact("g_tick", prev, now)], "E", "tick(E)", now=now)
+
+
+def test_feelings_drift_back_but_allies_keep_a_floor():
+    facts = (person("Ash") + person("Bram") + person("Cole")
+             + rel("FEELS", "Ash", "Bram", value=5) + rel("FEELS", "Bram", "Ash", value=-4)
+             + rel("FEELS", "Ash", "Cole", value=3) + rel("ALLY", "Ash", "Cole")
+             + rel("TENSION", "Bram", "Cole", level=2))
+    eff = _tick(facts, 20.0, 26.0)
+    got = sorted((e["rel"], e["a"], e["b"], e["delta"]) for e in eff if e["op"] == "add_rel_prop")
+    assert got == [("FEELS", "Ash", "Bram", -1), ("FEELS", "Bram", "Ash", 1), ("TENSION", "Bram", "Cole", -1)]
+    assert _tick(facts, 26.0, 30.0) == [], "once per period"
+
+
+def test_people_heal_unless_they_were_just_hit():
+    facts = (person("Ash", hp=40, max_hp=100) + person("Bram", hp=40, attacked_at=24.0)
+             + person("Cole", hp=100, max_hp=100))
+    heal = [(e["entity"], e["delta"], e["max"]) for e in _tick(facts, 20.0, 26.0) if e["op"] == "add_prop"]
+    assert heal == [("Ash", 8, 100)]

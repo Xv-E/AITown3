@@ -4,6 +4,7 @@
   rule_files()                          引擎核心 + 各启用内容包的 rules/*.pl（按包的加载顺序）
   ask(world, template, goal)            问规则：findall(template, goal) 的结果（转成 Python 值）
   after(world, action, params)          动作做完：规则推出的效果交给 graph_ops 写图；note / report 收集起来返回
+  tick(world, prev, now)                时间过去：tick/1 的效果同样写图（只在跨过规则声明的周期时才问）
   event(action, params)                 事件项：能力名（没有就用动作名）+ 参数（按动作声明的顺序）
   const(name, default)                  规则里的常量
 
@@ -54,7 +55,7 @@ def _value(v: Any) -> Optional[str]:
 
 
 def world_facts(world, files: Tuple[str, ...], *, at: Optional[float] = None,
-                sees: Iterable[Tuple[str, str]] = ()) -> List[str]:
+                sees: Iterable[Tuple[str, str]] = (), extra: Iterable[str] = ()) -> List[str]:
     labels, rels = _reads(files)
     facts: List[str] = []
     if labels:
@@ -84,14 +85,15 @@ def world_facts(world, files: Tuple[str, ...], *, at: Optional[float] = None,
     if at is not None:
         facts.append(fact("g_now", float(at)))
     facts += [fact("sees", w, p) for w, p in sees]
+    facts += list(extra)
     return facts
 
 
 def ask(world, template: str, goal: str, *, at: Optional[float] = None,
-        sees: Iterable[Tuple[str, str]] = ()) -> List[Any]:
+        sees: Iterable[Tuple[str, str]] = (), extra: Iterable[str] = ()) -> List[Any]:
     """findall(template, goal) 在当下的世界上；复合项变成 {"functor", "args"}，K-V 变成 [K, V]。"""
     files = rule_files()
-    rows = solve(files, world_facts(world, files, at=at, sees=sees),
+    rows = solve(files, world_facts(world, files, at=at, sees=sees, extra=extra),
                  f"answers_json({template}, ({goal}), J)")
     return json.loads(rows[0]["J"]) if rows else []
 
@@ -115,11 +117,34 @@ def event(action: str, params: Dict[str, Any]) -> str:
 
 def after(world, action: str, params: Dict[str, Any], *, at: float = 0.0) -> Dict[str, Any]:
     """动作做完之后，规则推出的效果：写图的交给 graph_ops；note 收进 notes，report 并进返回值。"""
-    from graph_ops import apply_op
-
     actor = str(next(iter(params.values()), "")) if params else ""
     effects = ask(world, "E", f"after({event(action, params)}, E)", at=at,
                   sees=watched_by(world, actor) if actor else ())
+    return apply_effects(world, effects)
+
+
+def _periods(files: Tuple[str, ...]) -> List[float]:
+    key = ("tick_period",) + files
+    if key not in _reads_cache:
+        rows = solve(files, [], "answers_json(P, tick_period(P), J)")
+        _reads_cache[key] = ([float(p) for p in json.loads(rows[0]["J"])] if rows else [], [])
+    return _reads_cache[key][0]
+
+
+def tick(world, prev: float, now: float) -> Dict[str, Any]:
+    """时间从 prev 走到 now：问规则 tick/1，效果照常写图。规则声明了周期时，没跨过任何周期就不问。"""
+    import math
+
+    periods = _periods(rule_files())
+    if periods and not any(math.floor(now / p) > math.floor(prev / p) for p in periods if p > 0):
+        return {}
+    effects = ask(world, "E", "tick(E)", at=now, extra=[fact("g_tick", float(prev), float(now))])
+    return apply_effects(world, effects)
+
+
+def apply_effects(world, effects: List[Any]) -> Dict[str, Any]:
+    from graph_ops import apply_op
+
     out: Dict[str, Any] = {}
     for e in effects:
         if not isinstance(e, dict):

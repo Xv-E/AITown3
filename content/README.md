@@ -457,6 +457,7 @@ sees(W, P)                         % W 看得见 P（引擎的感知；对事件
 | 谓词 | 引擎什么时候问 | 用法 |
 |---|---|---|
 | `after(Event, Effect)` | 任何动作做完之后 | Effect 是和动作 `effects` 一样的 op（写成 SWI dict），引擎照常执行；另有 `note`（告诉做的人的一句话）和 `report`（并进结算结果） |
+| `tick(Effect)` | 时间过去（每拍；声明了 `tick_period(P)` 就只在跨过周期时） | 同 `after` 的 op；用 `every(P)` 限定每 P 模拟秒一次 |
 | `forecast(Event, Text)` | NPC 决策前，对眼前的东西 | 给 NPC 的提示，原样放进提示词 |
 | `hostility(A, B, Why)` + `label/2` + `explain/4` | 战斗、界面、提示词判断敌对 | A 为什么敌视 B；标签给程序用，解释给提示词 / 界面 |
 | `const(Name, Value)` | 引擎别处要用的常量 | 如 `combat_memory` |
@@ -483,6 +484,17 @@ after(take(A, I, _), _{op: link, a: W, a_label: 'Person', b: A, b_label: 'Person
 | `social.pl` | 词汇（person / alive / owner / feeling…）、敌对的原因与优先级、偷窃、偷后的后果、拿之前的提示 |
 | `ownership.pl` | 手上没主的东西归谁、送礼（转手、好感、还给失主）、买卖（转手、双方好感） |
 | `combat.pl` | 打人之后：挨打的人、盟友、旁观者的好感，没被惹就动手算犯罪，告诉玩家对方还剩多少 HP |
+| `time.pl` | 时间过去：好感朝 0 回落（盟友有下限）、矛盾消退、没在打架的人回血 |
 
-动作之后的一切后果都从这里来：引擎的 `relations.consequences` 只是问 `after/2` 并照着写图。
+动作之后的一切后果都从这里来：引擎的 `relations.consequences` 只是问 `after/2` 并照着写图；
+游戏主循环每拍调用 `rulebook.tick`，同样只是问 `tick/1` 并照着写图。
+
+例：火堆每个游戏小时自己少一点柴（只写规则，不改代码）：
+
+```prolog
+reads(label('Item')).
+tick_period(12.5).
+tick(_{op: add_prop, entity: F, label: 'Item', prop: fuel, delta: -5, min: 0}) :-
+    every(12.5), prop(F, archetype, campfire), prop(F, fuel, N), N > 0.
+```
 

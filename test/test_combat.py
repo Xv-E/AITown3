@@ -219,14 +219,18 @@ def test_npcs_drop_what_they_are_doing_when_attacked(camp):
 
 
 def test_hp_comes_back_when_nobody_is_fighting(camp):
-    from combat import REGEN, regen, stats
-    from rulebook import const
+    from combat import stats
+    from rulebook import const, tick
 
-    camp.run_query("MATCH (p:Person {name: 'Reed'}) SET p.hp = 50, p.max_hp = 100, p.attacked_at = 0.0")
-    regen(camp, at=1.0)
+    period = const("decay_every")
+    camp.run_query("MATCH (p:Person {name: 'Reed'}) SET p.hp = 50, p.max_hp = 100, p.attacked_at = $t", t=period)
+    tick(camp, period - 1.0, period + 1.0)
     assert stats(camp, "Reed")["hp"] == 50, "still in a fight: no healing"
-    regen(camp, at=const("combat_memory") + 1.0)
-    assert stats(camp, "Reed")["hp"] == 50 + REGEN
+    later = 2 * period + const("combat_memory")
+    tick(camp, later - 1.0, later + 1.0)
+    assert stats(camp, "Reed")["hp"] == 50 + const("regen")
+    tick(camp, later + 1.0, later + 2.0)
+    assert stats(camp, "Reed")["hp"] == 50 + const("regen"), "only once per period"
 
 
 def test_someone_killed_on_the_road_lies_where_they_fell(camp):

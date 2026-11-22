@@ -353,6 +353,29 @@ def apply_op(world, op_spec: Dict[str, Any], ctx: Dict[str, str]) -> None:
         strike(world, str(resolve_token(op_spec["attacker"], ctx)), str(resolve_token(op_spec["target"], ctx)))
         return
 
+    if op == "add_rel_prop":
+        # 关系上的数值属性 +delta（可选 min / max），如好感回落：FEELS.value -1
+        import re
+
+        a = resolve_token(op_spec["a"], ctx)
+        b = resolve_token(op_spec["b"], ctx)
+        a_label = op_spec.get("a_label") or "Person"
+        b_label = op_spec.get("b_label") or "Person"
+        rel, prop = str(op_spec["rel"]), str(op_spec["prop"])
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", prop):
+            raise ValueError(f"bad property name: {prop}")
+        world.run_query(
+            f"""
+            MATCH (a:{a_label} {{name: $a}})-[r:{rel}]->(b:{b_label} {{name: $b}})
+            WITH r, coalesce(r.`{prop}`, 0) + $d AS v
+            SET r.`{prop}` = CASE WHEN $lo IS NOT NULL AND v < $lo THEN $lo
+                                  WHEN $hi IS NOT NULL AND v > $hi THEN $hi ELSE v END
+            """,
+            a=a, b=b, d=resolve_token(op_spec.get("delta", 0), ctx),
+            lo=op_spec.get("min"), hi=op_spec.get("max"),
+        )
+        return
+
     if op == "feel":
         # a 对 b 的好感 +delta（含范围、对玩家的信任、自动结盟，见 agent/relations.py）
         from relations import adjust
