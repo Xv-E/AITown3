@@ -781,7 +781,7 @@ def world_view(world, viewer: Optional[str]) -> Dict[str, Any]:
                 entry["actions"] = list(entry.get("actions") or []) + gather_options(world, viewer, it["name"])
             items.append(entry)
     persons = []
-    from social_rules import hostilities
+    from combat import hostilities
 
     characters = list_characters(world)
     # 这个人为什么把看的人当敌人（没有 = 不是敌人）：一次算完所有人

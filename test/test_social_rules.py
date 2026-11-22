@@ -1,6 +1,7 @@
-"""社会规则（rules/social.pl）：敌对的原因与优先级、偷窃、拿东西之前推演后果。
+"""内容包规则（content/base/rules/social.pl）经引擎核心（agent/rules_core.pl）运行。
 
-前半部分只用手写的事实（不需要 Neo4j）；后半部分在真实世界里比对「推演」和「真做之后」。
+前半部分直接喂图形状的事实（g_node / g_prop / g_rel，不需要 Neo4j）；
+后半部分在真实世界里：推演 == 真做之后；以及「只加一个 .pl 文件就能加规则」。
 """
 
 from __future__ import annotations
@@ -10,94 +11,102 @@ import pytest
 pytest.importorskip("pyswip")
 
 
-def _solve(facts, goal):
-    from prolog_engine import solve
-    from social_rules import _params
-    from prolog_engine import fact
+def node(label, name, **props):
+    from prolog_engine import atom, fact
 
-    return solve(list(facts) + [fact("now", 100.0)] + [fact("param", k, v) for k, v in _params().items()], goal)
+    return [fact("g_node", label, name)] + [f"g_prop({atom(name)}, {atom(k)}, {atom(v)})" for k, v in props.items()]
 
 
-def _people(*names, **flags):
-    from prolog_engine import fact
+def rel(t, a, b, **props):
+    from prolog_engine import atom
 
-    out = []
-    for n in names:
-        out += [fact("person", n), fact("alive", n), fact("faction", n, flags.get(n, ""))]
-    return out
+    pairs = ", ".join(f"{atom(k)}-{atom(v)}" for k, v in props.items())
+    return [f"g_rel({atom(t)}, {atom(a)}, {atom(b)}, [{pairs}])"]
 
 
-def _why(facts, a, b):
-    rows = _solve(facts, f"hostility('{a}', '{b}', W), W =.. [K|_]")
-    return str(rows[0]["K"]) if rows else ""
+def person(name, **props):
+    return node("Person", name, hp=props.pop("hp", 50), **props)
+
+
+def answers(facts, template, goal, now=100.0):
+    import json
+
+    from prolog_engine import fact, solve
+    from rulebook import rule_files
+
+    rows = solve(rule_files(), list(facts) + [fact("g_now", now)], f"answers_json({template}, ({goal}), J)")
+    return json.loads(rows[0]["J"])
+
+
+def why(facts, a, b):
+    got = answers(facts, "L", f"hostility('{a}', '{b}', W), label(W, L)")
+    return got[0] if got else ""
 
 
 def test_reasons_come_in_priority_order():
-    from prolog_engine import fact
-
-    base = _people("Ash", "Bram") + [fact("feels", "Ash", "Bram", -9)]
-    assert _why(base, "Ash", "Bram") == "hatred"
-    hit = base + [fact("attacked_by", "Ash", "Bram", 95.0)]
-    assert _why(hit, "Ash", "Bram") == "attacked_me", "being attacked outranks hatred"
-    stale = base + [fact("attacked_by", "Ash", "Bram", 10.0)]
-    assert _why(stale, "Ash", "Bram") == "hatred", "an old attack is forgotten"
-    assert _why(base, "Bram", "Ash") == "", "hostility is one-way"
+    base = person("Ash") + person("Bram") + rel("FEELS", "Ash", "Bram", value=-9)
+    assert why(base, "Ash", "Bram") == "hatred"
+    hit = person("Ash", attacked_by="Bram", attacked_at=95.0) + person("Bram") + rel("FEELS", "Ash", "Bram", value=-9)
+    assert why(hit, "Ash", "Bram") == "attacked me", "being attacked outranks hatred"
+    stale = person("Ash", attacked_by="Bram", attacked_at=10.0) + person("Bram") + rel("FEELS", "Ash", "Bram", value=-9)
+    assert why(stale, "Ash", "Bram") == "hatred", "an old attack is forgotten"
+    assert why(base, "Bram", "Ash") == "", "hostility is one-way"
 
 
 def test_monsters_fight_everyone_and_the_dead_fight_nobody():
-    from prolog_engine import fact
-
-    facts = _people("Wolf", "Sage", Wolf="monster")
-    assert _why(facts, "Wolf", "Sage") == "faction" and _why(facts, "Sage", "Wolf") == "faction"
-    dead = [f for f in facts if f != fact("alive", "Wolf")]
-    assert _why(dead, "Sage", "Wolf") == ""
+    facts = person("Wolf", faction="monster") + person("Sage")
+    assert why(facts, "Wolf", "Sage") == "faction" and why(facts, "Sage", "Wolf") == "faction"
+    assert why(person("Wolf", faction="monster", dead=True) + person("Sage"), "Sage", "Wolf") == ""
 
 
 def test_npcs_feel_about_the_player_through_trust():
-    from prolog_engine import fact
-
-    facts = _people("Sage", "Hero") + [fact("player", "Hero"), fact("trust", "Sage", -7),
-                                        fact("feels", "Sage", "Hero", 5)]
-    assert _why(facts, "Sage", "Hero") == "hatred", "trust, not the FEELS edge, is how an NPC feels about the player"
+    facts = person("Sage", trust_toward_player=-7) + person("Hero", is_player=True) + rel("FEELS", "Sage", "Hero", value=5)
+    assert why(facts, "Sage", "Hero") == "hatred", "trust, not the FEELS edge, is how an NPC feels about the player"
 
 
 def test_alliances_at_war():
-    from prolog_engine import fact
-
-    facts = _people("Ash", "Bram") + [fact("in_alliance", "Ash", "Reds"), fact("in_alliance", "Bram", "Blues"),
-                                       fact("stance", "Reds", "Blues", -6)]
-    assert _why(facts, "Ash", "Bram") == "war"
+    facts = (person("Ash") + person("Bram") + node("Alliance", "Reds") + node("Alliance", "Blues")
+             + rel("MEMBER_OF", "Ash", "Reds") + rel("MEMBER_OF", "Bram", "Blues") + rel("STANCE", "Reds", "Blues", value=-6))
+    assert why(facts, "Ash", "Bram") == "war"
 
 
 def test_theft_needs_a_living_owner_who_is_not_your_ally():
-    from prolog_engine import fact
-
-    facts = _people("Sage", "Ash") + [fact("owns", "Sage", "Knife")]
+    facts = person("Sage") + person("Ash") + rel("OWNS", "Sage", "Knife")
     goal = "theft('Ash', 'Knife', O)"
-    assert _solve(facts, goal)[0]["O"] == "Sage"
-    assert not _solve(facts + [fact("ally", "Sage", "Ash")], goal)
-    assert not _solve([f for f in facts if f != fact("alive", "Sage")], goal)
-    assert not _solve(facts, "theft('Sage', 'Knife', O)"), "your own things"
+    assert answers(facts, "O", goal) == ["Sage"]
+    assert answers(facts + rel("ALLY", "Sage", "Ash"), "O", goal) == []
+    assert answers(person("Sage", dead=True) + person("Ash") + rel("OWNS", "Sage", "Knife"), "O", goal) == []
+    assert answers(facts, "O", "theft('Sage', 'Knife', O)") == [], "your own things"
 
 
-def test_foreseeing_a_theft_names_who_would_turn_hostile_and_why():
+def test_forecast_names_who_would_turn_hostile_and_leaves_no_trace():
     from prolog_engine import fact
 
-    facts = _people("Ash", "Sage", "Rowan", "Hero") + [
-        fact("owns", "Sage", "Knife"), fact("guard", "Rowan"), fact("player", "Hero"),
-        fact("feels", "Sage", "Ash", -2),
-        fact("sees", "Rowan", "Ash"), fact("sees", "Sage", "Ash"), fact("sees", "Hero", "Ash"),
-    ]
-    rows = _solve(facts, "findall([W, K], (consequence(take('Ash', 'Knife'), turns_hostile(W, Why)), "
-                         "Why =.. [K|_]), L)")
-    got = {(str(w), str(k)) for w, k in rows[0]["L"]}
+    facts = (person("Ash") + person("Sage") + person("Rowan", guard=True) + person("Hero", is_player=True)
+             + rel("OWNS", "Sage", "Knife") + rel("FEELS", "Sage", "Ash", value=-2)
+             + [fact("sees", w, "Ash") for w in ("Rowan", "Sage", "Hero")])
+    lines = answers(facts, "T", "forecast(take('Ash', 'Knife', 'Grove'), T)")
+    assert lines[0] == "taking it is stealing"
     # 守卫看见了就当罪犯；失主 -2 再 -5 = -7，跌破仇恨线；玩家的感受不替他推演
-    assert got == {("Rowan", "criminal"), ("Sage", "hatred")}
-    assert _solve(facts, "\\+ hyp(_)"), "the assumptions are gone afterwards"
+    assert any(t.startswith("then Rowan would turn hostile (Rowan is a guard and saw Ash commit theft") for t in lines)
+    assert any(t.startswith("then Sage would turn hostile (Sage hates Ash (feeling -7))") for t in lines)
+    assert not any("Hero" in t for t in lines)
+    assert answers(facts, "x", "\\+ hyp(_)") == ["x"], "the assumptions are gone afterwards"
+
+
+def test_after_a_theft_the_effects_are_plain_graph_ops():
+    from prolog_engine import fact
+
+    facts = person("Ash") + person("Sage") + rel("OWNS", "Sage", "Knife") + [fact("sees", "Sage", "Ash")]
+    effects = answers(facts, "E", "after(take('Ash', 'Knife', 'Grove'), E)")
+    ops = sorted(e["op"] for e in effects)
+    assert ops == ["add_prop", "feel", "link", "note", "report"]
+    link = next(e for e in effects if e["op"] == "link")
+    assert link["rel"] == "WITNESSED" and link["props"] == {"crime": "theft", "victim": "Sage", "item": "Knife", "at": 100.0}
 
 
 # ---------------------------------------------------------------------
-# 真实世界：推演 == 真做之后
+# 真实世界
 # ---------------------------------------------------------------------
 
 @pytest.fixture
@@ -108,12 +117,17 @@ def camp(world):
     return world
 
 
+def _forecast(world, me, item, loc):
+    from rulebook import ask, watched_by
+
+    return ask(world, "T", f"forecast(take('{me}', '{item}', '{loc}'), T)", sees=watched_by(world, me))
+
+
 def test_the_forecast_matches_what_happens(camp):
     from combat import hostility
     from ownership import set_owner, witnesses
-    from relations import consequences
     from registry import get_registry
-    from social_rules import foresee_take
+    from relations import consequences
     from test_combat import _stand
 
     camp.run_query("MATCH (p:Person {name: 'Rowan'}) SET p.guard = true")
@@ -123,33 +137,67 @@ def test_the_forecast_matches_what_happens(camp):
     watchers = witnesses(camp, "Observer")
     assert "Rowan" in watchers
 
-    forecast = foresee_take(camp, "Observer", "Berry3", watchers=watchers)
-    assert forecast["theft"] and forecast["victim"] == "Sage"
-    predicted = {h["who"]: h["label"] for h in forecast["turns_hostile"]}
-    assert predicted.get("Rowan") == "criminal" and "Rowan would turn hostile" in forecast["turns_hostile"][0]["text"]
+    lines = _forecast(camp, "Observer", "Berry3", "BerryGrove")
+    assert lines[0] == "taking it is stealing"
+    predicted = sorted(t.split()[1] for t in lines if t.startswith("then "))
+    assert "Rowan" in predicted
 
     params = {"c": "Observer", "i": "Berry3", "l": "BerryGrove"}
     ok, why = get_registry().execute(camp, "pick_up", **params)
     assert ok, why
-    consequences(camp, "Observer", "pick_up", params, at=0.0)
-    actual = {w: hostility(camp, w, "Observer", at=0.0) for w in watchers}
-    assert {w: l for w, l in actual.items() if l} == predicted
+    out = consequences(camp, "Observer", "pick_up", params, at=0.0)
+    assert out["theft"] and out["victim"] == "Sage" and out["notes"][0].startswith("you stole from Sage; seen by")
+    actual = sorted(w for w in watchers if hostility(camp, w, "Observer", at=0.0))
+    assert actual == predicted
 
 
 def test_an_allys_things_are_not_stolen_and_reasons_read_well(camp):
+    from combat import why_hostile
     from ownership import set_owner
     from relations import _link_allies
-    from social_rules import foresee_take, why_hostile
 
     set_owner(camp, "Berry3", "Sage")
     _link_allies(camp, "Sage", "Observer", 0.0)
-    assert foresee_take(camp, "Observer", "Berry3", watchers=[])["theft"] is False
+    assert _forecast(camp, "Observer", "Berry3", "BerryGrove") == ["you may take it (not stealing)"]
 
     camp.run_query("MATCH (p:Person {name: 'Rowan'}) SET p.guard = true")
     camp.run_query(
         "MATCH (o:Person {name: 'Rowan'}), (c:Person {name: 'Observer'}) "
         "CREATE (o)-[:WITNESSED {crime: 'theft', victim: 'Reed', item: 'Fish1', at: 0.0}]->(c)"
     )
-    why = why_hostile(camp, "Rowan", "Observer", at=0.0)
-    assert why["label"] == "criminal"
-    assert why["text"] == "Rowan is a guard and saw Observer commit theft (Reed's Fish1)"
+    assert why_hostile(camp, "Rowan", "Observer", at=0.0) == {
+        "label": "criminal", "text": "Rowan is a guard and saw Observer commit theft (Reed's Fish1)"}
+
+
+def test_a_new_rule_is_just_a_file(camp, tmp_path, monkeypatch):
+    """新规则只写 .pl：一个新包规定「夜里拿走无主的东西也算偷（偷的是镇上的）」，引擎一行不改。"""
+    import content
+    from ownership import crimes_seen
+    from test_combat import _stand
+
+    pack = tmp_path / "night_law"
+    (pack / "rules").mkdir(parents=True)
+    (pack / "pack.json").write_text('{"name": "night_law"}')
+    (pack / "rules" / "night.pl").write_text(
+        "night :- now(T), T > 50.\n"
+        "after(take(A, I, _), _{op: link, a: W, a_label: 'Person', b: A, b_label: 'Person', rel: 'WITNESSED',\n"
+        "                      props: _{crime: night_taking, victim: town, item: I}}) :-\n"
+        "    night, \\+ owner(I, _), sees(W, A).\n"
+    )
+    for src in ("base", "rpg", "streets", "village"):
+        (tmp_path / src).symlink_to(content.CONTENT_ROOT / src)
+    monkeypatch.setattr(content, "CONTENT_ROOT", tmp_path)
+    content.reload_content(["base", "night_law"])
+    try:
+        from registry import get_registry
+        from relations import consequences
+
+        me = _stand(camp, "Observer", "BerryGrove")
+        _stand(camp, "Sage", "BerryGrove", near=me)
+        params = {"c": "Observer", "i": "Berry2", "l": "BerryGrove"}
+        assert get_registry().execute(camp, "pick_up", **params)[0]
+        consequences(camp, "Observer", "pick_up", params, at=60.0)
+        assert crimes_seen(camp, "Sage", "Observer")[0]["crime"] == "night_taking"
+    finally:
+        monkeypatch.undo()
+        content.reload_content()

@@ -219,12 +219,13 @@ def test_npcs_drop_what_they_are_doing_when_attacked(camp):
 
 
 def test_hp_comes_back_when_nobody_is_fighting(camp):
-    from combat import COMBAT_MEMORY, REGEN, regen, stats
+    from combat import REGEN, regen, stats
+    from rulebook import const
 
     camp.run_query("MATCH (p:Person {name: 'Reed'}) SET p.hp = 50, p.max_hp = 100, p.attacked_at = 0.0")
     regen(camp, at=1.0)
     assert stats(camp, "Reed")["hp"] == 50, "still in a fight: no healing"
-    regen(camp, at=COMBAT_MEMORY + 1.0)
+    regen(camp, at=const("combat_memory") + 1.0)
     assert stats(camp, "Reed")["hp"] == 50 + REGEN
 
 

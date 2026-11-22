@@ -1,14 +1,14 @@
 """
-Prolog 引擎（SWI-Prolog，经 pyswip）。
+Prolog 引擎（SWI-Prolog，经 pyswip）——只负责「装规则、装事实、证明目标」，不认识任何玩法。
 
-SWI-Prolog 的引擎不能被多个 Python 线程同时用（游戏里规划是并行的），所以全部查询都交给
-一个专门的工作线程排队执行。每次 solve() 先装入这次的事实、再证明目标，中间不会被别的查询插进来。
+SWI-Prolog 的引擎不能被多个 Python 线程同时用（游戏里规划是并行的），所以全部查询交给
+一个专门的工作线程排队执行。每次 solve() 的「换规则文件（如有变化）→ 换事实 → 证明」是一个整体，
+中间不会被别的查询插进来。
 
-    from prolog_engine import solve, fact, atom
-    rows = solve([fact("person", "Ash"), fact("alive", "Ash")], "findall(P, alive(P), L)")
-    rows[0]["L"]  # ['Ash']
+    from prolog_engine import solve, fact
+    rows = solve(files, [fact("g_node", "Person", "Ash")], "findall(P, g_node('Person', P), L)")
 
-规则文件在仓库根目录的 rules/*.pl，第一次查询时加载。
+规则文件由调用方给出（见 rulebook.rule_files）；facts 由 load_facts/1 装入（rules_core.pl）。
 没装 SWI-Prolog 时抛 PrologUnavailable（安装方法见 README）。
 """
 
@@ -17,10 +17,7 @@ from __future__ import annotations
 import atexit
 import queue
 import threading
-from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
-
-RULES_DIR = Path(__file__).resolve().parent.parent / "rules"
+from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 
 class PrologUnavailable(RuntimeError):
@@ -28,11 +25,13 @@ class PrologUnavailable(RuntimeError):
 
 
 def atom(value: Any) -> str:
-    """Python 值 → Prolog 字面量：数字原样，其余一律当带引号的原子（名字里有空格、引号也没事）。"""
+    """Python 值 → Prolog 字面量：数字、布尔（true/false）、列表原样，其余一律当带引号的原子。"""
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, (int, float)):
-        return repr(value)
+        return f"({value!r})" if value < 0 else repr(value)  # 括起来：'k'-(-9) 而不是 'k'--9
+    if isinstance(value, (list, tuple)):
+        return "[" + ", ".join(atom(v) for v in value) + "]"
     text = "" if value is None else str(value)
     return "'" + text.replace("\\", "\\\\").replace("'", "\\'") + "'"
 
@@ -56,7 +55,7 @@ class _Engine:
     def shutdown(self) -> None:
         if self._thread.is_alive():
             reply: "queue.Queue[tuple]" = queue.Queue(maxsize=1)
-            self._jobs.put(([], None, reply))
+            self._jobs.put(((), [], None, reply))
             reply.get(timeout=5)
 
     def _run(self) -> None:
@@ -64,15 +63,14 @@ class _Engine:
             from pyswip import Prolog
 
             prolog = Prolog()
-            for path in sorted(RULES_DIR.glob("*.pl")):
-                prolog.consult(path.as_posix())
         except BaseException as e:  # noqa: BLE001  pyswip 找不到 libswipl 时可能抛各种异常
             self._error = e
             self._ready.set()
             return
         self._ready.set()
+        loaded: Sequence[str] = ()
         while True:
-            facts, goal, reply = self._jobs.get()
+            files, facts, goal, reply = self._jobs.get()
             if goal is None:  # 退出：在本线程里收尾（否则退出时 SWI 会抱怨停不掉线程）
                 from pyswip.core import PL_cleanup, PL_thread_self, _lib
 
@@ -83,14 +81,21 @@ class _Engine:
                 reply.put((True, []))
                 return
             try:
+                if tuple(files) != tuple(loaded):
+                    for path in loaded:
+                        list(prolog.query(f"unload_file({atom(path)})"))
+                    loaded = ()
+                    for path in files:
+                        prolog.consult(path)
+                    loaded = tuple(files)
                 list(prolog.query(f"load_facts([{', '.join(facts)}])"))
                 reply.put((True, list(prolog.query(goal))))
             except BaseException as e:  # noqa: BLE001
                 reply.put((False, e))
 
-    def solve(self, facts: Iterable[str], goal: str) -> List[Dict[str, Any]]:
+    def solve(self, files: Sequence[str], facts: Iterable[str], goal: str) -> List[Dict[str, Any]]:
         reply: "queue.Queue[tuple]" = queue.Queue(maxsize=1)
-        self._jobs.put((list(facts), goal, reply))
+        self._jobs.put((tuple(files), list(facts), goal, reply))
         ok, value = reply.get()
         if not ok:
             raise value
@@ -116,6 +121,6 @@ def engine() -> _Engine:
         return _engine
 
 
-def solve(facts: Iterable[str], goal: str) -> List[Dict[str, Any]]:
-    """换上这次的 facts，再证明 goal；返回所有解（变量名 → 值）。facts 与 goal 一起执行，不会被别的查询打断。"""
-    return engine().solve(facts, goal)
+def solve(files: Sequence[str], facts: Iterable[str], goal: str) -> List[Dict[str, Any]]:
+    """用这组规则文件（有变化才重新加载）和这次的 facts 证明 goal；返回所有解（变量名 → 值）。"""
+    return engine().solve(files, facts, goal)

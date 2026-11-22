@@ -1,9 +1,9 @@
 """
 战斗与敌对。
 
-敌对（hostility(a, b) 返回 a 为什么把 b 当敌人，"" = 不是）——规则写在 rules/social.pl（Prolog），
-按下面的顺序取第一个原因；why_hostile / social_rules.explain 给出细节和一句话解释：
-  · "attacked me"   b 刚打过 a（COMBAT_MEMORY 之内）
+敌对（hostility(a, b) 返回 a 为什么把 b 当敌人，"" = 不是）——引擎只是问内容包规则的 hostility/3
+（base 包见 content/base/rules/social.pl），原因、标签和解释都由规则给出。base 包的原因（按优先级）：
+  · "attacked me"   b 刚打过 a（规则常量 combat_memory 之内）
   · "fighting"      a 刚打过 b，还在打
   · "faction"       两人阵营不同，而且有一方是见人就打的阵营（social.pl 的 hostile_faction，比如 monster / bandit）
   · "criminal"      a 是守卫（Person.guard），亲眼看见 b 偷过东西 / 无故打人
@@ -25,7 +25,6 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 
 AGGRESSIVE = {"attacked me", "fighting", "faction", "criminal"}
-COMBAT_MEMORY = 25.0      # 模拟秒（两个游戏小时）：这么久之内打过你的人还是敌人
 HURT_VICTIM = -4
 HURT_ALLY = -3
 HURT_WITNESS = -2
@@ -78,13 +77,28 @@ def now(world) -> float:
     return float(rows[0]["t"] or 0.0) if rows and rows[0].get("t") is not None else 0.0
 
 
-def hostility(world, a: str, b: str, *, at: Optional[float] = None) -> str:
-    """a 为什么把 b 当敌人（标签），"" = 不是。规则见 rules/social.pl。"""
-    if not a or not b or a == b:
-        return ""
-    from social_rules import hostility as rule_hostility
+def hostilities(world, pairs, *, at: Optional[float] = None) -> Dict[Tuple[str, str], Dict[str, str]]:
+    """{(a, b): {"label", "text"}}，只含 a 敌视 b 的那些对（一次问完）。"""
+    from prolog_engine import atom
+    from rulebook import ask
 
-    return rule_hostility(world, a, b, at=at)
+    pairs = [(a, b) for a, b in pairs if a and b and a != b]
+    if not pairs:
+        return {}
+    plist = ", ".join(f"{atom(a)}-{atom(b)}" for a, b in pairs)
+    rows = ask(world, "[A, B, L, T]",
+               f"member(A-B, [{plist}]), hostility(A, B, W), label(W, L), explain(W, A, B, T)", at=at)
+    return {(a, b): {"label": label, "text": text} for a, b, label, text in rows}
+
+
+def why_hostile(world, a: str, b: str, *, at: Optional[float] = None) -> Optional[Dict[str, str]]:
+    return hostilities(world, [(a, b)], at=at).get((a, b))
+
+
+def hostility(world, a: str, b: str, *, at: Optional[float] = None) -> str:
+    """a 为什么把 b 当敌人（规则给的标签），"" = 不是。"""
+    why = why_hostile(world, a, b, at=at)
+    return why["label"] if why else ""
 
 
 def _drop_everything(world, name: str, location: str) -> List[str]:
@@ -193,7 +207,9 @@ def after_attack(world, attacker: str, target: str, *, at: float = 0.0, provoked
 
 
 def regen(world, *, at: float = 0.0) -> int:
-    """没在打仗的活人回一点 HP。返回回了血的人数。"""
+    """没在打仗的活人回一点 HP（最近 combat_memory 之内挨过打的不回）。返回回了血的人数。"""
+    from rulebook import const
+
     rows = world.run_query(
         """
         MATCH (p:Person)
@@ -203,7 +219,7 @@ def regen(world, *, at: float = 0.0) -> int:
         SET p.hp = CASE WHEN p.hp + $r > coalesce(p.max_hp, 100) THEN coalesce(p.max_hp, 100) ELSE p.hp + $r END
         RETURN count(p) AS n
         """,
-        at=float(at), mem=COMBAT_MEMORY, r=REGEN,
+        at=float(at), mem=float(const("combat_memory", 25.0)), r=REGEN,
     ) or []
     return int(rows[0]["n"]) if rows else 0
 
@@ -216,8 +232,6 @@ def regen(world, *, at: float = 0.0) -> int:
 def enemies_near(world, me: str, *, at: float = 0.0) -> List[Tuple[str, str]]:
     """看得见的敌人：[(名字, 为什么)]，最近打过我的排前面。"""
     from ownership import witnesses
-
-    from social_rules import hostilities
 
     seen = witnesses(world, me)  # 看得见我的人 = 我看得见的人
     found = hostilities(world, [(me, other) for other in seen], at=at)
@@ -238,8 +252,6 @@ def _hostiles_at(world, me: str, place: str, *, at: float) -> int:
         "MATCH (p:Person)-[:LOCATED_AT]->(:Location {name: $l}) WHERE p.name <> $me RETURN p.name AS n",
         l=place, me=me,
     ) or []
-    from social_rules import hostilities
-
     return len(hostilities(world, [(r["n"], me) for r in rows], at=at))
 
 

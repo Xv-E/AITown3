@@ -416,7 +416,7 @@ def _heart_blocks(world, me: str, other: str, knowledge=None) -> tuple[str, str]
     if fblock:
         heart = f"{heart}\n{fblock}" if heart else fblock
     try:
-        from social_rules import why_hostile
+        from combat import why_hostile
 
         enemy = why_hostile(world, me, other)
     except Exception as e:

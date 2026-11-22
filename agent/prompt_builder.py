@@ -396,7 +396,7 @@ Respond with a JSON object:
                 me=name,
             ) or []
             if people:
-                from social_rules import hostilities
+                from combat import hostilities
 
                 names = [r["n"] for r in people if r.get("n")]
                 try:
@@ -435,6 +435,7 @@ Respond with a JSON object:
             ) or []
             if items:
                 bits = []
+                forecasts = self._take_forecasts(name, loc, [r["n"] for r in items if r.get("n")])
                 for r in items:
                     if not r.get("n"):
                         continue
@@ -444,9 +445,10 @@ Respond with a JSON object:
                         extra = " locked" if r.get("locked") else " open"
                     if r.get("owner") and r["owner"] != name:
                         extra += f", {r['owner']}'s"
-                        extra += self._take_consequence(name, r["n"])
                     elif r.get("owner") == name:
                         extra += ", yours"
+                    if forecasts.get(r["n"]):
+                        extra += ": " + "; ".join(forecasts[r["n"]])
                     bits.append(f"{r['n']}[{kind}{extra}]")
                 lines.append("Ground items / interactables: " + ", ".join(bits))
             else:
@@ -612,20 +614,22 @@ Respond with a JSON object:
         except Exception as e:
             return f"(no routine info: {e})"
 
-    def _take_consequence(self, me: str, item: str) -> str:
-        """拿走别人的东西会怎样（rules/social.pl 推演）：算不算偷、谁会因此敌视我。"""
+    def _take_forecasts(self, me: str, loc: str, items: List[str]) -> Dict[str, List[str]]:
+        """内容包规则对「拿走这件东西」的提示（forecast/2，如算不算偷、谁会翻脸）：{物品: [句子]}。"""
+        if not items:
+            return {}
         try:
-            from social_rules import foresee_take
+            from prolog_engine import atom
+            from rulebook import ask, watched_by
 
-            out = foresee_take(self.world, me, item)
+            rows = ask(self.world, "[I, T]", f"member(I, {atom(items)}), forecast(take({atom(me)}, I, {atom(loc)}), T)",
+                       sees=watched_by(self.world, me))
         except Exception:
-            return ": taking it may be stealing"
-        if not out["theft"]:
-            return ": you may take it (not stealing)"
-        text = ": taking it is stealing"
-        if out["turns_hostile"]:
-            text += "; then " + "; ".join(h["text"] for h in out["turns_hostile"])
-        return text
+            return {}
+        out: Dict[str, List[str]] = {}
+        for item, text in rows:
+            out.setdefault(item, []).append(str(text))
+        return out
 
     def _get_memories_text(self, agent: "AgentProfile", limit: int = 16) -> str:
         mem = self.memory or getattr(agent, "_memory", None)

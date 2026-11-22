@@ -353,6 +353,15 @@ def apply_op(world, op_spec: Dict[str, Any], ctx: Dict[str, str]) -> None:
         strike(world, str(resolve_token(op_spec["attacker"], ctx)), str(resolve_token(op_spec["target"], ctx)))
         return
 
+    if op == "feel":
+        # a 对 b 的好感 +delta（含范围、对玩家的信任、自动结盟，见 agent/relations.py）
+        from relations import adjust
+
+        adjust(world, str(resolve_token(op_spec["a"], ctx)), str(resolve_token(op_spec["b"], ctx)),
+               int(resolve_token(op_spec.get("delta", 0), ctx) or 0),
+               reason=str(op_spec.get("reason") or ""), at=float(op_spec.get("at") or 0.0))
+        return
+
     if op == "add_prop":
         entity = resolve_token(op_spec["entity"], ctx)
         label = op_spec.get("label") or "Item"
@@ -458,6 +467,13 @@ def apply_op(world, op_spec: Dict[str, Any], ctx: Dict[str, str]) -> None:
         rel = op_spec.get("rel") or "ADJACENT_TO"
         # 注意：world.has_relationship 是无向匹配；双向时必须各建一条有向边，
         # 否则 Courtyard→Cellar 建完后会误判反向已存在，导致进地窖出不来。
+        if op_spec.get("props"):
+            # 带属性：每次新建一条边（记一件事，如 WITNESSED {crime, at}）
+            world.run_query(
+                f"MATCH (a:{a_label} {{name: $a}}), (b:{b_label} {{name: $b}}) CREATE (a)-[r:{rel}]->(b) SET r = $props",
+                a=a, b=b, props={k: resolve_token(v, ctx) for k, v in dict(op_spec["props"]).items()},
+            )
+            return
         world.link_entities(a, a_label, b, b_label, rel)
         if op_spec.get("bidirectional"):
             world.link_entities(b, b_label, a, a_label, rel)

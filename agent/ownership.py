@@ -9,17 +9,15 @@
   · 送人 / 卖掉 / 买来 → 归新主人（前提是原来就是给的人的；偷来的东西转手还是原主的）
   · 主人死了 → 他的东西都没主了，谁捡归谁
 
-偷：拿走（take 能力）一件还活着的别人的东西，而且主人不是你的盟友。
-看见的人（离得够近、没隔着墙，见 spatial.people_near）记下这件事；失主对小偷好感 -5，旁观者 -2。
-守卫看见了会把小偷当敌人（见 combat.hostility）。把东西还给失主（give）好感会回来一些。
+什么算偷、偷了之后谁记下、好感怎么变，都是内容包规则（content/base/rules/social.pl 的 theft/3、
+after(take(...), ...)）；看得见的人由 witnesses() 给出（离得够近、没隔着墙）。
+把东西还给失主（give）好感会回来一些。
 """
 
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-THEFT_VICTIM = -5
-THEFT_WITNESS = -2
 RETURNED = 3
 
 
@@ -106,15 +104,8 @@ def crimes_seen(world, observer: str, culprit: str) -> List[Dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
-def is_theft(world, taker: str, item: str) -> str:
-    """taker 拿走 item 算不算偷：算的话返回失主。规则见 rules/social.pl（theft/3）。"""
-    from social_rules import is_theft as rule_is_theft
-
-    return rule_is_theft(world, taker, item)
-
-
 def after_action(world, actor: str, action: str, params: Dict[str, str], *, at: float = 0.0) -> Dict[str, Any]:
-    """动作做完之后：东西易手、认领、偷窃（归属只在这里改，所以这时读到的还是动作前的主人）。"""
+    """动作做完之后：东西易手、认领（偷窃由规则先结算，见 relations.consequences）。"""
     from content import get_content
     from relations import adjust
 
@@ -122,17 +113,7 @@ def after_action(world, actor: str, action: str, params: Dict[str, str], *, at: 
     cap = get_content().capability_of(action) or action
     item = params.get("i") or ""
     before = owner_of(world, item) if item else ""
-    if cap == "take" and item:
-        victim = is_theft(world, actor, item)  # 归属还没改，读到的是动作前的主人
-        if victim:
-            seen = record_crime(world, actor, "theft", victim=victim, item=item, at=at)
-            if victim in seen:
-                adjust(world, victim, actor, THEFT_VICTIM, reason=f"stole my {item}", at=at)
-            for w in seen:
-                if w != victim:
-                    adjust(world, w, actor, THEFT_WITNESS, reason=f"saw them steal {victim}'s {item}", at=at)
-            out = {"theft": True, "victim": victim, "witnesses": seen}
-    elif cap == "give" and item:
+    if cap == "give" and item:
         receiver = params.get("receiver") or ""
         if before == actor:
             set_owner(world, item, receiver)

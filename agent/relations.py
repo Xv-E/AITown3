@@ -312,11 +312,14 @@ def after_action(world, actor: str, action: str, params: Dict[str, str], *, at: 
 
 
 def consequences(world, actor: str, action: str, params: Dict[str, str], *, at: float = 0.0) -> Dict[str, Any]:
-    """任何动作做完之后：东西易手 / 认领 / 偷窃（ownership.py）；打人的后果（combat.py）。"""
+    """任何动作做完之后：先按内容包规则结算（after/2，如偷窃，见 content/*/rules），
+    再是东西易手 / 认领（ownership.py）、打人的后果（combat.py）。"""
     from content import get_content
     from ownership import after_action as ownership_after
+    from rulebook import after as rule_after
 
-    out = dict(ownership_after(world, actor, action, params, at=at) or {})
+    out = dict(rule_after(world, action, params, at=at) or {})  # 归属还没改：规则读到的是动作前的主人
+    out.update(ownership_after(world, actor, action, params, at=at) or {})
     if (get_content().capability_of(action) or action) == "attack" and params.get("target"):
         from combat import after_attack
 

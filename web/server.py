@@ -253,12 +253,9 @@ def _player_consequences(world, action: str, params: Dict[str, str], capability:
 
             st = stats(world, params["target"])
             message = f"{message} — {params['target']} " + ("is dead" if not st.get("alive") else f"has {st.get('hp')} HP left")
-        if out.get("theft"):
-            seen = out.get("witnesses") or []
-            message = f"{message} — you stole from {out['victim']}" + (
-                f"; seen by {', '.join(seen)}" if seen else "; nobody saw"
-            )
-        elif out.get("crime"):
+        for note in out.get("notes") or []:  # 内容包规则要告诉玩家的话（after/2 的 note）
+            message = f"{message} — {note}"
+        if out.get("crime"):
             message = f"{message} — an unprovoked attack: witnesses will remember"
     except Exception as e:  # noqa: BLE001
         print(f"[WARN] consequences of {action}: {e}")

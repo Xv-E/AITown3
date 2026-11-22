@@ -11,6 +11,7 @@ content/
     states/*.json        持续状态（睡着、昏迷……）
     archetypes/*.json    物品原型（篝火、炉子、木柴……）
     planning.json        PDDL 自动编译的手动剪枝（见第 5 节）
+    rules/*.pl           规则（Prolog）：推导、动作之后的后果、做之前的提示（见第 7 节）
 ```
 
 默认加载 `base`，再按名字顺序加载 `content/` 下其它带 `pack.json` 的包（如 `streets`、`village`）。
@@ -429,3 +430,51 @@ Routine 里用 `"action": "sleep"` 让角色在该时段去执行这个动作：
 
 - 结盟的人聚成联盟（`(:Person)-[:MEMBER_OF]->(:Alliance)`），联盟之间的关系（`STANCE`，-10..10）= 两边成员互相好感的平均，每两个游戏小时重算：≥4 友好，≤-2 对立，≤-5 敌对（敌对联盟之间不做买卖）。
 - NPC 可以自己去结盟：目标 `Form alliance`（target = 人），规划器让他走过去 `propose_alliance`；对方好感 ≥ 4 才答应（条件 `feels_gte`，当面才知道）。
+
+---
+
+## 7. 规则 `rules/*.pl`（Prolog）
+
+动作 JSON 描述「一个动作本身做什么」；规则描述「世界里还有什么会因此成立 / 发生」：谁是谁的敌人、
+什么算偷、偷了之后谁记下来、拿之前该提醒 NPC 什么。规则只写在内容包里，引擎不认识其中任何概念。
+需要装 SWI-Prolog（见根目录 README）。各包的 `rules/*.pl` 按包的加载顺序全部加载。
+
+**读世界**：每次提问前，引擎把图里你声明要读的部分变成事实，规则用这些谓词读（推演时会叠加假设）：
+
+```prolog
+reads(label('Person')).            % 要读的节点标签
+reads(rel('OWNS')).                % 要读的关系类型
+
+node(Label, Id)                    % Id = 节点的 name
+prop(Id, Key, Value)               % 节点属性（字符串是原子，布尔是 true/false）
+rel(Type, A, B)  rel(Type, A, B, Props)  rel_prop(Type, A, B, Key, Value)
+now(T)                             % 模拟时钟
+sees(W, P)                         % W 看得见 P（引擎的感知；对事件的发起人给出）
+```
+
+**引擎会问的东西**（都可以在多个包里各加一些）：
+
+| 谓词 | 引擎什么时候问 | 用法 |
+|---|---|---|
+| `after(Event, Effect)` | 任何动作做完之后 | Effect 是和动作 `effects` 一样的 op（写成 SWI dict），引擎照常执行；另有 `note`（告诉做的人的一句话）和 `report`（并进结算结果） |
+| `forecast(Event, Text)` | NPC 决策前，对眼前的东西 | 给 NPC 的提示，原样放进提示词 |
+| `hostility(A, B, Why)` + `label/2` + `explain/4` | 战斗、界面、提示词判断敌对 | A 为什么敌视 B；标签给程序用，解释给提示词 / 界面 |
+| `const(Name, Value)` | 引擎别处要用的常量 | 如 `combat_memory` |
+
+事件 = 能力名（没有能力就用动作名）+ 动作参数（按声明顺序），如 `take('Ash', 'Berry1', 'Grove')`。
+
+**推演**：`if_done(Event, Goal)` 先收集 `after(Event, E)` 的全部效果当作假设，再证明 Goal，然后撤掉——
+所以「做了会怎样」不需要另写规则，`forecast` 里直接用它。
+
+例：一个新包规定「夜里拿走无主的东西，看见的人会记下来」，不改任何引擎代码：
+
+```prolog
+% content/night_law/rules/night.pl
+night :- now(T), T > 50.
+after(take(A, I, _), _{op: link, a: W, a_label: 'Person', b: A, b_label: 'Person', rel: 'WITNESSED',
+                       props: _{crime: night_taking, victim: town, item: I}}) :-
+    night, \+ owner(I, _), sees(W, A).
+```
+
+`base` 包的 `rules/social.pl` 是完整的例子（敌对的原因与优先级、偷窃、偷后的后果、拿之前的提示）。
+
