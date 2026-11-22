@@ -448,12 +448,13 @@ Routine 里用 `"action": "sleep"` 让角色在该时段去执行这个动作：
 ```prolog
 reads(label('Person')).            % 要读的节点标签
 reads(rel('OWNS')).                % 要读的关系类型
+reads(label('Item', [damage, armor])).  % 只读这些属性（节点多、属性大时用）
 
 node(Label, Id)                    % Id = 节点的 name
 prop(Id, Key, Value)               % 节点属性（字符串是原子，布尔是 true/false）
 rel(Type, A, B)  rel(Type, A, B, Props)  rel_prop(Type, A, B, Key, Value)
 now(T)                             % 模拟时钟
-sees(W, P)                         % W 看得见 P（引擎的感知；对事件的发起人给出）
+sees(W, P)                         % W 看得见 P（引擎的感知；规则问到时才算，P 要已知）
 ```
 
 **引擎会问的东西**（都可以在多个包里各加一些）：
@@ -463,6 +464,7 @@ sees(W, P)                         % W 看得见 P（引擎的感知；对事件
 | `after(Event, Effect)` | 任何动作做完之后 | Effect 是和动作 `effects` 一样的 op（写成 SWI dict），引擎照常执行；另有 `note`（告诉做的人的一句话）和 `report`（并进结算结果） |
 | `tick(Effect)` | 时间过去（每拍；声明了 `tick_period(P)` 就只在跨过周期时） | 同 `after` 的 op；用 `every(P)` 限定每 P 模拟秒一次 |
 | `forecast(Event, Text)` | NPC 决策前，对眼前的东西 | 给 NPC 的提示，原样放进提示词 |
+| `react(Me, Choice)` | 每个 NPC 大约每秒一次（正在做事时给 `busy_since(Me, T)`） | 要不要丢下手上的事马上行动：`goal`、`target`、`why`、`text`、`plan`（`[[能力名, [参数...]], ...]`，引擎换成动作名） |
 | `hostility(A, B, Why)` + `label/2` + `explain/4` | 战斗、界面、提示词判断敌对 | A 为什么敌视 B；标签给程序用，解释给提示词 / 界面 |
 | `const(Name, Value)` | 引擎别处要用的常量 | 如 `combat_memory` |
 
@@ -489,6 +491,7 @@ after(take(A, I, _), _{op: link, a: W, a_label: 'Person', b: A, b_label: 'Person
 | `ownership.pl` | 手上没主的东西归谁、送礼（转手、好感、还给失主）、买卖（转手、双方好感） |
 | `combat.pl` | 打人之后：挨打的人、盟友、旁观者的好感，没被惹就动手算犯罪，告诉玩家对方还剩多少 HP |
 | `time.pl` | 时间过去：好感朝 0 回落（盟友有下限）、矛盾消退、没在打架的人回血 |
+| `react.pl` | NPC 看到敌人：打得过就打（不在一处就先走过去），快不行又打不过就逃，只是讨厌又不占上风就不招惹 |
 | `alliances.pl` | 互相喜欢就结盟、聚成一伙；闹翻就散；联盟之间的立场 = 成员互相好感的平均（分四步的 tick/2） |
 
 动作之后的一切后果都从这里来：引擎的 `relations.consequences` 只是问 `after/2` 并照着写图；

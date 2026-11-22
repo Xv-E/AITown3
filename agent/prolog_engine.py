@@ -9,6 +9,8 @@ SWI-Prolog 的引擎不能被多个 Python 线程同时用（游戏里规划是�
     rows = solve(files, [fact("g_node", "Person", "Ash")], "findall(P, g_node('Person', P), L)")
 
 规则文件由调用方给出（见 rulebook.rule_files）；facts 由 load_facts/1 装入（rules_core.pl）。
+callbacks：规则可以经 py_call(Name, Arg, Result) 回头问引擎（如感知：谁看得见谁），只在规则真的问到时才算，
+同一次查询里同样的问题只算一次。
 没装 SWI-Prolog 时抛 PrologUnavailable（安装方法见 README）。
 """
 
@@ -22,6 +24,37 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 class PrologUnavailable(RuntimeError):
     pass
+
+
+# 回调（py_call/3）要在初始化 Prolog 的同一个线程里注册，否则从工作线程回调会崩：
+# 所以在导入本模块时一起导入 pyswip（它在导入时初始化 Prolog）并注册。
+_callbacks: Dict[str, Any] = {}
+_memo: Dict[Any, Any] = {}
+
+
+def _py_call(name, arg, out):
+    """Prolog 的 py_call(Name, Arg, Result)：交给当前查询的 callbacks（同一次查询内记住结果）。"""
+    from pyswip import Atom
+
+    key = (str(name), str(arg))
+    fn = _callbacks.get(key[0])
+    if fn is None:
+        return False
+    try:
+        if key not in _memo:
+            _memo[key] = [str(x) for x in (fn(key[1]) or [])]
+        return out.unify([Atom(x) for x in _memo[key]])
+    except Exception:  # noqa: BLE001
+        return False
+
+
+try:
+    from pyswip import registerForeign
+
+    registerForeign(_py_call, name="py_call", arity=3)
+    _import_error: Optional[BaseException] = None
+except BaseException as e:  # noqa: BLE001  没装 SWI-Prolog / pyswip
+    _import_error = e
 
 
 def atom(value: Any) -> str:
@@ -55,11 +88,13 @@ class _Engine:
     def shutdown(self) -> None:
         if self._thread.is_alive():
             reply: "queue.Queue[tuple]" = queue.Queue(maxsize=1)
-            self._jobs.put(((), [], None, reply))
+            self._jobs.put(((), [], None, reply, None))
             reply.get(timeout=5)
 
     def _run(self) -> None:
         try:
+            if _import_error is not None:
+                raise _import_error
             from pyswip import Prolog
 
             prolog = Prolog()
@@ -70,7 +105,7 @@ class _Engine:
         self._ready.set()
         loaded: Sequence[str] = ()
         while True:
-            files, facts, goal, reply = self._jobs.get()
+            files, facts, goal, reply, job_callbacks = self._jobs.get()
             if goal is None:  # 退出：在本线程里收尾（否则退出时 SWI 会抱怨停不掉线程）
                 from pyswip.core import PL_cleanup, PL_thread_self, _lib
 
@@ -80,6 +115,9 @@ class _Engine:
                     _lib.PL_thread_destroy_engine()
                 reply.put((True, []))
                 return
+            _callbacks.clear()
+            _callbacks.update(job_callbacks or {})
+            _memo.clear()
             try:
                 if tuple(files) != tuple(loaded):
                     for path in loaded:
@@ -93,9 +131,10 @@ class _Engine:
             except BaseException as e:  # noqa: BLE001
                 reply.put((False, e))
 
-    def solve(self, files: Sequence[str], facts: Iterable[str], goal: str) -> List[Dict[str, Any]]:
+    def solve(self, files: Sequence[str], facts: Iterable[str], goal: str,
+              callbacks: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         reply: "queue.Queue[tuple]" = queue.Queue(maxsize=1)
-        self._jobs.put((tuple(files), list(facts), goal, reply))
+        self._jobs.put((tuple(files), list(facts), goal, reply, callbacks))
         ok, value = reply.get()
         if not ok:
             raise value
@@ -121,6 +160,8 @@ def engine() -> _Engine:
         return _engine
 
 
-def solve(files: Sequence[str], facts: Iterable[str], goal: str) -> List[Dict[str, Any]]:
-    """用这组规则文件（有变化才重新加载）和这次的 facts 证明 goal；返回所有解（变量名 → 值）。"""
-    return engine().solve(files, facts, goal)
+def solve(files: Sequence[str], facts: Iterable[str], goal: str,
+          callbacks: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    """用这组规则文件（有变化才重新加载）和这次的 facts 证明 goal；返回所有解（变量名 → 值）。
+    callbacks：{名字: 函数(参数) -> [名字, ...]}，规则经 py_call/3 按需调用。"""
+    return engine().solve(files, facts, goal, callbacks)

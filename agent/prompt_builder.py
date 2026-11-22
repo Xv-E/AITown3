@@ -620,10 +620,9 @@ Respond with a JSON object:
             return {}
         try:
             from prolog_engine import atom
-            from rulebook import ask, watched_by
+            from rulebook import ask
 
-            rows = ask(self.world, "[I, T]", f"member(I, {atom(items)}), forecast(take({atom(me)}, I, {atom(loc)}), T)",
-                       sees=watched_by(self.world, me))
+            rows = ask(self.world, "[I, T]", f"member(I, {atom(items)}), forecast(take({atom(me)}, I, {atom(loc)}), T)")
         except Exception:
             return {}
         out: Dict[str, List[str]] = {}

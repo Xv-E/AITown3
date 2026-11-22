@@ -142,7 +142,8 @@ def test_death_drops_everything_and_frees_it(camp):
 
 
 def test_an_unprovoked_attack_is_a_crime_and_the_victim_fights_back(camp):
-    from combat import hostility, react
+    from combat import hostility
+    from rulebook import react
     from ownership import crimes_seen
 
     me = _stand(camp, "Observer", "CampfireClearing")
@@ -152,7 +153,7 @@ def test_an_unprovoked_attack_is_a_crime_and_the_victim_fights_back(camp):
     assert crimes_seen(camp, "Ash", "Observer")[0]["crime"] == "assault"
     assert hostility(camp, "Ash", "Observer", at=0.0) == "attacked me"
     choice = react(camp, "Ash", at=0.0)
-    assert choice["kind"] == "attack" and choice["target"] == "Observer"
+    assert choice["goal"] == "Defeat enemy" and choice["target"] == "Observer"
     assert choice["plan"][-1][0] == "attack"
     # 被打的人还手不算犯罪
     from relations import consequences
@@ -165,19 +166,21 @@ def test_an_unprovoked_attack_is_a_crime_and_the_victim_fights_back(camp):
 
 
 def test_the_losing_side_runs_away(camp):
-    from combat import react, strike
+    from combat import strike
+    from rulebook import react
 
     here = _stand(camp, "Reed", "CampfireClearing")
     _stand(camp, "Rowan", "CampfireClearing", near=here)
     camp.run_query("MATCH (p:Person {name: 'Reed'}) SET p.hp = 20")
     strike(camp, "Rowan", "Reed", at=1.0)
     choice = react(camp, "Reed", at=1.0)
-    assert choice["kind"] == "flee" and choice["from"] == "Rowan"
-    assert choice["to"] != "CampfireClearing" and choice["plan"][0][0] == "move"
+    assert choice["goal"] == "Flee" and choice["text"].startswith("Flees from Rowan")
+    assert choice["target"] != "CampfireClearing" and choice["plan"][0][0] == "move"
 
 
 def test_guards_go_after_criminals_and_monsters_attack_outsiders(camp):
-    from combat import hostility, react
+    from combat import hostility
+    from rulebook import react
     from ownership import set_owner
 
     camp.run_query("MATCH (p:Person {name: 'Rowan'}) SET p.guard = true")

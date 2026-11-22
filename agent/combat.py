@@ -9,7 +9,7 @@
   · "criminal"      a 是守卫（Person.guard），亲眼看见 b 偷过东西 / 无故打人
   · "hatred"        a 对 b 的好感 ≤ 仇恨线（social.pl 的 hatred_threshold）
   · "war"           两人的联盟互相敌对（规则常量 alliance_hostile）
-前四种会主动动手（AGGRESSIVE）；后两种只在自己明显更强时才动手，否则躲着走。
+前四种会主动动手；后两种只在自己明显更强时才动手，否则躲着走（content/base/rules/react.pl）。
 
 一击（strike）：伤害 = 力量（power_level）+ 手上最好的武器（Item.damage）- 对方的护甲（Item.armor），至少 1。
 HP 掉到 0 就死了：手上的东西掉在地上，名下的东西都没主了（谁捡归谁）。
@@ -17,16 +17,13 @@ HP 掉到 0 就死了：手上的东西掉在地上，名下的东西都没主�
 strike 只在打人的人身上记下 strike_provoked（动手前的敌对标签，'' = 没被惹）供规则用。
 不打仗的时候 HP 慢慢回来：规则 tick/1（content/base/rules/time.pl）。
 
-NPC 的反应见 react()：打得过就打（不在一个地点就先走过去），快不行了就逃到旁边没敌人的地点。
+NPC 打还是逃：内容包规则 react/2（content/base/rules/react.pl），引擎经 rulebook.react 问。
 """
 
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
-AGGRESSIVE = {"attacked me", "fighting", "faction", "criminal"}
-FLEE_AT = 0.3             # HP 掉到最大值的这么多以下，又打不过，就逃
-BRAVE_RATIO = 1.3         # 只是讨厌（不是被打）的话，强出这么多才动手
 
 
 def stats(world, name: str) -> Dict[str, Any]:
@@ -60,11 +57,6 @@ def stats(world, name: str) -> Dict[str, Any]:
 
 def damage_of(attacker: Dict[str, Any], target: Dict[str, Any]) -> int:
     return max(1, attacker["power"] + attacker["weapon"] - target["armor"])
-
-
-def strength(s: Dict[str, Any]) -> float:
-    """大概打得过谁：每一击的伤害 × 能挨几下。"""
-    return float(max(1, s["power"] + s["weapon"])) * float(max(1, s["hp"] + s["armor"] * 3))
 
 
 def now(world) -> float:
@@ -174,78 +166,3 @@ def strike(world, attacker: str, target: str, *, at: Optional[float] = None) -> 
         out["killed"] = True
         out["dropped"] = die(world, target, at=at)
     return out
-
-
-# ---------------------------------------------------------------------
-# NPC 怎么反应
-# ---------------------------------------------------------------------
-
-
-def enemies_near(world, me: str, *, at: float = 0.0) -> List[Tuple[str, str]]:
-    """看得见的敌人：[(名字, 为什么)]，最近打过我的排前面。"""
-    from ownership import witnesses
-
-    seen = witnesses(world, me)  # 看得见我的人 = 我看得见的人
-    found = hostilities(world, [(me, other) for other in seen], at=at)
-    out = [(other, found[(me, other)]["label"]) for other in seen if (me, other) in found]
-    out.sort(key=lambda p: (p[1] != "attacked me", p[1] != "fighting", p[0]))
-    return out
-
-
-def _neighbours(world, here: str) -> List[str]:
-    rows = world.run_query(
-        "MATCH (:Location {name: $l})-[:ADJACENT_TO]->(n:Location) RETURN n.name AS n ORDER BY n", l=here
-    ) or []
-    return [r["n"] for r in rows]
-
-
-def _hostiles_at(world, me: str, place: str, *, at: float) -> int:
-    rows = world.run_query(
-        "MATCH (p:Person)-[:LOCATED_AT]->(:Location {name: $l}) WHERE p.name <> $me RETURN p.name AS n",
-        l=place, me=me,
-    ) or []
-    return len(hostilities(world, [(r["n"], me) for r in rows], at=at))
-
-
-def react(world, me: str, *, at: float = 0.0) -> Optional[Dict[str, Any]]:
-    """这个 NPC 现在该打、该逃，还是不管：
-
-      {"kind": "attack", "target": 谁, "why": ..., "plan": [(动作, 参数), ...]}
-      {"kind": "flee", "from": 谁, "to": 地点, "plan": [...]}
-      None：没有敌人，或者只是讨厌、又打不过（不招惹）
-    """
-    from registry import act
-
-    sm = stats(world, me)
-    if not sm or not sm["alive"] or sm.get("player"):
-        return None
-    enemies = enemies_near(world, me, at=at)
-    if not enemies:
-        return None
-    here = str(sm.get("location") or "")
-    target, why = enemies[0]
-    st = stats(world, target)
-    if not st:
-        return None
-    mine = strength(sm)
-    threat = sum(strength(stats(world, e)) for e, w in enemies if w in AGGRESSIVE or hostility(world, e, me, at=at))
-    losing = threat > mine
-    if sm["hp"] <= FLEE_AT * sm["max_hp"] and losing and here:
-        options = sorted(_neighbours(world, here), key=lambda p: (_hostiles_at(world, me, p, at=at), p))
-        if options:
-            dest = options[0]
-            return {"kind": "flee", "from": target, "to": dest, "why": why,
-                    "plan": [(act("travel"), [me, here, dest])]}
-        return None
-    if why not in AGGRESSIVE and mine < BRAVE_RATIO * strength(st):
-        return None  # 只是讨厌、又不占上风：不招惹
-    there = str(st.get("location") or "")
-    if not here or not there:
-        return None
-    plan: List[Tuple[str, List[str]]] = []
-    if there != here:
-        if there not in _neighbours(world, here):
-            return None
-        plan.append((act("travel"), [me, here, there]))
-    plan.append((act("attack"), [me, target, there]))
-    return {"kind": "attack", "target": target, "why": why, "plan": plan}

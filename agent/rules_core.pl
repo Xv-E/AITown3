@@ -8,7 +8,9 @@
 %   g_rel(Type, A, B, Props).       有向边；Props = [Key-Value, ...]
 %   g_now(T).                       模拟时钟
 %   g_tick(Prev, Now).              时间钩子：上一次和这一次（只在问 tick/1 时给）
-%   sees(W, P).                     W 看得见 P（引擎的感知，只对事件的发起人给）
+%   sees(W, P)                      W 看得见 P：规则问到时才回头问引擎的感知（P 要已知）；
+%                                   给了 g_sees(W, P) 事实就只用这些（测试 / 调用方指定）
+%   busy_since(P, T).               问 react/2 时：P 从 T 起正在做一件事
 % 读哪些标签 / 关系由规则声明：reads(label('Person')). reads(rel('FEELS')).
 %
 % 规则应通过下面这些谓词读图——它们会叠加「假设」（推演时）：
@@ -24,6 +26,8 @@
 %                                      分步的时间效果：先 tick/1，再按 Order 逐步问，每步之前重读世界
 %                                      （后一步要看到前一步的结果时用，如先结盟、再算联盟成员）
 %   forecast(Event, Text)              做之前提示会怎样
+%   react(Me, Choice)                  NPC 要不要丢下手上的事马上行动（打、逃……）；Choice 是 dict：
+%                                      goal / target / why / text / source / plan（[[能力名, [参数...]], ...]）
 %   label/2  explain/4                 原因的标签 / 一句话解释（引擎原样转给提示词与界面）
 %   const(Name, Value)                 引擎在别处也要用的常量
 % 事件 = 能力名（没有就用动作名）+ 动作参数（按声明顺序），如 take('Ash', 'Berry1', 'Grove')。
@@ -33,14 +37,15 @@
 :- use_module(library(apply)).
 :- use_module(library(lists)).
 
-:- dynamic g_node/2, g_prop/3, g_rel/4, g_now/1, g_tick/2, sees/2, hyp/1.
-:- multifile reads/1, after/2, tick/1, tick/2, tick_phase/2, tick_period/1, forecast/2, label/2, explain/4, const/2.
-:- dynamic reads/1, after/2, tick/1, tick/2, tick_phase/2, tick_period/1, forecast/2, label/2, explain/4, const/2.
-:- discontiguous reads/1, after/2, tick/1, tick/2, tick_phase/2, tick_period/1, forecast/2, label/2, explain/4, const/2.
+:- dynamic g_node/2, g_prop/3, g_rel/4, g_now/1, g_tick/2, g_sees/2, busy_since/2, hyp/1.
+:- multifile reads/1, after/2, tick/1, tick/2, tick_phase/2, tick_period/1, forecast/2, react/2, label/2, explain/4, const/2.
+:- dynamic reads/1, after/2, tick/1, tick/2, tick_phase/2, tick_period/1, forecast/2, react/2, label/2, explain/4, const/2.
+:- discontiguous reads/1, after/2, tick/1, tick/2, tick_phase/2, tick_period/1, forecast/2, react/2, label/2, explain/4, const/2.
 
 load_facts(Facts) :-
     retractall(g_node(_, _)), retractall(g_prop(_, _, _)), retractall(g_rel(_, _, _, _)),
-    retractall(g_now(_)), retractall(g_tick(_, _)), retractall(sees(_, _)), retractall(hyp(_)),
+    retractall(g_now(_)), retractall(g_tick(_, _)), retractall(g_sees(_, _)), retractall(busy_since(_, _)),
+    retractall(hyp(_)),
     forall(member(F, Facts), assertz(F)).
 
 % ---------------------------------------------------------------------
@@ -79,6 +84,9 @@ rel_prop(T, A, B, K, V) :- rel(T, A, B, Props), memberchk(K-V, Props).
 
 now(T) :- g_now(T), !.
 now(0).
+
+sees(W, P) :- g_sees(_, _), !, g_sees(W, P).
+sees(W, P) :- nonvar(P), catch(py_call(sees, P, L), _, fail), member(W, L).
 
 % 这一拍跨过了周期 P 的边界（每 P 模拟秒一次；跳时间也只算一次）
 every(P) :- g_tick(Prev, Now), floor(Now / P) > floor(Prev / P).

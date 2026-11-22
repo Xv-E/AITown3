@@ -34,14 +34,19 @@ def rule_files() -> Tuple[str, ...]:
 _reads_cache: Dict[Tuple[str, ...], Tuple[List[str], List[str]]] = {}
 
 
-def _reads(files: Tuple[str, ...]) -> Tuple[List[str], List[str]]:
-    """规则声明要读的 (标签, 关系类型)。"""
+def _reads(files: Tuple[str, ...]) -> Tuple[List[str], Dict[str, List[str]], List[str]]:
+    """规则声明要读的 (整个读的标签, {只读部分属性的标签: 属性}, 关系类型)。
+    reads(label(L)) 读全部属性；reads(label(L, [K, ...])) 只读这些属性（如物品只要 damage / armor）。"""
     if files not in _reads_cache:
         rows = solve(files, [], "answers_json(X, reads(X), J)")
-        decl = json.loads(rows[0]["J"]) if rows else []
-        labels = sorted({d["args"][0] for d in decl if d.get("functor") == "label"})
+        decl = [d for d in (json.loads(rows[0]["J"]) if rows else []) if isinstance(d, dict)]
+        full = {d["args"][0] for d in decl if d.get("functor") == "label" and len(d["args"]) == 1}
+        some: Dict[str, set] = {}
+        for d in decl:
+            if d.get("functor") == "label" and len(d["args"]) == 2 and d["args"][0] not in full:
+                some.setdefault(d["args"][0], set()).update(d["args"][1])
         rels = sorted({d["args"][0] for d in decl if d.get("functor") == "rel"})
-        _reads_cache[files] = (labels, rels)
+        _reads_cache[files] = (sorted(full), {k: sorted(v) for k, v in some.items()}, rels)
     return _reads_cache[files]
 
 
@@ -56,8 +61,18 @@ def _value(v: Any) -> Optional[str]:
 
 def world_facts(world, files: Tuple[str, ...], *, at: Optional[float] = None,
                 sees: Iterable[Tuple[str, str]] = (), extra: Iterable[str] = ()) -> List[str]:
-    labels, rels = _reads(files)
+    labels, partial, rels = _reads(files)
     facts: List[str] = []
+    for lab, keys in partial.items():
+        for r in world.run_query(
+            f"MATCH (n:`{lab}`) WHERE n.name IS NOT NULL RETURN n.name AS id, [k IN $keys | [k, n[k]]] AS kv",
+            keys=keys,
+        ) or []:
+            facts.append(fact("g_node", lab, r["id"]))
+            for k, v in r["kv"] or []:
+                pv = _value(v)
+                if pv is not None:
+                    facts.append(f"g_prop({atom(r['id'])}, {atom(k)}, {pv})")
     if labels:
         for r in world.run_query(
             "MATCH (n) WHERE n.name IS NOT NULL AND any(l IN labels(n) WHERE l IN $labels) "
@@ -84,25 +99,26 @@ def world_facts(world, files: Tuple[str, ...], *, at: Optional[float] = None,
         at = rows[0]["t"] if rows and rows[0].get("t") is not None else None
     if at is not None:
         facts.append(fact("g_now", float(at)))
-    facts += [fact("sees", w, p) for w, p in sees]
+    facts += [fact("g_sees", w, p) for w, p in sees]
     facts += list(extra)
     return facts
 
 
 def ask(world, template: str, goal: str, *, at: Optional[float] = None,
         sees: Iterable[Tuple[str, str]] = (), extra: Iterable[str] = ()) -> List[Any]:
-    """findall(template, goal) 在当下的世界上；复合项变成 {"functor", "args"}，K-V 变成 [K, V]。"""
+    """findall(template, goal) 在当下的世界上；复合项变成 {"functor", "args"}，K-V 变成 [K, V]。
+    sees：指定谁看得见谁（不给就按需问引擎的感知 perceive）。"""
     files = rule_files()
     rows = solve(files, world_facts(world, files, at=at, sees=sees, extra=extra),
-                 f"answers_json({template}, ({goal}), J)")
+                 f"answers_json({template}, ({goal}), J)", callbacks={"sees": lambda p: perceive(world, p)})
     return json.loads(rows[0]["J"]) if rows else []
 
 
-def watched_by(world, actor: str) -> List[Tuple[str, str]]:
-    """引擎的感知：现在看得见 actor 的人（作为 sees/2 交给规则）。"""
+def perceive(world, actor: str) -> List[str]:
+    """引擎的感知：现在看得见 actor 的人（规则的 sees(W, actor) 问到时才算）。"""
     from ownership import witnesses
 
-    return [(w, actor) for w in witnesses(world, actor)]
+    return witnesses(world, actor)
 
 
 def event(action: str, params: Dict[str, Any]) -> str:
@@ -117,9 +133,7 @@ def event(action: str, params: Dict[str, Any]) -> str:
 
 def after(world, action: str, params: Dict[str, Any], *, at: float = 0.0) -> Dict[str, Any]:
     """动作做完之后，规则推出的效果：写图的交给 graph_ops；note 收进 notes，report 并进返回值。"""
-    actor = str(next(iter(params.values()), "")) if params else ""
-    effects = ask(world, "E", f"after({event(action, params)}, E)", at=at,
-                  sees=watched_by(world, actor) if actor else ())
+    effects = ask(world, "E", f"after({event(action, params)}, E)", at=at)
     return apply_effects(world, effects)
 
 
@@ -151,6 +165,21 @@ def _phases(files: Tuple[str, ...]) -> List[str]:
         rows = solve(files, [], "answers_json([O, P], tick_phase(O, P), J)")
         _reads_cache[key] = ([p for _, p in sorted(json.loads(rows[0]["J"]) if rows else [])], [])
     return _reads_cache[key][0]
+
+
+def react(world, me: str, *, at: Optional[float] = None, busy_since: Optional[float] = None) -> Optional[Dict[str, Any]]:
+    """这个 NPC 现在要不要丢下手上的事、马上行动（规则 react/2）：
+    {"goal", "target", "why", "text", "source", "plan": [(动作名, 参数), ...]}；None = 不用。
+    计划里写的是能力名（travel、attack……），这里换成当前内容包的动作名。"""
+    from registry import act
+
+    extra = [fact("busy_since", me, float(busy_since))] if busy_since is not None else []
+    rows = ask(world, "C", f"once(react({atom(me)}, C))", at=at, extra=extra)
+    if not rows or not isinstance(rows[0], dict):
+        return None
+    choice = dict(rows[0])
+    choice["plan"] = [(act(str(cap)) or str(cap), [str(a) for a in args]) for cap, args in choice.get("plan") or []]
+    return choice
 
 
 def holds(world, goal: str) -> bool:

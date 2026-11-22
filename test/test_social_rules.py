@@ -84,7 +84,7 @@ def test_forecast_names_who_would_turn_hostile_and_leaves_no_trace():
 
     facts = (person("Ash") + person("Sage") + person("Rowan", guard=True) + person("Hero", is_player=True)
              + rel("OWNS", "Sage", "Knife") + rel("FEELS", "Sage", "Ash", value=-2)
-             + [fact("sees", w, "Ash") for w in ("Rowan", "Sage", "Hero")])
+             + [fact("g_sees", w, "Ash") for w in ("Rowan", "Sage", "Hero")])
     lines = answers(facts, "T", "forecast(take('Ash', 'Knife', 'Grove'), T)")
     assert lines[0] == "taking it is stealing"
     # 守卫看见了就当罪犯；失主 -2 再 -5 = -7，跌破仇恨线；玩家的感受不替他推演
@@ -97,7 +97,7 @@ def test_forecast_names_who_would_turn_hostile_and_leaves_no_trace():
 def test_after_a_theft_the_effects_are_plain_graph_ops():
     from prolog_engine import fact
 
-    facts = person("Ash") + person("Sage") + rel("OWNS", "Sage", "Knife") + [fact("sees", "Sage", "Ash")]
+    facts = person("Ash") + person("Sage") + rel("OWNS", "Sage", "Knife") + [fact("g_sees", "Sage", "Ash")]
     effects = answers(facts, "E", "after(take('Ash', 'Knife', 'Grove'), E)")
     ops = sorted(e["op"] for e in effects)
     assert ops == ["add_prop", "feel", "link", "note", "report"]
@@ -118,9 +118,9 @@ def camp(world):
 
 
 def _forecast(world, me, item, loc):
-    from rulebook import ask, watched_by
+    from rulebook import ask
 
-    return ask(world, "T", f"forecast(take('{me}', '{item}', '{loc}'), T)", sees=watched_by(world, me))
+    return ask(world, "T", f"forecast(take('{me}', '{item}', '{loc}'), T)")
 
 
 def test_the_forecast_matches_what_happens(camp):
@@ -249,7 +249,7 @@ def test_an_unprovoked_attack_is_seen_and_remembered():
     from prolog_engine import fact
 
     facts = (person("Ash") + person("Bram", hp=30) + person("Cole") + person("Dana")
-             + rel("ALLY", "Bram", "Cole") + [fact("sees", "Dana", "Ash")])
+             + rel("ALLY", "Bram", "Cole") + [fact("g_sees", "Dana", "Ash")])
     eff = _effects(facts, "attack('Ash', 'Bram', 'Camp')")
     assert _feels(eff) == [("Bram", "Ash", -4), ("Cole", "Ash", -3), ("Dana", "Ash", -2)]
     assert sorted(e["a"] for e in eff if e["op"] == "link") == ["Bram", "Dana"]
@@ -371,3 +371,46 @@ def test_time_turns_friends_into_a_band_in_the_real_world(camp):
     rows = camp.run_query("MATCH (:Person {name: 'Sage'})-[:MEMBER_OF]->(g:Alliance)<-[:MEMBER_OF]-(:Person {name: 'Reed'}) "
                           "RETURN g.name AS g")
     assert rows, "decayed to 7, still mutual ≥ 6: allies in one band"
+
+
+# ---------------------------------------------------------------------
+# NPC 看到敌人时（content/base/rules/react.pl）
+# ---------------------------------------------------------------------
+
+def _react(facts, me, **extra):
+    from prolog_engine import fact
+
+    more = [fact("busy_since", me, extra["busy_since"])] if "busy_since" in extra else []
+    got = answers(facts + more, "C", f"once(react('{me}', C))")
+    return got[0] if got else None
+
+
+def _arena(**ash):
+    from prolog_engine import fact
+
+    return (person("Ash", **ash) + person("Bram", hp=50)
+            + rel("LOCATED_AT", "Ash", "Camp") + rel("LOCATED_AT", "Bram", "Camp")
+            + rel("ADJACENT_TO", "Camp", "Woods") + [fact("g_sees", "Bram", "Ash")])
+
+
+def test_hit_back_when_attacked():
+    c = _react(_arena(hp=50, attacked_by="Bram", attacked_at=99.0), "Ash")
+    assert c["goal"] == "Defeat enemy" and c["target"] == "Bram" and c["why"] == "attacked me"
+    assert c["plan"] == [["attack", ["Ash", "Bram", "Camp"]]] and c["text"] == "Fights Bram (attacked me)"
+
+
+def test_mere_hatred_only_fights_when_clearly_stronger():
+    hate = rel("FEELS", "Ash", "Bram", value=-8)
+    assert _react(_arena(hp=50) + hate, "Ash") is None, "as strong as Bram: keeps away"
+    assert _react(_arena(hp=50, power_level=5) + hate, "Ash")["goal"] == "Defeat enemy"
+
+
+def test_run_when_losing_and_hurt():
+    c = _react(_arena(hp=10, max_hp=100, attacked_by="Bram", attacked_at=99.0), "Ash")
+    assert c["goal"] == "Flee" and c["target"] == "Woods" and c["plan"] == [["travel", ["Ash", "Camp", "Woods"]]]
+
+
+def test_busy_people_only_drop_things_when_hit_after_starting():
+    facts = _arena(hp=50, attacked_by="Bram", attacked_at=99.0)
+    assert _react(facts, "Ash", busy_since=99.5) is None
+    assert _react(facts, "Ash", busy_since=98.0)["goal"] == "Defeat enemy"

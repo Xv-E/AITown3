@@ -30,7 +30,7 @@ reads(rel('OWNS')).
 const(combat_memory, 25.0).     % 模拟秒（两个游戏小时）：这么久之内打过你的人还是敌人
 const(theft_victim, -5).        % 失主亲眼看见被偷：好感
 const(theft_witness, -2).       % 旁观者看见偷窃：好感
-const(alliance_hostile, -5).    % 联盟之间的立场到这么低就是敌对（relations.HOSTILE 同值，迁移后删那边）
+const(alliance_hostile, -5).    % 联盟之间的立场到这么低就是敌对
 
 hostile_faction(F) :-
     memberchk(F, [monster, monsters, bandit, bandits, beast, beasts, undead, raider, raiders]).
