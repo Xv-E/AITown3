@@ -54,9 +54,11 @@ def test_reasons_come_in_priority_order():
 
 
 def test_monsters_fight_everyone_and_the_dead_fight_nobody():
-    facts = person("Wolf", faction="monster") + person("Sage")
+    pack = node("Faction", "Wolves", kind="monster") + rel("MEMBER_OF", "Wolf", "Wolves")
+    facts = person("Wolf") + person("Sage") + pack
     assert why(facts, "Wolf", "Sage") == "faction" and why(facts, "Sage", "Wolf") == "faction"
-    assert why(person("Wolf", faction="monster", dead=True) + person("Sage"), "Sage", "Wolf") == ""
+    assert why(facts + person("Cub") + rel("MEMBER_OF", "Cub", "Wolves"), "Wolf", "Cub") == "", "not their own"
+    assert why(person("Wolf", dead=True) + person("Sage") + pack, "Sage", "Wolf") == ""
 
 
 def test_npcs_feel_about_the_player_through_trust():
@@ -64,10 +66,11 @@ def test_npcs_feel_about_the_player_through_trust():
     assert why(facts, "Sage", "Hero") == "hatred", "trust, not the FEELS edge, is how an NPC feels about the player"
 
 
-def test_alliances_at_war():
-    facts = (person("Ash") + person("Bram") + node("Alliance", "Reds") + node("Alliance", "Blues")
-             + rel("MEMBER_OF", "Ash", "Reds") + rel("MEMBER_OF", "Bram", "Blues") + rel("STANCE", "Reds", "Blues", value=-6))
-    assert why(facts, "Ash", "Bram") == "war"
+def test_feuding_groups_at_war():
+    facts = (person("Ash") + person("Bram") + node("Faction", "Lau", kind="family") + node("Faction", "Chan", kind="guild")
+             + rel("MEMBER_OF", "Ash", "Lau") + rel("MEMBER_OF", "Bram", "Chan") + rel("FACTION_REL", "Chan", "Lau", stance="hostile"))
+    assert why(facts, "Ash", "Bram") == "war", "a family takes enmity personally"
+    assert why(facts, "Bram", "Ash") == "", "a guild does not"
 
 
 def test_theft_needs_a_living_owner_who_is_not_your_ally():
@@ -293,7 +296,7 @@ def test_people_heal_unless_they_were_just_hit():
 
 
 # ---------------------------------------------------------------------
-# 盟友与联盟（content/base/rules/alliances.pl，content/rpg/rules/alliance.pl）
+# 盟友与朋友结的伙（content/base/rules/group_life.pl，content/rpg/rules/alliance.pl）
 # ---------------------------------------------------------------------
 
 def _phase(facts, phase, prev=20.0, now=26.0):
@@ -303,43 +306,60 @@ def _phase(facts, phase, prev=20.0, now=26.0):
 
 
 def _ops(effects):
-    return [(e["op"], e.get("a") or e.get("entity") or e.get("name"), e.get("b"), e.get("value")) for e in effects]
+    return [(e["op"], e.get("a") or e.get("entity") or e.get("name"), e.get("b"),
+             e.get("value") if "value" in e else (e.get("props") or {}).get("stance")) for e in effects]
+
+
+def band(name):
+    return node("Faction", name, kind="band")
 
 
 def test_mutual_liking_makes_allies_and_a_band():
     facts = person("Ash") + person("Bram") + rel("FEELS", "Ash", "Bram", value=7) + rel("FEELS", "Bram", "Ash", value=6)
     assert _ops(_phase(facts, "bonds")) == [
         ("link", "Ash", "Bram", None), ("link", "Bram", "Ash", None),
-        ("merge_node", "Ash's Band", None, None), ("link", "Ash", "Ash's Band", None), ("link", "Bram", "Ash's Band", None)]
+        ("merge_node", "Ash's Band", None, None), ("set_prop", "Ash's Band", None, "active"),
+        ("link", "Ash", "Ash's Band", None), ("link", "Bram", "Ash's Band", None)]
+    new = _phase(facts, "bonds")[2]
+    assert new["label"] == "Faction" and new["props"]["kind"] == "band", "a band is just a group of kind band"
     assert _phase(facts, "bonds", 26.0, 30.0) == [], "only every two game hours"
 
 
 def test_joining_an_existing_band_or_bringing_two_bands_closer():
     base = person("Ash") + person("Bram") + rel("FEELS", "Ash", "Bram", value=7) + rel("FEELS", "Bram", "Ash", value=7)
-    one = base + node("Alliance", "Reds") + rel("MEMBER_OF", "Ash", "Reds")
+    one = base + band("Reds") + rel("MEMBER_OF", "Ash", "Reds")
     assert _ops(_phase(one, "bonds"))[2:] == [("link", "Bram", "Reds", None)]
-    two = one + node("Alliance", "Blues") + rel("MEMBER_OF", "Bram", "Blues") + rel("STANCE", "Reds", "Blues", value=1)
-    assert _ops(_phase(two, "bonds"))[2:] == [("set_rel_prop", "Reds", "Blues", 4), ("set_rel_prop", "Blues", "Reds", 4)]
+    two = one + band("Blues") + rel("MEMBER_OF", "Bram", "Blues") + rel("FACTION_REL", "Reds", "Blues", value=1, stance="neutral")
+    assert _ops(_phase(two, "bonds"))[2:] == [("set_rel_prop", "Reds", "Blues", 4), ("set_rel_prop", "Reds", "Blues", "friendly")]
+    fresh = one + band("Blues") + rel("MEMBER_OF", "Bram", "Blues")
+    assert _ops(_phase(fresh, "bonds"))[2:] == [("link", "Reds", "Blues", "friendly")]
 
 
 def test_falling_out_breaks_the_bond_and_empties_the_band():
-    facts = (person("Ash") + person("Bram") + person("Cole") + node("Alliance", "Reds")
+    facts = (person("Ash") + person("Bram") + person("Cole") + band("Reds")
              + rel("ALLY", "Ash", "Bram") + rel("FEELS", "Ash", "Bram", value=-1)
              + rel("MEMBER_OF", "Ash", "Reds") + rel("MEMBER_OF", "Bram", "Reds") + rel("FEELS", "Bram", "Ash", value=2))
     assert _ops(_phase(facts, "bonds")) == [("unlink", "Ash", "Bram", None)]
     assert _ops(_phase(facts, "leave")) == [("unlink", "Ash", "Reds", None)], "Ash no longer likes the band"
-    lonely = person("Ash") + node("Alliance", "Reds") + rel("MEMBER_OF", "Ash", "Reds")
-    assert _ops(_phase(lonely, "dissolve")) == [("delete_entity", "Reds", None, None)]
+    lonely = person("Ash") + band("Reds") + rel("MEMBER_OF", "Ash", "Reds")
+    assert _ops(_phase(lonely, "dissolve"))[:2] == [("set_prop", "Reds", None, "dissolved"), ("set_prop", "Reds", None, 26.0)]
+    assert all(e["op"] == "set_prop" for e in _phase(lonely, "dissolve")), "bands are informal: no chronicle"
+    gang = person("Ash") + node("Faction", "Axemen", kind="gang") + rel("MEMBER_OF", "Ash", "Axemen")
+    assert _phase(gang, "dissolve") == [], "a one-man gang is still a gang"
 
 
 def test_bands_feel_about_each_other_like_their_members_do():
-    facts = (person("Ash") + person("Bram") + node("Alliance", "Reds") + node("Alliance", "Blues")
+    facts = (person("Ash") + person("Bram") + band("Reds") + band("Blues")
              + rel("MEMBER_OF", "Ash", "Reds") + rel("MEMBER_OF", "Bram", "Blues")
              + rel("FEELS", "Ash", "Bram", value=-7) + rel("FEELS", "Bram", "Ash", value=-6))
-    assert _ops(_phase(facts, "stance")) == [("set_rel_prop", "Blues", "Reds", -7), ("set_rel_prop", "Reds", "Blues", -7)]
-    at_war = facts + rel("STANCE", "Reds", "Blues", value=-7)
-    assert answers(at_war, "x", "alliances_at_war('Ash', 'Bram')") == ["x"]
-    assert answers(at_war, "x", "alliances_at_war('Ash', 'Ash')") == []
+    assert _ops(_phase(facts, "mood")) == [("link", "Blues", "Reds", "hostile")]
+    at_war = facts + rel("FACTION_REL", "Reds", "Blues", value=-7, stance="hostile")
+    assert _ops(_phase(at_war, "mood")) == [("set_rel_prop", "Reds", "Blues", -7), ("set_rel_prop", "Reds", "Blues", "hostile")]
+    assert answers(at_war, "x", "at_war('Ash', 'Bram')") == ["x"]
+    assert answers(at_war, "x", "at_war('Ash', 'Ash')") == []
+    cool = (person("Ash") + person("Bram") + band("Reds") + band("Blues") + rel("MEMBER_OF", "Ash", "Reds")
+            + rel("MEMBER_OF", "Bram", "Blues") + rel("FACTION_REL", "Reds", "Blues", value=-7, stance="hostile"))
+    assert why(cool, "Ash", "Bram") == "war", "bands feud: members of a hostile band are enemies"
 
 
 def test_proposing_an_alliance_is_just_the_content_action(camp):
@@ -356,8 +376,8 @@ def test_proposing_an_alliance_is_just_the_content_action(camp):
     ok, msg = propose_alliance(camp, "Reed", "Sage")
     assert ok and are_allies(camp, "Reed", "Sage") and are_allies(camp, "Sage", "Reed")
     assert feeling(camp, "Sage", "Reed") == 6
-    band = camp.run_query("MATCH (p:Person)-[:MEMBER_OF]->(g:Alliance) RETURN g.name AS g, collect(p.name) AS who")
-    assert band and band[0]["g"] == "Reed's Band" and sorted(band[0]["who"]) == ["Reed", "Sage"]
+    got = camp.run_query("MATCH (p:Person)-[:MEMBER_OF]->(g:Faction {kind: 'band'}) RETURN g.name AS g, collect(p.name) AS who")
+    assert got and got[0]["g"] == "Reed's Band" and sorted(got[0]["who"]) == ["Reed", "Sage"]
 
 
 def test_time_turns_friends_into_a_band_in_the_real_world(camp):
@@ -368,8 +388,8 @@ def test_time_turns_friends_into_a_band_in_the_real_world(camp):
         "MERGE (a)-[r:FEELS]->(b) SET r.value = 8 MERGE (b)-[s:FEELS]->(a) SET s.value = 8")
     p = const("decay_every")
     tick(camp, p - 1.0, p + 1.0)
-    rows = camp.run_query("MATCH (:Person {name: 'Sage'})-[:MEMBER_OF]->(g:Alliance)<-[:MEMBER_OF]-(:Person {name: 'Reed'}) "
-                          "RETURN g.name AS g")
+    rows = camp.run_query("MATCH (:Person {name: 'Sage'})-[:MEMBER_OF]->(g:Faction {kind: 'band'})"
+                          "<-[:MEMBER_OF]-(:Person {name: 'Reed'}) RETURN g.name AS g")
     assert rows, "decayed to 7, still mutual ≥ 6: allies in one band"
 
 

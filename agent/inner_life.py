@@ -398,10 +398,10 @@ def settle_favors(world, memory=None) -> List[str]:
             except Exception:
                 pass
             try:
-                from factions import ripple
+                from rulebook import happen
 
-                # 兑现人情：求助者的家 / 帮派都会记住
-                notes.extend(ripple(world, helper, giver, 2.0, why=f"kept a promise to {giver}"))
+                # 兑现人情：求助者的家 / 帮派都会记住（规则 after(deed(...))）
+                notes.extend(happen(world, "deed", helper, giver, 2.0, f"kept a promise to {giver}").get("notes") or [])
             except Exception:
                 pass
         if memory is not None and giver:

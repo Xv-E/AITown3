@@ -1,5 +1,5 @@
 """
-世界系统 — 昼夜时钟 + 通用物品脚本 tick + 势力演化（无玩法特判）。
+世界系统 — 昼夜时钟 + 通用物品脚本 tick（无玩法特判）。
 """
 
 from __future__ import annotations
@@ -25,26 +25,7 @@ def tick_world_systems(world: "Neo4jWorld", dt: float, sim_time: float, *, memor
     report["events"].extend(scripts.get("events") or [])
     report["alerts"] = scripts.get("alerts") or []
     report["respawned"] = scripts.get("spawned") or []
-    # 势力演化：到点结算；大事作为公告进新闻，NPC 会因此重新决策
-    try:
-        from faction_sim import maybe_tick
-
-        fac = maybe_tick(world, sim_time, memory=memory) or {}
-    except Exception:
-        fac = {}
-    report["factions"] = fac.get("events") or []
-    # 街头经济：保护费累计；每天结算拖欠、工钱、房租
-    try:
-        from street_economy import maybe_tick as economy_tick
-
-        econ = economy_tick(world, sim_time, memory=memory) or {}
-    except Exception:
-        econ = {}
-    report["factions"] += econ.get("events") or []
-    report["economy"] = econ.get("notes") or []
-    report["events"].extend(
-        {"type": "announce", "text": ev["text"], "source": "factions"} for ev in report["factions"] if ev.get("text")
-    )
+    # 群体演化、街头经济都是内容包规则的 tick（game_loop._rules_step），大事经 announce 进新闻
     report["clock"] = format_clock(sim_time)
     report["phase"] = phase
     report["night"] = night

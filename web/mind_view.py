@@ -178,9 +178,9 @@ def profile_view(world, name: str) -> Dict[str, Any]:
         if text:
             fields.append({"label": label, "value": text})
     try:
-        from factions import membership_summary
+        from group_views import summary
 
-        factions = membership_summary(world, name)
+        factions = summary(world, name)
     except Exception:  # noqa: BLE001
         factions = ""
     if factions:

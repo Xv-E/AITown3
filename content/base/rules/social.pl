@@ -2,6 +2,7 @@
 % =====================================================================
 % base 包：敌对与偷窃。
 %
+% 群体（谁和谁一伙、群体之间的立场）见 groups.pl。
 % 只通过引擎核心的读图谓词（node / prop / rel / rel_prop / now / assumed / sees）
 % 读世界，见 agent/rules_core.pl。这里定义的东西引擎都不认识，只会照着问：
 %   hostility(A, B, Why)    combat 问「A 为什么把 B 当敌人」
@@ -10,16 +11,14 @@
 %   label/2  explain/4      原因的标签和一句话解释
 % =====================================================================
 
-% 其他包可以接着加敌对原因、阵营、标签和解释（加在后面的原因优先级更低）
-:- multifile reason/3, hostile_faction/1.
-:- discontiguous reason/3, hostile_faction/1.
+% 其他包可以接着加敌对原因、标签和解释（加在后面的原因优先级更低）
+:- multifile reason/3.
+:- discontiguous reason/3.
 
 reads(label('Person')).
-reads(label('Alliance')).
 reads(rel('FEELS')).
 reads(rel('ALLY')).
 reads(rel('MEMBER_OF')).
-reads(rel('STANCE')).
 reads(rel('WITNESSED')).
 reads(rel('OWNS')).
 
@@ -30,11 +29,6 @@ reads(rel('OWNS')).
 const(combat_memory, 25.0).     % 模拟秒（两个游戏小时）：这么久之内打过你的人还是敌人
 const(theft_victim, -5).        % 失主亲眼看见被偷：好感
 const(theft_witness, -2).       % 旁观者看见偷窃：好感
-const(alliance_hostile, -5).    % 联盟之间的立场到这么低就是敌对
-
-hostile_faction(F) :-
-    memberchk(F, [monster, monsters, bandit, bandits, beast, beasts, undead, raider, raiders]).
-
 hatred_threshold(-6).
 
 % 好感的范围（与 relations.adjust / npc_knowledge 的取值范围一致）
@@ -49,11 +43,8 @@ person(P) :- node('Person', P).
 alive(P) :- person(P), \+ prop(P, dead, true), prop(P, hp, HP), HP > 0.
 player(P) :- once(( prop(P, is_player, true) ; prop(P, role, player) )).
 guard(P) :- prop(P, guard, true).
-faction(P, F) :- person(P), ( prop(P, faction, F0) -> F = F0 ; F = '' ).
 ally(A, B) :- rel('ALLY', A, B).
 owner(Item, O) :- rel('OWNS', O, Item).
-in_alliance(P, G) :- rel('MEMBER_OF', P, G), node('Alliance', G).
-stance(GA, GB, S) :- rel_prop('STANCE', GA, GB, value, S).
 recent(T) :- now(Now), const(combat_memory, M), Now - T =< M.
 
 % NPC 对玩家的好感就是信任值；其余看 FEELS 边，没有就是 0。推演里的 feel 效果叠加上去。
@@ -78,31 +69,31 @@ hostile(A, B, Why) :- A \== B, alive(A), alive(B), reason(A, B, Why).
 
 reason(A, B, attacked_me(T)) :- prop(A, attacked_by, B), prop(A, attacked_at, T), recent(T).
 reason(A, B, fighting(T))    :- prop(A, fighting, B), prop(A, fighting_at, T), recent(T).
-reason(A, B, faction(FA, FB)) :-
-    faction(A, FA), faction(B, FB), FA \== FB,
-    once(( hostile_faction(FA) ; hostile_faction(FB) )).
+% 见人就打的群体（狼群、强盗……见 groups.pl 的 attacks_on_sight）：对群体外的人，双方都是敌人
+reason(A, B, faction(G)) :- direct(A, G), has(G, attacks_on_sight), \+ in_group(B, G).
+reason(A, B, faction(G)) :- direct(B, G), has(G, attacks_on_sight), \+ in_group(A, G).
 reason(A, B, criminal(Crime, Victim, Item)) :-
     guard(A), rel('WITNESSED', A, B, Ps),
     pv(Ps, crime, Crime), pv(Ps, victim, Victim), pv(Ps, item, Item).
 reason(A, B, hatred(V)) :- feeling(A, B, V), hatred_threshold(H), V =< H.
+% A 的群体记仇（feud：一家人、朋友结的伙），又和 B 的群体敌对
 reason(A, B, war(GA, GB)) :-
-    in_alliance(A, GA), in_alliance(B, GB), GA \== GB,
-    stance(GA, GB, S), const(alliance_hostile, H), S =< H.
+    direct(A, GA), has(GA, feud), direct(B, GB), GA \== GB, stance(GA, GB, hostile).
 
 pv(Ps, K, V) :- ( memberchk(K-V0, Ps) -> V = V0 ; V = '' ).
 
 label(attacked_me(_), 'attacked me').
 label(fighting(_), fighting).
-label(faction(_, _), faction).
+label(faction(_), faction).
 label(criminal(_, _, _), criminal).
 label(hatred(_), hatred).
 label(war(_, _), war).
 
 explain(attacked_me(_), A, B, T) :- format(atom(T), "~w attacked ~w recently", [B, A]).
 explain(fighting(_), A, B, T) :- format(atom(T), "~w is in a fight with ~w", [A, B]).
-explain(faction(FA, FB), A, B, T) :-
-    side(FA, SA), side(FB, SB),
-    format(atom(T), "~w (~w) and ~w (~w) are on sides that fight on sight", [A, SA, B, SB]).
+explain(faction(G), A, B, T) :-
+    ( direct(A, G) -> Who = A ; Who = B ),
+    format(atom(T), "~w runs with ~w, who fight anyone outside their own on sight (~w vs ~w)", [Who, G, A, B]).
 explain(criminal(Crime, Victim, Item), A, B, T) :-
     (   Victim \== '', Item \== '' -> format(atom(W), "~w (~w's ~w)", [Crime, Victim, Item])
     ;   Victim \== '' -> format(atom(W), "~w against ~w", [Crime, Victim])
@@ -110,10 +101,7 @@ explain(criminal(Crime, Victim, Item), A, B, T) :-
     ),
     format(atom(T), "~w is a guard and saw ~w commit ~w", [A, B, W]).
 explain(hatred(V), A, B, T) :- format(atom(T), "~w hates ~w (feeling ~w)", [A, B, V]).
-explain(war(GA, GB), A, B, T) :- format(atom(T), "~w's alliance ~w is hostile to ~w's alliance ~w", [A, GA, B, GB]).
-
-side('', 'no faction') :- !.
-side(F, F).
+explain(war(GA, GB), A, B, T) :- format(atom(T), "~w's ~w is hostile to ~w's ~w", [A, GA, B, GB]).
 
 % ---------------------------------------------------------------------
 % 偷窃：拿走一件还活着的别人的东西，而且主人不当你是盟友

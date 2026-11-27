@@ -4,16 +4,15 @@
   (:Person)-[:FEELS {value, reason, at}]->(:Person)   a 对 b 的好感，-10..10
   (:Person)-[:ALLY {since}]->(:Person)                盟友（双向各一条）
   Person.follows = <leader>                            跟着 leader 走（组队）
-  (:Person)-[:MEMBER_OF]->(:Alliance {name, founded})  联盟：结盟的人自然聚成一伙
-  (:Alliance)-[:STANCE {value}]->(:Alliance)           联盟之间的关系，-10..10，
-                                                       = 两边成员互相好感的平均（每两小时重算）
+  (:Person)-[:MEMBER_OF]->(:Faction {kind: band})     结盟的人自然聚成一伙（群体，见 content/base/rules/groups.pl）
+  (:Faction)-[:FACTION_REL {stance, value}]-(:Faction) 两伙之间的立场 = 两边成员互相好感的平均（每两小时重算）
 
 NPC 对玩家的好感就是原来的 trust_toward_player（同一个数，不另记一份）。
 
 会改变好感的事：动作之后的（送礼、买卖、偷窃、打人……）都是内容包规则（content/base/rules/），
 经 feel op 走 adjust()；对话里的语气（LLM 给的 -1..+2）；东西被对方抢先拿走 -2。
 好感随时间回落、矛盾消退：规则 tick/1（content/base/rules/time.pl）。
-结盟 / 散伙 / 联盟成员与立场：规则（content/base/rules/alliances.pl）；这里只剩读图的小工具和界面文字。
+结盟 / 散伙 / 一伙人的成员与立场：规则（content/base/rules/group_life.pl）；这里只剩问规则的小工具和界面文字。
 """
 
 from __future__ import annotations
@@ -243,31 +242,25 @@ def consequences(world, actor: str, action: str, params: Dict[str, str], *, at: 
     return dict(rule_after(world, action, params, at=at) or {})
 
 
-# ----- 联盟（一伙人）-----
+# ----- 一伙人（mood_bound 的群体，如朋友结的伙）-----
 
 def alliance_of(world, name: str) -> str:
-    rows = world.run_query(
-        "MATCH (:Person {name: $n})-[:MEMBER_OF]->(a:Alliance) RETURN a.name AS a LIMIT 1", n=name
-    ) or []
-    return str(rows[0]["a"]) if rows else ""
+    from prolog_engine import atom
+    from rulebook import ask
+
+    rows = ask(world, "G", f"band_of({atom(name)}, G)")
+    return str(rows[0]) if rows else ""
 
 
 def members(world, alliance: str) -> List[str]:
-    rows = world.run_query(
-        "MATCH (p:Person)-[:MEMBER_OF]->(:Alliance {name: $a}) RETURN p.name AS n ORDER BY n", a=alliance
-    ) or []
-    return [r["n"] for r in rows]
+    from prolog_engine import atom
+    from rulebook import ask
 
-
-def stance(world, a: str, b: str) -> int:
-    rows = world.run_query(
-        "MATCH (:Alliance {name: $a})-[r:STANCE]->(:Alliance {name: $b}) RETURN coalesce(r.value, 0) AS v", a=a, b=b
-    ) or []
-    return int(rows[0]["v"]) if rows else 0
+    return sorted(str(p) for p in ask(world, "P", f"direct(P, {atom(alliance)})"))
 
 
 def stance_word(value: int) -> str:
-    """联盟之间的立场说成词（阈值是规则 stance_word/2，见 content/base/rules/alliances.pl）。"""
+    """两伙人之间的立场说成词（阈值是规则 stance_word/2，见 content/base/rules/group_life.pl）。"""
     from prolog_engine import atom
     from rulebook import pure
 
@@ -276,19 +269,16 @@ def stance_word(value: int) -> str:
 
 
 def alliances_view(world) -> List[Dict[str, Any]]:
-    """导演选项卡：每个联盟、成员、和别的联盟的关系。"""
-    out = []
-    names = [r["g"] for r in world.run_query("MATCH (g:Alliance) RETURN g.name AS g ORDER BY g") or []]
-    for g in names:
-        out.append({
-            "name": g,
-            "members": members(world, g),
-            "stances": [
-                {"other": o, "value": stance(world, g, o), "word": stance_word(stance(world, g, o))}
-                for o in names if o != g
-            ],
-        })
-    return out
+    """导演选项卡：每一伙人、成员、和别的伙的关系。"""
+    from rulebook import ask
+
+    rows = ask(world, "[G, Ms, Ss]",
+               "group(G), has(G, mood_bound), findall(P, direct(P, G), Ms), "
+               "findall([O, V, W], (group(O), O \\== G, has(O, mood_bound), group_rel(G, O, Ps), "
+               "kv(Ps, value, 0, V), kv(Ps, stance, neutral, W)), Ss)")
+    return [{"name": g, "members": sorted(ms),
+             "stances": [{"other": o, "value": int(v), "word": w} for o, v, w in ss]}
+            for g, ms, ss in sorted(rows)]
 
 
 def alliance_text(world, name: str) -> str:

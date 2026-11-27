@@ -850,21 +850,23 @@ def get_play_state(world) -> Dict[str, Any]:
 
     known_clues = _player_known_clues(world, name)
     try:
-        from factions import player_faction_summary
+        from group_views import cards
 
-        faction_rows = player_faction_summary(world, name)
+        faction_rows = cards(world, name)
     except Exception:
         faction_rows = []
     try:
-        from faction_sim import chronicle
+        from group_views import chronicle
 
         faction_chronicle = chronicle(world, 8)
     except Exception:
         faction_chronicle = []
     try:
-        from street_economy import street_summary
+        from prolog_engine import atom
+        from rulebook import ask
 
-        economy = street_summary(world, name)
+        panels = ask(world, "C", f"panel({atom(name)}, economy, C)")  # 内容包规则给的面板（如 streets 包）
+        economy = panels[0] if panels else {}
     except Exception:
         economy = {}
 

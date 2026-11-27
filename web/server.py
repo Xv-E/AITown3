@@ -244,8 +244,11 @@ def _note_player_action(me: str, action: str, target: str) -> None:
 def _player_consequences(world, action: str, params: Dict[str, str], message: str) -> str:
     """玩家做完任何动作：按内容包规则结算后果（relations.consequences），规则要告诉玩家的话接在后面。"""
     try:
+        from llm_service import get_web_memory
         from relations import consequences
+        from rulebook import use_memory
 
+        use_memory(get_web_memory())  # 规则的 remember 效果写进 NPC 的记忆
         actor = next(iter(params.values()), "")
         out = consequences(world, actor, action, params, at=get_world_simulator().sim_time) or {}
         for note in out.get("notes") or []:
@@ -400,62 +403,49 @@ class FactionJoinRequest(BaseModel):
     via: Optional[str] = None  # 向哪位在场成员开口；不填则自动找
 
 
-def _faction_call(fn_name: str, faction: str, **kwargs):
+def _group_event(event: str, faction: str, *args):
+    """玩家对某群体做的事（入会、退出）：交给内容包规则 after(event(...))，返回规则的 report。"""
     import sys as _sys
     agent_path = str(_AITOWN3 / "agent")
     if agent_path not in _sys.path:
         _sys.path.insert(0, agent_path)
-    import factions as _factions
     from llm_service import get_web_memory
+    from rulebook import happen, use_memory
 
     world = get_world()
     player = get_player(world)
     if player is None:
         raise HTTPException(status_code=404, detail="No player character in the current world")
-    fn = getattr(_factions, fn_name)
-    return fn(world, player["name"], faction, memory=get_web_memory(), **kwargs)
+    use_memory(get_web_memory())
+    out = happen(world, event, player["name"], faction, *args)
+    out.setdefault("faction", faction)
+    out.setdefault("notes", [])
+    return out
 
 
 @app.get("/api/factions")
 def api_factions():
-    """势力总览（客户端 Factions 面板）：每个势力的成员、地盘、关系、近况，以及玩家的身份 / 声望 / 能不能加入。"""
+    """群体总览（客户端 Factions 面板）：每个群体的成员、地盘、关系、近况，以及玩家的身份 / 声望 / 能不能加入。"""
     try:
         import sys as _sys
         agent_path = str(_AITOWN3 / "agent")
         if agent_path not in _sys.path:
             _sys.path.insert(0, agent_path)
-        import faction_sim
-        from factions import direct_members, player_faction_summary
+        from group_views import cards, chronicle
 
         world = get_world()
         player = get_player(world)
         name = player["name"] if player else ""
-        rows = player_faction_summary(world, name) if name else []
-        controls: Dict[str, List[str]] = {}
-        for r in world.run_query(
-            "MATCH (l:Location) WHERE l.controlled_by IS NOT NULL RETURN l.name AS l, l.controlled_by AS c"
-        ) or []:
-            controls.setdefault(r["c"], []).append(r["l"])
-        relations = faction_sim.relation_rows(world)
-        for f in rows:
-            fname = f["name"]
-            f["members"] = sorted(direct_members(world, fname), key=lambda m: -float(m.get("loyalty") or 0))
-            f["controls"] = sorted(controls.get(fname, []))
-            f["relations"] = [
-                {"with": r["b"] if r["a"] == fname else r["a"], "stance": r.get("stance"), "reason": r.get("reason") or ""}
-                for r in relations if fname in (r.get("a"), r.get("b"))
-            ]
-            f["events"] = faction_sim.recent_events(world, fname, 3)
-        return {"player": name, "factions": rows, "chronicle": faction_sim.chronicle(world, 8)}
+        return {"player": name, "factions": cards(world, name), "chronicle": chronicle(world, 8)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.post("/api/factions/{name}/join")
 def api_faction_join(name: str, req: FactionJoinRequest):
-    """玩家向在场成员申请加入势力：joined | trial_started | refused。"""
+    """玩家向在场成员申请加入群体：joined | trial_started | refused。"""
     try:
-        return _faction_call("request_join", name, via=(req.via or "").strip() or None)
+        return _group_event("ask_to_join", name, (req.via or "").strip())
     except HTTPException:
         raise
     except Exception as e:
@@ -465,7 +455,7 @@ def api_faction_join(name: str, req: FactionJoinRequest):
 @app.post("/api/factions/{name}/leave")
 def api_faction_leave(name: str):
     try:
-        return _faction_call("leave_faction", name)
+        return _group_event("leave_group", name)
     except HTTPException:
         raise
     except Exception as e:
@@ -474,13 +464,24 @@ def api_faction_leave(name: str):
 
 @app.post("/api/factions/tick")
 def api_faction_tick(ticks: int = 1):
-    """立刻推进势力历史若干轮（每轮 = FACTION_TICK_HOURS 游戏小时）。"""
+    """立刻推进群体历史若干轮（每轮 = 规则的 group_tick_hours 游戏小时），不等游戏时钟。"""
     try:
-        import faction_sim
+        import sys as _sys
+        agent_path = str(_AITOWN3 / "agent")
+        if agent_path not in _sys.path:
+            _sys.path.insert(0, agent_path)
+        from group_views import chronicle
         from llm_service import get_web_memory
+        from rulebook import ask, tick, use_memory
 
-        events = faction_sim.force_tick(get_world(), ticks=ticks, memory=get_web_memory())
-        return {"ok": True, "events": events, "chronicle": faction_sim.chronicle(get_world(), 12)}
+        world = get_world()
+        use_memory(get_web_memory())
+        period = float((ask(world, "P", "group_period(P)") or [75.0])[0])
+        now = float(get_world_simulator().sim_time)
+        events: List[Dict[str, Any]] = []
+        for i in range(max(1, min(20, int(ticks)))):
+            events += tick(world, now + period * i, now + period * (i + 1)).get("events") or []
+        return {"ok": True, "events": events, "chronicle": chronicle(world, 12)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
@@ -673,26 +674,7 @@ async def api_execute(req: ExecuteActionRequest):
                     reason = f"{reason} (favor kept: {'; '.join(settled)})"
             except Exception:
                 pass
-        faction_changes = []
-        if ok:
-            try:
-                import sys as _sys
-                agent_path = str(_AITOWN3 / "agent")
-                if agent_path not in _sys.path:
-                    _sys.path.insert(0, agent_path)
-                from factions import on_action
-                from llm_service import get_web_memory
-
-                faction_changes = on_action(world, capability, positional, memory=get_web_memory())
-                if faction_changes:
-                    reason = f"{reason} (factions: {'; '.join(faction_changes)})"
-                from street_economy import on_action as economy_action
-
-                money = economy_action(world, req.action, positional, memory=get_web_memory())
-                if money:
-                    reason = f"{reason} ({'; '.join(money)})"
-            except Exception:
-                pass
+        faction_changes: List[str] = []  # 群体、经济的后果都是规则的 note，已由 _player_consequences 接进 message
         interaction = None
         if ok and req.action == "interact":
             try:

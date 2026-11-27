@@ -73,7 +73,7 @@
     },
     {
       "op": "holds",
-      "goal": "\\+ alliances_at_war(@c, @buyer)",
+      "goal": "\\+ at_war(@c, @buyer)",
       "message": "@buyer won't trade with someone from a hostile alliance"
     }
   ],

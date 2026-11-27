@@ -144,7 +144,7 @@ def test_alliance_stances_have_words():
     import relations
 
     assert relations.stance_word(6) == "friendly" and relations.stance_word(-6) == "hostile"
-    assert relations.stance_word(-3) == "rivals" and relations.stance_word(0) == "neutral"
+    assert relations.stance_word(-3) == "rival" and relations.stance_word(0) == "neutral"
 
 
 def test_npcs_can_set_out_to_form_an_alliance():
@@ -155,7 +155,7 @@ def test_npcs_can_set_out_to_form_an_alliance():
     action = get_content().actions["propose_alliance"]
     assert any(r.get("op") == "holds" and "would_ally(@other, @c)" in r["goal"] for r in action["requires"])
     buy = get_content().actions["buy"]
-    assert any(r.get("op") == "holds" and "alliances_at_war" in r["goal"] for r in buy["requires"]), \
+    assert any(r.get("op") == "holds" and "at_war" in r["goal"] for r in buy["requires"]), \
         "no deals across hostile alliances"
 
 

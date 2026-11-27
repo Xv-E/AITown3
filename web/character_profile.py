@@ -18,9 +18,9 @@ PROFILE_FIELDS: Tuple[Tuple[str, str], ...] = (
 
 def _factions_text(world, name: str) -> str:
     try:
-        from factions import membership_summary
+        from group_views import summary
 
-        return membership_summary(world, name)
+        return summary(world, name)
     except Exception:
         return ""
 

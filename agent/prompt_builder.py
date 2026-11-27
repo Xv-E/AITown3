@@ -291,25 +291,6 @@ Respond with a JSON object:
             except Exception:
                 pass
             try:
-                from factions import faction_situation_text
-                from routine import people_at_location
-
-                loc = self._person_location(agent.name)
-                here = people_at_location(self.world, loc, exclude=agent.name) if loc else []
-                ftext = faction_situation_text(self.world, agent.name, here)
-                if ftext:
-                    lines.append(ftext)
-            except Exception:
-                pass
-            try:
-                from street_economy import economy_text
-
-                money = economy_text(self.world, agent.name)
-                if money:
-                    lines.append(money)
-            except Exception:
-                pass
-            try:
                 from rulebook import context
 
                 lines.extend(context(self.world, agent.name))  # 内容包规则加的处境（context/2）

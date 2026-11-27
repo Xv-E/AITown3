@@ -366,7 +366,7 @@ class RumorSpec:
         )
 
 
-FACTION_KINDS = ("family", "gang", "guild", "crew", "order", "authority", "town", "other")
+# 种类是内容包定的（content/base/rules/groups.pl 的 kind_traits/2：family、gang、town、band、beast……），这里不限
 FACTION_SCALES = ("small", "medium", "large")
 FACTION_STANCES = ("allied", "friendly", "neutral", "rival", "hostile")
 
@@ -380,7 +380,7 @@ def _clamp(v: Any, lo: float, hi: float, default: float) -> float:
 
 @dataclass
 class FactionSpec:
-    """势力：家庭 / 帮派 / 行会 / 城镇……大小不一，可嵌套（parent）。"""
+    """群体：一家人 / 帮派 / 行会 / 城镇……大小不一，可嵌套（parent）。种类的默认特性由内容包规则给出。"""
 
     name: str
     kind: str = "other"
@@ -401,15 +401,15 @@ class FactionSpec:
     trial: Dict[str, str] = field(default_factory=dict)
     # 势力范围：{地点: 控制力 0..10}（列表写法 = 每处 5）
     territory: Dict[str, float] = field(default_factory=dict)
-    # 由剧情来的特性：[{id, why}]，id 取自 agent/faction_sim.TRAITS
+    # 由剧情来的特性：[{id, why}]，id 取自内容包规则的 trait_text/2（content/base/rules/groups.pl）
     traits: List[Dict[str, str]] = field(default_factory=list)
     # 首领每天发给每个成员的工钱（街头经济，单位：cash 张数）
     wage: int = 0
 
     def normalized(self) -> "FactionSpec":
-        kind = (self.kind or "other").strip().lower()
-        if kind not in FACTION_KINDS:
-            kind = "other"
+        import re as _re
+
+        kind = _re.sub(r"[^a-z0-9_]+", "_", (self.kind or "other").strip().lower()).strip("_") or "other"
         scale = (self.scale or "").strip().lower()
         if scale not in FACTION_SCALES:
             scale = {"family": "small", "gang": "small", "crew": "small", "town": "large"}.get(kind, "medium")

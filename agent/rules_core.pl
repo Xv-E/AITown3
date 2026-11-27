@@ -34,6 +34,9 @@
 %                                      goal / target / reason / priority / source
 %   context(Me, Text)                  给 Me 的提示词加一行（处境）
 %   context(Me, Other, Text)           Me 面对 Other 时提示词加一行（关系、身份）
+%   panel(Viewer, Name, Card)          界面上的一块面板（dict，原样交给客户端），如 economy
+%   plea(Dict)                         剧情素材：谁有难处、要什么（who / need / severity / title / why / arc /
+%                                      stakes / note / people / reward），Storyteller 安排他去找玩家求助
 %   const(Name, Value)                 引擎在别处也要用的常量
 %
 % 效果里引擎认得的 op 除了动作 JSON 那些，还有：
@@ -47,9 +50,9 @@
 :- use_module(library(lists)).
 
 :- dynamic g_node/2, g_prop/3, g_rel/4, g_now/1, g_tick/2, g_sees/2, g_day_length/1, busy_since/2, hyp/1.
-:- multifile reads/1, after/2, tick/1, tick/2, tick_phase/2, tick_period/1, forecast/2, react/2, want/2, context/2, context/3, label/2, explain/4, const/2.
-:- dynamic reads/1, after/2, tick/1, tick/2, tick_phase/2, tick_period/1, forecast/2, react/2, want/2, context/2, context/3, label/2, explain/4, const/2.
-:- discontiguous reads/1, after/2, tick/1, tick/2, tick_phase/2, tick_period/1, forecast/2, react/2, want/2, context/2, context/3, label/2, explain/4, const/2.
+:- multifile reads/1, after/2, tick/1, tick/2, tick_phase/2, tick_period/1, forecast/2, react/2, want/2, context/2, context/3, panel/3, plea/1, label/2, explain/4, const/2.
+:- dynamic reads/1, after/2, tick/1, tick/2, tick_phase/2, tick_period/1, forecast/2, react/2, want/2, context/2, context/3, panel/3, plea/1, label/2, explain/4, const/2.
+:- discontiguous reads/1, after/2, tick/1, tick/2, tick_phase/2, tick_period/1, forecast/2, react/2, want/2, context/2, context/3, panel/3, plea/1, label/2, explain/4, const/2.
 
 load_facts(Facts) :-
     retractall(g_node(_, _)), retractall(g_prop(_, _, _)), retractall(g_rel(_, _, _, _)),

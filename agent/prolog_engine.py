@@ -58,15 +58,17 @@ except BaseException as e:  # noqa: BLE001  没装 SWI-Prolog / pyswip
 
 
 def atom(value: Any) -> str:
-    """Python 值 → Prolog 字面量：数字、布尔（true/false）、列表原样，其余一律当带引号的原子。"""
+    """Python 值 → Prolog 字面量：数字、布尔（true/false）、列表、dict（SWI dict）原样，其余一律当带引号的原子。"""
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, (int, float)):
         return f"({value!r})" if value < 0 else repr(value)  # 括起来：'k'-(-9) 而不是 'k'--9
     if isinstance(value, (list, tuple)):
         return "[" + ", ".join(atom(v) for v in value) + "]"
+    if isinstance(value, dict):
+        return "_{" + ", ".join(f"{atom(str(k))}: {atom(v)}" for k, v in value.items()) + "}"
     text = "" if value is None else str(value)
-    return "'" + text.replace("\\", "\\\\").replace("'", "\\'") + "'"
+    return "'" + text.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n") + "'"
 
 
 def fact(name: str, *args: Any) -> str:
@@ -104,6 +106,7 @@ class _Engine:
             return
         self._ready.set()
         loaded: Sequence[str] = ()
+        current: Optional[tuple] = None  # 上一次灌进去的事实：一样就不重灌（一拍里各角色读的是同一个世界）
         while True:
             files, facts, goal, reply, job_callbacks = self._jobs.get()
             if goal is None:  # 退出：在本线程里收尾（否则退出时 SWI 会抱怨停不掉线程）
@@ -122,11 +125,14 @@ class _Engine:
                 if tuple(files) != tuple(loaded):
                     for path in loaded:
                         list(prolog.query(f"unload_file({atom(path)})"))
-                    loaded = ()
+                    loaded, current = (), None
                     for path in files:
                         prolog.consult(path)
                     loaded = tuple(files)
-                list(prolog.query(f"load_facts([{', '.join(facts)}])"))
+                if facts != current:
+                    current = None
+                    list(prolog.query(f"load_facts([{', '.join(facts)}])"))
+                    current = facts
                 reply.put((True, list(prolog.query(goal))))
             except BaseException as e:  # noqa: BLE001
                 reply.put((False, e))
@@ -134,7 +140,7 @@ class _Engine:
     def solve(self, files: Sequence[str], facts: Iterable[str], goal: str,
               callbacks: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         reply: "queue.Queue[tuple]" = queue.Queue(maxsize=1)
-        self._jobs.put((tuple(files), list(facts), goal, reply, callbacks))
+        self._jobs.put((tuple(files), tuple(facts), goal, reply, callbacks))
         ok, value = reply.get()
         if not ok:
             raise value

@@ -16,7 +16,6 @@ import re
 from typing import Callable, Any, Dict, List, Optional
 
 from agent_profile import AgentProfile
-from factions import faction_block, pair_view, ripple
 from inner_life import (
     DIALOGUE_CRAFT,
     apply_mood,
@@ -394,27 +393,22 @@ def _heart_blocks(world, me: str, other: str, knowledge=None) -> tuple[str, str]
         return "", ""
     view = None
     try:
-        view = pair_view(world, me, other)
+        from group_views import attitude
+
+        view = attitude(world, me, other)
     except Exception as e:
-        logger.debug("faction view failed: %s", e)
+        logger.debug("group attitude failed: %s", e)
     try:
         inner = load_inner_life(world, me)
         rels = graph_relations(world, me, other)
-        # 亲近度 = 个人信任（仅对玩家）+ 势力倾向
-        trust = view.score if view is not None and view.reasons else None
+        # 亲近度 = 个人信任（仅对玩家）+ 群体倾向
+        trust = view["score"] if view is not None and view["reasons"] else None
         if knowledge is not None and _is_player(world, other):
             trust = int(getattr(knowledge, "trust_toward_player", 0) or 0) + (trust or 0)
         heart = inner_life_block(inner, listener=other, rels=rels, trust=trust)
     except Exception as e:
         logger.debug("inner life block failed: %s", e)
         heart = ""
-    try:
-        fblock = faction_block(world, me, other, view=view) if view is not None else ""
-    except Exception as e:
-        logger.debug("faction block failed: %s", e)
-        fblock = ""
-    if fblock:
-        heart = f"{heart}\n{fblock}" if heart else fblock
     try:
         from combat import why_hostile
 
@@ -425,14 +419,6 @@ def _heart_blocks(world, me: str, other: str, knowledge=None) -> tuple[str, str]
     if enemy:
         line = f"You see {other} as an enemy: {enemy['text']}."
         heart = f"{heart}\n{line}" if heart else line
-    try:
-        from street_economy import economy_text
-
-        money = economy_text(world, me)
-    except Exception:
-        money = ""
-    if money:
-        heart = f"{heart}\n{money}" if heart else money
     try:
         from rulebook import context
 
@@ -1374,9 +1360,11 @@ def _settle_trust(world, speaker_a: str, speaker_b: str, result: Dict[str, Any],
     result["trust"] = new_trust
     result["trust_delta"] = delta if result.get("source") == "llm" else 0
     if world is not None and raw_delta and result.get("source") == "llm":
-        # 谈话结果同时传到 speaker_b 所在势力对 speaker_a 的声望
+        # 谈话结果同时传到 speaker_b 所在群体对 speaker_a 的声望（规则 after(deed(...))）
         try:
-            notes = ripple(world, speaker_a, speaker_b, raw_delta * 0.5, why=f"talk with {speaker_b}")
+            from rulebook import happen
+
+            notes = happen(world, "deed", speaker_a, speaker_b, raw_delta * 0.5, f"talk with {speaker_b}").get("notes")
             if notes:
                 result["faction_changes"] = notes
         except Exception as e:

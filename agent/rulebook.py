@@ -62,8 +62,24 @@ def _value(v: Any) -> Optional[str]:
     return atom(v)
 
 
+# 一拍之内（world.read_cache() 作用域里）世界没被写过：直接用上次拼好的事实
+_facts_memo: Dict[Any, List[str]] = {}
+
+
 def world_facts(world, files: Tuple[str, ...], *, at: Optional[float] = None,
                 sees: Iterable[Tuple[str, str]] = (), extra: Iterable[str] = ()) -> List[str]:
+    gen = getattr(world, "_cache_gen", None)
+    key = (id(world), gen, files, at) if gen is not None and getattr(world, "_cache_depth", 0) else None
+    base = _facts_memo.get(key) if key is not None else None
+    if base is None:
+        base = _graph_facts(world, files, at)
+        if key is not None:
+            _facts_memo.clear()
+            _facts_memo[key] = base
+    return base + [fact("g_sees", w, p) for w, p in sees] + list(extra)
+
+
+def _graph_facts(world, files: Tuple[str, ...], at: Optional[float]) -> List[str]:
     labels, partial, rels = _reads(files)
     facts: List[str] = []
     for lab, keys in partial.items():
@@ -103,8 +119,6 @@ def world_facts(world, files: Tuple[str, ...], *, at: Optional[float] = None,
     if at is not None:
         facts.append(fact("g_now", float(at)))
     facts.append(_day_fact())
-    facts += [fact("g_sees", w, p) for w, p in sees]
-    facts += list(extra)
     return facts
 
 
@@ -202,9 +216,13 @@ def tick(world, prev: float, now: float) -> Dict[str, Any]:
         ends = marks[:-1] + [now]
     else:
         starts, ends = [prev], [now]
+    from contextlib import nullcontext
+
     out: Dict[str, Any] = {}
-    for a, b in zip(starts, ends):
-        _merge(out, _tick_once(world, a, b))
+    read_cache = getattr(world, "read_cache", None)
+    with read_cache() if read_cache else nullcontext():  # 没有写的步骤之间复用同一份事实
+        for a, b in zip(starts, ends):
+            _merge(out, _tick_once(world, a, b))
     return out
 
 

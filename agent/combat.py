@@ -5,10 +5,10 @@
 （base 包见 content/base/rules/social.pl），原因、标签和解释都由规则给出。base 包的原因（按优先级）：
   · "attacked me"   b 刚打过 a（规则常量 combat_memory 之内）
   · "fighting"      a 刚打过 b，还在打
-  · "faction"       两人阵营不同，而且有一方是见人就打的阵营（social.pl 的 hostile_faction，比如 monster / bandit）
+  · "faction"       一方属于见人就打的群体（特性 attacks_on_sight，如狼群、强盗），另一方不在其中
   · "criminal"      a 是守卫（Person.guard），亲眼看见 b 偷过东西 / 无故打人
   · "hatred"        a 对 b 的好感 ≤ 仇恨线（social.pl 的 hatred_threshold）
-  · "war"           两人的联盟互相敌对（规则常量 alliance_hostile）
+  · "war"           a 的群体记仇（特性 feud：一家人、朋友结的伙），又和 b 的群体敌对
 前四种会主动动手；后两种只在自己明显更强时才动手，否则躲着走（content/base/rules/react.pl）。
 
 一击（strike）：伤害 = 力量（power_level）+ 手上最好的武器（Item.damage）- 对方的护甲（Item.armor），至少 1。

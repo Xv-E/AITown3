@@ -16,10 +16,9 @@ const(brave_ratio, 1.3).    % 只是讨厌（不是被打）的话，强出这�
 % 会主动动手的原因
 aggressive(attacked_me(_)).
 aggressive(fighting(_)).
-aggressive(faction(_, _)).
+aggressive(faction(_)).
 aggressive(criminal(_, _, _)).
 
-location(P, L) :- rel('LOCATED_AT', P, L), !.
 neighbour(A, B) :- rel('ADJACENT_TO', A, B).
 hp(P, H) :- ( prop(P, hp, H0) -> H = H0 ; H = 0 ).
 power(P, X) :- ( prop(P, power_level, X0) -> X = X0 ; X = 1 ).

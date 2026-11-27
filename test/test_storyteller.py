@@ -202,12 +202,16 @@ def test_story_context_only_asks_the_person_the_errand_is_for():
     assert item is None and text == "On your mind lately: The Dragons want their money."
 
 
-def test_template_turns_debts_and_faction_news_into_conversations():
-    owed = dict(STREET, owed=[{"owner": "BigMa", "business": "MaCart", "faction": "SilverDragons", "dues": 6.0, "fee": 2.0}])
-    plan = Storyteller(interval=50.0, use_llm=False).compose_template(owed)
+def test_template_turns_pleas_and_faction_news_into_conversations():
+    # 有难处的人来自内容包规则 plea/1（如 streets 包：欠了保护费），这里直接给
+    plea = {"who": "BigMa", "need": "cash", "severity": 3.0, "title": "BigMa owes SilverDragons",
+            "why": "SilverDragons want the $6 I owe for MaCart, and I can't pay", "arc": "a squeeze",
+            "stakes": "they smash MaCart", "note": "BigMa is $6 behind", "people": ["BigMa", "SilverDragons"],
+            "reward": "I'll owe you"}
+    plan = Storyteller(interval=50.0, use_llm=False).compose_template(dict(STREET, pleas=[plea]))
     beat = plan["beats"][0]
     assert beat["op"] == "ask" and beat["who"] == "BigMa" and beat["item"] == "cash"
-    assert plan["threads"][0]["id"] == beat["thread"]
+    assert plan["threads"][0]["id"] == beat["thread"] and plan["threads"][0]["title"] == "BigMa owes SilverDragons"
 
     news = dict(STREET, faction_news=[{"t": 90.0, "day": 3, "text": "SilverDragons smashed up BigMa's cart."}])
     plan = Storyteller(interval=50.0, use_llm=False).compose_template(news)

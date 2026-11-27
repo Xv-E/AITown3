@@ -372,7 +372,7 @@ def apply_op(world, op_spec: Dict[str, Any], ctx: Dict[str, str]) -> None:
         return
 
     if op == "add_rel_prop":
-        # 关系上的数值属性 +delta（可选 min / max），如好感回落：FEELS.value -1
+        # 关系上的数值属性 +delta（可选 min / max），如好感回落 FEELS.value -1；关系没有就先建一条（如第一次有了声望）
         import re
 
         a = resolve_token(op_spec["a"], ctx)
@@ -384,7 +384,8 @@ def apply_op(world, op_spec: Dict[str, Any], ctx: Dict[str, str]) -> None:
             raise ValueError(f"bad property name: {prop}")
         world.run_query(
             f"""
-            MATCH (a:{a_label} {{name: $a}})-[r:{rel}]->(b:{b_label} {{name: $b}})
+            MATCH (a:{a_label} {{name: $a}}), (b:{b_label} {{name: $b}})
+            MERGE (a)-[r:{rel}]->(b)
             WITH r, coalesce(r.`{prop}`, 0) + $d AS v
             SET r.`{prop}` = CASE WHEN $lo IS NOT NULL AND v < $lo THEN $lo
                                   WHEN $hi IS NOT NULL AND v > $hi THEN $hi ELSE v END

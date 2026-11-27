@@ -104,13 +104,36 @@ def _build_factions(world: "Neo4jWorld", factions) -> None:
             world.link_entities(person, "Person", f.name, "Faction", "STANDING", value=float(value))
         for loc, strength in (getattr(f, "territory", None) or {}).items():
             world.link_entities(f.name, "Faction", loc, "Location", "CONTROLS", strength=float(strength))
-    # 每处地点的当前控制者（最强的一方），供界面与 prompt 快速读取
+    _sides_as_groups(world)
+    # 每处地点的当前控制者（最强的一方）等：交给内容包规则 after(world_built, E)
     try:
-        from faction_sim import refresh_control
+        from rulebook import happen
 
-        refresh_control(world)
+        happen(world, "world_built")
     except Exception:
-        logger.debug("refresh_control skipped", exc_info=True)
+        logger.debug("world_built rules skipped", exc_info=True)
+
+
+def _sides_as_groups(world: "Neo4jWorld") -> None:
+    """人物身上的 faction 写的是一个群体的名字：有这个群体就成为成员；没有（"beast"、"bandit"……）
+    就建一个以它为种类的群体（种类的默认特性见 content/base/rules/groups.pl，如见人就打）。"""
+    rows = world.run_query(
+        """
+        MATCH (p:Person) WHERE coalesce(p.faction, '') <> ''
+        OPTIONAL MATCH (f:Faction {name: p.faction})
+        RETURN p.name AS p, p.faction AS side, f IS NOT NULL AS known
+        """
+    ) or []
+    for r in rows:
+        if not r["known"]:
+            world.run_query(
+                "MERGE (f:Faction {name: $f}) ON CREATE SET f.kind = toLower($f), f.scale = 'small', f.status = 'active'",
+                f=r["side"],
+            )
+        world.run_query(
+            "MATCH (p:Person {name: $p}), (f:Faction {name: $f}) MERGE (p)-[:MEMBER_OF]->(f)",
+            p=r["p"], f=r["side"],
+        )
 
 
 def build_from_blueprint(

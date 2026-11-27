@@ -191,7 +191,8 @@ def test_guards_go_after_criminals_and_monsters_attack_outsiders(camp):
     assert hostility(camp, "Rowan", "Observer") == "criminal"
     assert react(camp, "Rowan", at=0.0)["target"] == "Observer"
 
-    camp.run_query("MATCH (p:Person {name: 'Reed'}) SET p.faction = 'monster'")
+    camp.run_query("MATCH (p:Person {name: 'Reed'}) MERGE (f:Faction {name: 'Wolves'}) SET f.kind = 'monster' "
+                   "MERGE (p)-[:MEMBER_OF]->(f)")
     assert hostility(camp, "Reed", "Sage") == "faction" and hostility(camp, "Sage", "Reed") == "faction"
 
 

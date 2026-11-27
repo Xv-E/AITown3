@@ -390,24 +390,21 @@ class Storyteller:
                 }],
             }
 
-        # 2) 欠了保护费：摊主去找玩家借钱（会落成人情任务）
-        cash = favor_items.get("cash")
-        for o in digest.get("owed") or []:
-            owner = o.get("owner")
-            if not (cash and player and owner in talkers and owner not in busy):
+        # 2) 有难处的人（内容包规则 plea/1，如欠了保护费）：去找玩家求助（会落成人情任务）
+        for o in digest.get("pleas") or []:
+            who, item = o.get("who"), favor_items.get(str(o.get("need") or "").lower())
+            if not (item and player and who in talkers and who not in busy):
                 continue
-            title = f"{owner} owes {o['faction']}"
+            title = str(o.get("title") or f"{who} needs {item}")
             tid = thread_id(title)
             if (self.thread(tid) or {}).get("status") == "open" and self._template_turn % 3:
                 continue  # 这条线已经开着了：别每拍都催
-            why = f"{o['faction']} want the ${o['dues']:.0f} I owe for {o['business']}, and I can't pay"
             return {
-                "arc": f"{o['faction']} are squeezing {owner}; someone has to help or it ends badly.",
-                "threads": [{"id": tid, "title": title, "people": [owner, o["faction"], player], "status": "open",
-                             "stakes": f"{o['faction']} smash {o['business']} if {owner} can't pay",
-                             "note": f"{owner} is ${o['dues']:.0f} behind with {o['faction']}."}],
-                "beats": [{"op": "ask", "who": owner, "item": cash, "why": why,
-                           "reward": "I'll owe you, and I don't forget", "thread": tid}],
+                "arc": str(o.get("arc") or ""),
+                "threads": [{"id": tid, "title": title, "people": list(o.get("people") or [who]) + [player],
+                             "status": "open", "stakes": str(o.get("stakes") or ""), "note": str(o.get("note") or "")}],
+                "beats": [{"op": "ask", "who": who, "item": item, "why": str(o.get("why") or ""),
+                           "reward": str(o.get("reward") or ""), "thread": tid}],
             }
 
         # 3) 刚发生的势力大事：被卷进去的人去找玩家说
@@ -661,30 +658,22 @@ class Storyteller:
 
 def _world_story_signals(world, npcs: List[str], now: float) -> Dict[str, Any]:
     """剧情素材：势力大事、欠的保护费、谁身无分文、心愿、人情、强烈的好恶、谁正带着差事。每样单独兜底。"""
-    out: Dict[str, Any] = {"faction_news": [], "owed": [], "broke": [], "hearts": [], "favors": [],
+    out: Dict[str, Any] = {"faction_news": [], "pleas": [], "hearts": [], "favors": [],
                            "feelings": [], "errands": [], "favor_items": []}
     try:
-        from faction_sim import recent_events
+        from group_views import chronicle
 
         out["faction_news"] = [
             {"t": e.get("t"), "day": e.get("day"), "kind": e.get("kind"), "text": e.get("text")}
-            for e in reversed(recent_events(world, None, 6))
+            for e in reversed(chronicle(world, 6))
         ]
     except Exception:  # noqa: BLE001
         pass
     try:
-        from street_economy import businesses, cash_of, has_economy
+        from rulebook import ask
 
-        if has_economy(world):
-            for biz in businesses(world):
-                fee = float(biz.get("fee") or 0)
-                for r in biz.get("rackets") or []:
-                    if fee and float(r.get("dues") or 0) >= fee:
-                        out["owed"].append({"owner": biz.get("owner"), "business": biz.get("name"),
-                                            "location": biz.get("location"), "faction": r.get("faction"),
-                                            "dues": float(r.get("dues") or 0), "fee": fee})
-            out["owed"].sort(key=lambda o: -o["dues"] / max(1.0, o["fee"]))
-            out["broke"] = [n for n in npcs if cash_of(world, n) == 0][:6]
+        pleas = [p for p in ask(world, "P", "plea(P)") if isinstance(p, dict)]
+        out["pleas"] = sorted(pleas, key=lambda p: -float(p.get("severity") or 0))[:8]
     except Exception:  # noqa: BLE001
         pass
     try:
@@ -757,7 +746,7 @@ def build_prompt(d: Dict[str, Any]) -> str:
     talks = lines(d.get("talks"), lambda c: f"- {c['a']} -> {c['b']} at {c.get('location')}: " + " / ".join(c.get("lines") or []),
                   "- (nobody has talked yet)")
     news = lines(d.get("faction_news"), lambda e: f"- day {e.get('day')}: {e.get('text')}")
-    owed = lines(d.get("owed"), lambda o: f"- {o['owner']}'s {o['business']} owes {o['faction']} ${o['dues']:.0f} (fee ${o['fee']:.0f}/day)")
+    pleas = lines(d.get("pleas"), lambda o: f"- {o.get('note') or o.get('title')} (needs {o.get('need')})")
     hearts = lines(d.get("hearts"), lambda h: f"- {h['name']}: longs for {h.get('desire') or '?'}; fears {h.get('fear') or '?'}")
     favors = lines(d.get("favors"), lambda f: f"- {f['giver']} asked {f['helper']} for {f['item']} ({f['state']}): {f.get('why')}"
                    + (f" [thread {f['thread']}]" if f.get("thread") else ""))
@@ -770,7 +759,6 @@ def build_prompt(d: Dict[str, Any]) -> str:
     chronicle = "\n".join(f"- {c}" for c in d.get("chronicle") or [] if c) or "- (nothing yet)"
     recent = lines(d.get("recent_beats"), lambda b: f"- {b.get('op')}: {b.get('text') or b.get('topic') or b}")
     player = d.get("player") or "the player"
-    broke = ", ".join(d.get("broke") or []) or "nobody"
     favor_items = ", ".join(d.get("favor_items") or []) or "(nothing)"
     return f"""Time: {d['clock']}
 Story so far: {d.get('arc') or '(just beginning)'}
@@ -791,8 +779,8 @@ The player is {player}.
 === Faction news ===
 {news}
 
-=== Money on the street (debts, who is broke: {broke}) ===
-{owed}
+=== Who is in trouble and what they need ===
+{pleas}
 
 === What people long for and fear ===
 {hearts}
