@@ -128,7 +128,8 @@ Worlds may declare factions of any size — a family, a gang, a guild, the town 
 ]
 ```
 
-- `kind`: family | gang | guild | crew | order | authority | town | other; `scale`: small | medium | large; `stance`: allied | friendly | neutral | rival | hostile.
+- `kind` is any word; content rules give each kind its default traits (`content/base/rules/groups.pl`: family, town, guild, crew, gang, order, authority, band, beast, …), so a new kind of group is one line of data. `scale`: small | medium | large; `stance`: allied | friendly | neutral | rival | hostile.
+- Families, towns, gangs, friends who banded together and monster packs are all the same kind of thing (a group); a person's `"faction": "beast"` that names no group becomes a group of that kind.
 - Membership is inherited up `parent` (at half loyalty), so a town's feud reaches every family in it.
 - **Attitude**: when two people meet, shared factions, the stances between their factions, and the other person's standing with your factions give a score (loyal / friendly / neutral / wary / hostile). It goes into dialogue and NPC decision prompts, and counts toward whether a secret is confided.
 - **Standing ripples**: giving (+2), attacking (−6), talk outcomes and kept favors change the actor's standing with every faction of the target, and with that faction's allies (same way) and rivals / enemies (opposite way). Small factions react hardest; hurting your own faction counts 1.5×.
@@ -156,7 +157,7 @@ Worlds may declare factions of any size — a family, a gang, a guild, the town 
 
 #### Factions evolve on their own
 
-Every `FACTION_TICK_HOURS` (default 6) game hours, `agent/faction_sim.py` runs a round. It also catches up, at most 4 rounds at a time, after skipping time.
+Every `group_tick_hours` (default 6) game hours, the content rules in `content/base/rules/group_life.pl` run a round. After skipping time the engine catches up period by period (at most 8).
 
 1. **Territory**: members standing in a place raise their faction's hold (more loyalty, faster). Unwatched ground loses 0.3 per round. Rival or hostile factions in the same place wear each other down.
 2. **Tension**: factions sharing ground build tension (allies ease it). At ±6 (about a game day and a half of friction) the stance moves one step along hostile ↔ rival ↔ neutral ↔ friendly ↔ allied. Parent and child factions never clash.
@@ -164,18 +165,18 @@ Every `FACTION_TICK_HOURS` (default 6) game hours, `agent/faction_sim.py` runs a
 4. **New factions**, at most one per game day:
    - **splinter**: a member whose loyalty falls to 3 or below walks out with like-minded members (towns don't split);
    - **coalition**: two people from different sides, both barely loyal and close to each other, found their own;
-   - **arrival**: newcomers settle an unheld place (`FACTION_ARRIVAL_CHANCE`, default 0.15 per round). They keep unnamed members there until driven out.
+   - **arrival**: newcomers settle an unheld place (`arrival_chance`, default 0.15 per round). They keep unnamed members there until driven out.
 
-   The LLM writes the new faction's name, goal, origin and traits, grounded in the founders' lives, the parent faction's history and recent events. Each trait must cite the story. Without an LLM (or with `FACTION_STORY_LLM=0`), rules write them.
+   The LLM writes the new faction's name, goal, origin and traits (`agent/rule_extensions.py`), grounded in the founders' lives, the parent faction's history and recent events. Each trait must cite the story. Without an LLM (or with `FACTION_STORY_LLM=0`), the rules' own story is used.
 5. **Recruiting, growth, decline**: a faction takes in people on its ground whose loyalty elsewhere has faded. It grows small → medium → large with members plus ground, and dissolves with neither.
 
 Every event goes into the chronicle (`:FactionEvent`, shown in the play UI). Members remember it, and it is announced as news, so NPCs reconsider their plans. Dialogue and decision prompts show each faction's traits, territory and latest history.
 
-Knobs: `FACTION_SIM=0` turns evolution off; `FACTION_MAX_ACTIVE` (default 12). `POST /api/factions/tick?ticks=N` pushes history forward right away.
+Knobs are rule constants in `group_life.pl` (`group_tick_hours`, `max_groups`, `arrival_chance`, …). `POST /api/factions/tick?ticks=N` pushes history forward right away.
 
 #### Joining factions
 
-Each faction has a joining rule (`join_policy`, `join_standing`, `trial`; defaults depend on `kind`):
+Each faction has a joining rule (`join_policy`, `join_standing`, `trial`; defaults come from its kind's traits):
 
 | policy | defaults | what it takes |
 |--------|----------|---------------|
@@ -190,7 +191,7 @@ Each faction has a joining rule (`join_policy`, `join_standing`, `trial`; defaul
 - NPCs who are members are told the real rules when they talk to you, so they don't promise what the game won't allow.
 - API: `POST /api/factions/{name}/join` (`{"via": "Rowan"}` optional), `POST /api/factions/{name}/leave`. The play UI shows a join / leave button per faction, with the reason in the tooltip when it is disabled.
 
-## Street economy (`content/streets`, `agent/street_economy.py`)
+## Street economy (`content/streets`, rules in `content/streets/rules/street.pl`)
 
 Money is `cash` items: one note is one dollar. Money never appears or disappears; every transaction moves notes from one pocket to another.
 
@@ -198,7 +199,7 @@ Money is `cash` items: one note is one dollar. Money never appears or disappears
 |------|-----|
 | buy food / drink | use a note on a shop (`noodle_stall`, `fishball_cart`, `tea_house`, `bar_counter`, `herbal_counter`): stock −1, the note goes to the shop's `owner`, you get the food |
 | restock | a sold-out shop alerts its owner (`works_at`), who buys `supplies` at the `wholesale` (the note goes to the wholesaler) and uses them on the shop (+4 stock). Boats refill the wholesale daily. |
-| protection | every shop with a `protection_fee` owes that much per day to the **gang that holds its ground** (`(:Faction)-[:EXTORTS {dues}]->(:Item)`). A gang member runs `collect_dues` there to take what is owed; the boss takes half. |
+| protection | every shop with a `protection_fee` owes that much per day to the **group that holds its ground, if that group `extorts`** (gangs do) (`(:Faction)-[:EXTORTS {dues}]->(:Item)`). A member runs `collect_dues` there to take what is owed; the boss takes half. |
 | wages | factions with `wage` (gangs, the dock crew): the leader pays each member every day |
 | rent | a `rent_book` item: each tenant pays the landlord every day; arrears are tracked |
 
@@ -206,11 +207,11 @@ How it ties into factions and the story:
 
 - Each payment strengthens the collecting gang's hold on that place (+0.5). Collecting from an unprotected shop starts a new racket there (+1).
 - **Muscling in**: collecting on a rival's ground takes the rival's money, costs −3 standing with them, adds tension between the gangs, and is written into the chronicle.
-- A police member (`authority` faction) on the spot stops the collection and remembers who tried.
-- **Three days behind**: the gang smashes the shop (stock 0, owner hurt and afraid). This adds tension with the owner's guild and goes into the chronicle.
+- A member of a group that `polices` (the `authority` kind) on the spot stops the collection and remembers who tried.
+- **Three days behind**: the gang smashes the shop (stock 0, owner hurt and afraid). This adds tension with the owner's `trade_guild` groups (guilds, crews) and goes into the chronicle.
 - NPC dialogue and decisions see their cash, what they owe or are owed, and their shop's stock. Routines buy and eat (`"goal": "Use item on", "item_kind": "cash"`, then `"Use item", "item_kind": "food"`) and collect (`"action": "collect_dues"`).
 - The play UI shows your cash, the money supply, and every shop's owner, protector, dues and stock. Cash is grouped in the inventory (`Cash ×4`).
-- `ECONOMY_SIM=0` turns the daily economy off.
+- It is all content rules: a world without the `streets` pack has no street economy.
 
 ## Project layout
 

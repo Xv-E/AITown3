@@ -122,21 +122,29 @@ def test_party_members_follow_instead_of_deciding():
 
 
 def test_prices_follow_scarcity_and_demand():
-    from economy import MAX_FACTOR, MIN_FACTOR, factor
+    pytest.importorskip("pyswip")
+    from rulebook import pure
 
-    assert factor(base=4, supply=4, demand=0) == 1.0
-    assert factor(base=4, supply=0, demand=0) > 2.5, "nothing left: expensive"
-    assert factor(base=4, supply=40, demand=0) == MIN_FACTOR, "a glut: cheap"
-    assert factor(base=4, supply=4, demand=2) > 1.0, "people keep buying: dearer"
-    assert factor(base=0, supply=0, demand=50) == MAX_FACTOR
+    def factor(base, supply, demand):
+        return pure("F", f"factor({base}, {supply}, {demand}, F)")[0]
+
+    assert factor(4, 4, 0) == 1.0
+    assert factor(4, 0, 0) > 2.5, "nothing left: expensive"
+    assert factor(4, 40, 0) == 0.5, "a glut: cheap"
+    assert factor(4, 4, 2) > 1.0, "people keep buying: dearer"
+    assert factor(0, 0, 50) == 3.0
 
 
-def test_an_empty_shop_becomes_the_traders_own_goal(monkeypatch):
-    import economy
+def test_an_empty_shop_becomes_the_traders_own_goal():
+    pytest.importorskip("pyswip")
+    from test_social_rules import answers, node, rel
 
-    monkeypatch.setattr(economy, "shop_shortages", lambda w, t: ["axe"])
-    (goal,) = economy.restock_candidates(None, "Reed")
-    assert goal["goal"] == "Collect item" and goal["target_entity"] == "kind:axe" and goal["source"] == "shop"
+    facts = node("Person", "Reed", trader=True, sells=["axe", "rope"]) + node("Item", "Rope1", item_kind="rope") \
+        + rel("HAS_ITEM", "Reed", "Rope1")
+    (goal,) = answers(facts, "G", "want('Reed', G)")
+    assert goal["goal"] == "Collect item" and goal["target"] == "kind:axe" and goal["source"] == "shop"
+    listed = answers(facts, "E", "after(rest('Reed'), E)")
+    assert {"op": "set_prop", "entity": "Rope1", "label": "Item", "prop": "for_sale", "value": True} in listed
 
 
 def test_alliance_stances_have_words():
@@ -267,3 +275,24 @@ def test_gathering_spots_regrow_even_in_tiny_steps():
         assert 1.4 < float(World.props["stock"]) < 1.6, World.props
     finally:
         action.get_property, action.set_property = old_get, old_set
+
+
+def test_the_market_prices_goods_every_hour_in_a_real_world(world):
+    pytest.importorskip("pyswip")
+    from director import build_from_blueprint, load_world
+    from rulebook import ask, tick
+
+    build_from_blueprint(world, load_world("riverford"), clear=True)
+    hour = float(ask(world, "P", "market_period(P)")[0])
+    tick(world, hour - 1.0, hour + 1.0)
+    goods = {r["k"]: r for r in world.run_query(
+        "MATCH (m:MarketGood) RETURN m.name AS k, m.price AS price, m.supply AS supply, m.base AS base")}
+    assert goods and all(g["price"] >= 1 and g["base"] == g["supply"] for g in goods.values())
+    kind = next(iter(goods))
+    priced = world.run_query("MATCH (i:Item) WHERE toLower(i.item_kind) = $k AND i.value > 0 RETURN i.price AS p", k=kind)
+    assert priced and all(r["p"] is not None for r in priced)
+    panel = ask(world, "R", "panel('', market, R)")[0]
+    assert {r["kind"] for r in panel} == set(goods)
+    traders = world.run_query("MATCH (p:Person {trader: true}) RETURN p.name AS n LIMIT 1")
+    if traders:
+        assert all(g["source"] == "shop" for g in __import__("rulebook").want(world, traders[0]["n"]))

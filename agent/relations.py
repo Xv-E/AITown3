@@ -216,7 +216,7 @@ def describe(world, name: str, limit: int = 6) -> str:
 
 # ----- 发生了什么 → 好感怎么变（玩家和 NPC 共用） -----
 
-def after_action(world, actor: str, action: str, params: Dict[str, str], *, at: float = 0.0) -> None:
+def after_action(world, actor: str, action: str, params: Dict[str, str], *, at: float = 0.0) -> Dict[str, Any]:
     from content import get_content
 
     cap = get_content().capability_of(action) or action
@@ -226,12 +226,9 @@ def after_action(world, actor: str, action: str, params: Dict[str, str], *, at: 
 
         if world is not None:
             on_give(world, actor, receiver, params.get("i") or "", at=at)  # 交的是他求的东西：委托完成、付酬劳
-    if action == "buy" and params.get("i") and world is not None:
-        from economy import add_demand, kind_of
-
-        add_demand(world, kind_of(world, params["i"]), 1.0)  # 有人买 → 这类东西更抢手
-    if world is not None:
-        consequences(world, actor, action, params, at=at)
+    if world is None:
+        return {}
+    return consequences(world, actor, action, params, at=at)  # 有人买 → 更抢手、上架……都是规则
 
 
 def consequences(world, actor: str, action: str, params: Dict[str, str], *, at: float = 0.0) -> Dict[str, Any]:

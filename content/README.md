@@ -18,7 +18,7 @@ content/
 
 - `village`：边境村落的建设（工地、作坊、面包房……）
 - `streets`：街头经济 — `cash` 付给摊档时进摊主口袋（不销毁），摊档卖完向码头 `wholesale` 进 `supplies`，
-  `rent_book` 记房租，`collect_dues` 收保护费（结算在 `agent/street_economy.py`）
+  `rent_book` 记房租，`collect_dues` 收保护费（全是规则：`streets/rules/street.pl`）
 环境变量 `AITOWN_CONTENT_PACKS`（逗号分隔）可以显式指定加载哪些包。
 **后加载的包覆盖同名定义**，所以想改 `base` 里的某个动作，新建一个包写同名文件即可：
 
@@ -425,14 +425,15 @@ Routine 里用 `"action": "sleep"` 让角色在该时段去执行这个动作：
 - 剧情导演的 `adjust` 只能减（风雨、损耗），不能凭空加。
 - 钱只在买卖时从一个人转给另一个人。
 
-### 价格和商店（`agent/economy.py`）
+### 价格和商店（规则 `rpg/rules/market.pl`）
 
 - 每个游戏小时按供需定价：`price = value × (基准数量+2)/(现有数量+2) × (1 + 0.15×需求)`，夹在 0.5–3 倍；买卖都按 `price`。
-- 商人写 `"sells": ["axe", "rod"]`、`"shop_stock": 1`：某类缺货就成了他自己的目标（`Collect item kind:<类别>`，规划器让他采集、制造或收购），拿到手就自动上架。
+- 商人写 `"sells": ["axe", "rod"]`、`"shop_stock": 1`：某类缺货就成了他自己的目标（规则 `want/2`：`Collect item kind:<类别>`，规划器让他采集、制造或收购），拿到手就自动上架。
+- 每类东西一个 `(:MarketGood {name: 类别, base, supply, demand, price, prev, factor})`；导演选项卡的市场面板是规则 `panel(_, market, Rows)`。
 
-### 联盟
+### 一伙人
 
-- 结盟的人聚成联盟（`(:Person)-[:MEMBER_OF]->(:Alliance)`），联盟之间的关系（`STANCE`，-10..10）= 两边成员互相好感的平均，每两个游戏小时重算：≥4 友好，≤-2 对立，≤-5 敌对（敌对联盟之间不做买卖）。
+- 结盟的人聚成一伙：一个 `kind: band` 的群体（群体见第 7 节），两伙之间的立场 = 两边成员互相好感的平均，每两个游戏小时重算：≥4 friendly，≤-2 rival，≤-5 hostile（敌对又记仇的群体之间不做买卖：条件 `holds at_war(...)`）。
 - NPC 可以自己去结盟：目标 `Form alliance`（target = 人），规划器让他走过去 `propose_alliance`；对方好感够高才答应（条件 `holds` 问规则 `would_ally/2`，当面才知道）。
 
 ---
@@ -461,14 +462,26 @@ sees(W, P)                         % W 看得见 P（引擎的感知；规则问
 
 | 谓词 | 引擎什么时候问 | 用法 |
 |---|---|---|
-| `after(Event, Effect)` | 任何动作做完之后 | Effect 是和动作 `effects` 一样的 op（写成 SWI dict），引擎照常执行；另有 `note`（告诉做的人的一句话）和 `report`（并进结算结果） |
-| `tick(Effect)` | 时间过去（每拍；声明了 `tick_period(P)` 就只在跨过周期时） | 同 `after` 的 op；用 `every(P)` 限定每 P 模拟秒一次 |
+| `after(Event, Effect)` | 任何动作做完之后；还有不是动作的事（谈完一场话 `deed(...)`、新世界建好 `world_built`、界面上的入会 `ask_to_join(...)`……，引擎经 `rulebook.happen` 问） | Effect 是和动作 `effects` 一样的 op（写成 SWI dict），引擎照常执行；另见下面「引擎认得的效果」 |
+| `tick(Effect)` | 时间过去（声明了 `tick_period(P)` 就只在跨过某个周期时；可以声明好几个；跳时间时逐段补算，最多 8 段） | 同 `after` 的 op；用 `every(P)` 限定每 P 模拟秒一次 |
+| `tick_phase(Order, Phase)` + `tick(Phase, Effect)` | 同上，在 `tick/1` 之后按 Order 逐步问，每步之前重读世界 | 后一步要看到前一步的结果时用（先算地盘、再算谁控制哪里） |
+| `want(Me, Goal)` | 排 NPC 的目标时（和日程一起） | 想做的事：`goal`、`target`、`reason`、`priority`、`source`，如商店缺货去补货 |
+| `context(Me, Text)` / `context(Me, Other, Text)` | 写 NPC 的决策提示词 / 和 Other 对话的提示词时 | 加几行处境、关系，如属于哪些群体、欠了多少保护费 |
+| `panel(Viewer, Name, Card)` | 界面要一块面板时（如 `economy`、`market`） | 一个 dict，原样交给客户端 |
+| `plea(Dict)` | Storyteller 找剧情素材时 | 谁有难处、要什么：`who`、`need`（物品类别）、`severity`、`title`、`why`、`arc`、`stakes`、`note`、`people`、`reward` |
 | `forecast(Event, Text)` | NPC 决策前，对眼前的东西 | 给 NPC 的提示，原样放进提示词 |
 | `react(Me, Choice)` | 每个 NPC 大约每秒一次（正在做事时给 `busy_since(Me, T)`） | 要不要丢下手上的事马上行动：`goal`、`target`、`why`、`text`、`plan`（`[[能力名, [参数...]], ...]`，引擎换成动作名） |
 | `hostility(A, B, Why)` + `label/2` + `explain/4` | 战斗、界面、提示词判断敌对 | A 为什么敌视 B；标签给程序用，解释给提示词 / 界面 |
 | `const(Name, Value)` | 引擎别处要用的常量 | 如 `combat_memory` |
 
 事件 = 能力名（没有能力就用动作名）+ 动作参数（按声明顺序），如 `take('Ash', 'Berry1', 'Grove')`。
+
+**引擎认得的效果**：动作 `effects` 的全部 op，加上
+`transfer`（`from` 把至多 `count` 件 `kind` 类物品交给 `to`，如付钱）、`merge_node`、`set_rel_prop`、`add_rel_prop`（关系没有就先建）、
+`note`（告诉做的人）、`report`（并进返回值）、`announce`（进新闻，NPC 会重新决策）、`remember`（写进 `who` 的记忆）、
+`extend`（交给 Python 注册的同名扩展，见 `agent/rule_extensions.py`；目前只有 `new_group_story`：让 LLM 写新群体的名字和来历）。
+
+**时间和随机**：`now(T)`、`day_length(L)`、`day(T, D)`（第几天）、`every(P)`、`chance(Key, P)`（可复现：同一时刻同一个 Key 结果一样）。
 
 **推演**：`if_done(Event, Goal)` 先收集 `after(Event, E)` 的全部效果当作假设，再证明 Goal，然后撤掉——
 所以「做了会怎样」不需要另写规则，`forecast` 里直接用它。
@@ -492,7 +505,26 @@ after(take(A, I, _), _{op: link, a: W, a_label: 'Person', b: A, b_label: 'Person
 | `combat.pl` | 打人之后：挨打的人、盟友、旁观者的好感，没被惹就动手算犯罪，告诉玩家对方还剩多少 HP |
 | `time.pl` | 时间过去：好感朝 0 回落（盟友有下限）、矛盾消退、没在打架的人回血 |
 | `react.pl` | NPC 看到敌人：打得过就打（不在一处就先走过去），快不行又打不过就逃，只是讨厌又不占上风就不招惹 |
-| `alliances.pl` | 互相喜欢就结盟、聚成一伙；闹翻就散；联盟之间的立场 = 成员互相好感的平均（分四步的 tick/2） |
+| `groups.pl` | 群体：成员（沿 PART_OF 继承）、种类的默认特性、亲疏、提示词、对人做的事传到他的群体、入会 / 退出 / 转正、界面卡片 |
+| `group_life.pl` | 群体随时间变化：结盟成伙、散伙；地盘、控制者、张力 → 立场、忠诚、分裂 / 另立门户 / 外来者、招募、升格、解散；编年史 |
+
+别的包：`streets/rules/street.pl`（保护费、收数、过界、差人、砸场、工钱、房租、钱的面板）、
+`rpg/rules/market.pl`（供需定价、商店缺货、上架）、`rpg/rules/alliance.pl`（提出结盟之后）。
+
+### 群体
+
+势力、一家人、城镇、帮派、行会、朋友结的伙、狼群……都是 `:Faction` 节点。**种类只是一组默认特性**，规则只问特性，不认种类名：
+
+```prolog
+kind_traits(family, [kin, closed, homebound, feud]).        % 加一种群体：写一行
+kind_traits(beast,  [attacks_on_sight, roving, closed, informal]).
+trait(kin, bond, 4).                                        % 特性的机制：键 + 值
+trait(militant, contest, 1.5).
+```
+
+群体自己在世界文件里写的 `traits`（如 `militant`）和种类的默认特性合在一起。数值键按连乘（`mult/3`）或相加（`sum/3`）用；
+没有键的特性是开关（`closed` 外人进不来、`homebound` 忠诚不看地盘、`feud` 对敌对群体的人见面就打、`extorts` 收保护费、`polices` 管治安……，
+全表见 `groups.pl` 开头）。人物身上的 `"faction": "beast"` 这种不是已有群体名字的，建世界时会变成一个以它为种类的群体。
 
 动作之后的一切后果都从这里来：引擎的 `relations.consequences` 只是问 `after/2` 并照着写图；
 游戏主循环每拍调用 `rulebook.tick`，同样只是问 `tick/1` 并照着写图。

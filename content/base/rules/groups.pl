@@ -178,7 +178,8 @@ memberships(P, Ms) :-
 role(P, G, Role) :- ( direct(P, G, Role, _) -> true ; Role = member ).
 
 % 特性 = 种类默认 + 自己写的（JSON：["militant"] 或 [{"id": "militant", "why": "..."}]）
-traits(G, Ts) :-
+traits(G, Ts) :- memo(traits(G), Ts, traits_(G, Ts)).
+traits_(G, Ts) :-
     kind(G, K), ( kind_traits(K, KT) -> true ; KT = [] ),
     findall(T, own_trait(G, T, _), Own), append(KT, Own, Ts).
 

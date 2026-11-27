@@ -17,6 +17,7 @@
 % 规则应通过下面这些谓词读图——它们会叠加「假设」（推演时）：
 %   node(L, Id)  prop(Id, K, V)  rel(T, A, B)  rel(T, A, B, Props)  rel_prop(T, A, B, K, V)
 %   now(T)  assumed(Effect)  assumed_op(Op, Effect)
+%   memo(Key, Value, Goal)   算过就记住（同一份事实上），如群体的特性列表
 %
 % 内容包提供（都可以分散在多个包里）：
 %   reads/1                            要读的标签 / 关系
@@ -49,7 +50,7 @@
 :- use_module(library(apply)).
 :- use_module(library(lists)).
 
-:- dynamic g_node/2, g_prop/3, g_rel/4, g_now/1, g_tick/2, g_sees/2, g_day_length/1, busy_since/2, hyp/1.
+:- dynamic g_node/2, g_prop/3, g_rel/4, g_now/1, g_tick/2, g_sees/2, g_day_length/1, busy_since/2, hyp/1, memo_/2.
 :- multifile reads/1, after/2, tick/1, tick/2, tick_phase/2, tick_period/1, forecast/2, react/2, want/2, context/2, context/3, panel/3, plea/1, label/2, explain/4, const/2.
 :- dynamic reads/1, after/2, tick/1, tick/2, tick_phase/2, tick_period/1, forecast/2, react/2, want/2, context/2, context/3, panel/3, plea/1, label/2, explain/4, const/2.
 :- discontiguous reads/1, after/2, tick/1, tick/2, tick_phase/2, tick_period/1, forecast/2, react/2, want/2, context/2, context/3, panel/3, plea/1, label/2, explain/4, const/2.
@@ -57,7 +58,7 @@
 load_facts(Facts) :-
     retractall(g_node(_, _)), retractall(g_prop(_, _, _)), retractall(g_rel(_, _, _, _)),
     retractall(g_now(_)), retractall(g_tick(_, _)), retractall(g_sees(_, _)), retractall(g_day_length(_)), retractall(busy_since(_, _)),
-    retractall(hyp(_)),
+    retractall(hyp(_)), retractall(memo_(_, _)),
     forall(member(F, Facts), assertz(F)).
 
 % ---------------------------------------------------------------------
@@ -110,6 +111,11 @@ chance(Key, P) :- now(T), term_hash(k(Key, T), H), X is (H mod 100000) / 100000.
 
 % 这一拍跨过了周期 P 的边界（每 P 模拟秒一次；跳时间也只算一次）
 every(P) :- g_tick(Prev, Now), floor(Now / P) > floor(Prev / P).
+
+% 同一份事实上算过一次就记住（事实一换就清掉；推演时不记）：memo(Key, Value, Goal)
+memo(_, Value, Goal) :- hyp(_), !, once(Goal), ground(Value).
+memo(Key, Value, _) :- memo_(Key, V), !, Value = V.
+memo(Key, Value, Goal) :- once(Goal), assertz(memo_(Key, Value)).
 
 assumed(E) :- hyp(E).
 assumed_op(Op, E) :- hyp(E), is_dict(E), get_dict(op, E, Op).

@@ -134,10 +134,11 @@ def build_director_view(loop: Any, world: Any) -> Dict[str, Any]:
         except Exception:  # noqa: BLE001
             pass
         try:
-            from economy import market_view
             from relations import alliances_view
+            from rulebook import ask
 
-            out["market"] = market_view(world)
+            panels = ask(world, "R", "panel('', market, R)")  # 内容包规则的市场面板（rpg 包）
+            out["market"] = panels[0] if panels else []
             out["alliances"] = alliances_view(world)
             from job_board import requests_view
 

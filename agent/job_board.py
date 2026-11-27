@@ -20,11 +20,9 @@ REWARD_MARKUP = 1.2
 
 
 def _price(world, kind: str) -> int:
-    from economy import _market
-
-    entry = _market(world).get(kind) or {}
-    if entry.get("price"):
-        return int(entry["price"])
+    got = world.run_query("MATCH (m:MarketGood {name: $k}) RETURN m.price AS p", k=kind) or []
+    if got and got[0].get("p"):
+        return int(got[0]["p"])
     rows = world.run_query(
         "MATCH (i:Item) WHERE toLower(coalesce(i.item_kind, '')) = $k RETURN avg(toFloat(coalesce(i.value, 1))) AS v",
         k=kind,
@@ -79,11 +77,10 @@ def recent_requests(world, limit: int = 12) -> List[Dict[str, Any]]:
 
 def on_give(world, giver: str, receiver: str, item: str, *, at: float = 0.0) -> str:
     """有人把东西交给发委托的人：是他要的那类就完成委托、付酬劳。返回一句话（没完成就是 ""）。"""
-    from economy import kind_of
-
     if not giver or giver == receiver:
         return ""
-    kind = kind_of(world, item)
+    got = world.run_query("MATCH (i:Item {name: $n}) RETURN toLower(coalesce(i.item_kind, '')) AS k", n=item) or []
+    kind = got[0]["k"] if got else ""
     req = open_request(world, receiver, kind)
     if not req:
         return ""

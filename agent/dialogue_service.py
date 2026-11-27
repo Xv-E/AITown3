@@ -734,18 +734,6 @@ def situation_brief(world, name: str) -> str:
                 lines.append(f"You NEED {r['kind']} and posted a request for it ({pay}). Reason: {r.get('reason') or '-'}")
     except Exception:
         pass
-    if rows and rows[0].get("trader"):
-        try:
-            from economy import shop_of, shop_shortages
-
-            shop = shop_of(world, name)
-            if shop.get("sells"):
-                lines.append(f"You run a shop selling: {', '.join(shop['sells'])}.")
-            missing = shop_shortages(world, name)
-            if missing:
-                lines.append(f"Your shop is out of: {', '.join(missing)} - you'd welcome anyone bringing some.")
-        except Exception:
-            pass
     return "\n".join(lines)
 
 

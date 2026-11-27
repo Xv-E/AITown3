@@ -62,57 +62,44 @@ def _value(v: Any) -> Optional[str]:
     return atom(v)
 
 
-# 一拍之内（world.read_cache() 作用域里）世界没被写过：直接用上次拼好的事实
-_facts_memo: Dict[Any, List[str]] = {}
+# 一拍之内（world.read_cache() 作用域里）：每个标签 / 关系类型的事实各自记着，
+# 只有写过这个标签 / 关系类型（或全局的写）之后才重读这一份（缓存代数见 Neo4jWorld.invalidate_cache）
+_parts_memo: Dict[Any, Tuple[Any, List[str]]] = {}
 
 
 def world_facts(world, files: Tuple[str, ...], *, at: Optional[float] = None,
                 sees: Iterable[Tuple[str, str]] = (), extra: Iterable[str] = ()) -> List[str]:
-    gen = getattr(world, "_cache_gen", None)
-    key = (id(world), gen, files, at) if gen is not None and getattr(world, "_cache_depth", 0) else None
-    base = _facts_memo.get(key) if key is not None else None
-    if base is None:
-        base = _graph_facts(world, files, at)
-        if key is not None:
-            _facts_memo.clear()
-            _facts_memo[key] = base
-    return base + [fact("g_sees", w, p) for w, p in sees] + list(extra)
+    return _graph_facts(world, files, at) + [fact("g_sees", w, p) for w, p in sees] + list(extra)
+
+
+def _version(world, token: str) -> Any:
+    tok_gen, global_gen = getattr(world, "_tok_gen", None), getattr(world, "_global_gen", None)
+    if tok_gen is None or global_gen is None or not getattr(world, "_cache_depth", 0):
+        return None
+    return (id(world), global_gen, tok_gen.get(token, 0))
+
+
+def _part(world, key: Tuple[str, str], build) -> List[str]:
+    version = _version(world, key[1])
+    if version is not None:
+        hit = _parts_memo.get(key)
+        if hit is not None and hit[0] == version:
+            return hit[1]
+    facts = build()
+    if version is not None:
+        _parts_memo[key] = (version, facts)
+    return facts
 
 
 def _graph_facts(world, files: Tuple[str, ...], at: Optional[float]) -> List[str]:
     labels, partial, rels = _reads(files)
     facts: List[str] = []
     for lab, keys in partial.items():
-        for r in world.run_query(
-            f"MATCH (n:`{lab}`) WHERE n.name IS NOT NULL RETURN n.name AS id, [k IN $keys | [k, n[k]]] AS kv",
-            keys=keys,
-        ) or []:
-            facts.append(fact("g_node", lab, r["id"]))
-            for k, v in r["kv"] or []:
-                pv = _value(v)
-                if pv is not None:
-                    facts.append(f"g_prop({atom(r['id'])}, {atom(k)}, {pv})")
-    if labels:
-        for r in world.run_query(
-            "MATCH (n) WHERE n.name IS NOT NULL AND any(l IN labels(n) WHERE l IN $labels) "
-            "RETURN labels(n) AS ls, n.name AS id, properties(n) AS props",
-            labels=labels,
-        ) or []:
-            for lab in r["ls"]:
-                if lab in labels:
-                    facts.append(fact("g_node", lab, r["id"]))
-            for k, v in (r["props"] or {}).items():
-                pv = _value(v)
-                if pv is not None and k != "name":
-                    facts.append(f"g_prop({atom(r['id'])}, {atom(k)}, {pv})")
-    if rels:
-        for r in world.run_query(
-            "MATCH (a)-[r]->(b) WHERE type(r) IN $types AND a.name IS NOT NULL AND b.name IS NOT NULL "
-            "RETURN type(r) AS t, a.name AS a, b.name AS b, properties(r) AS props",
-            types=rels,
-        ) or []:
-            pairs = [f"{atom(k)}-{_value(v)}" for k, v in (r["props"] or {}).items() if _value(v) is not None]
-            facts.append(f"g_rel({atom(r['t'])}, {atom(r['a'])}, {atom(r['b'])}, [{', '.join(pairs)}])")
+        facts += _part(world, ("some", lab), lambda lab=lab, keys=keys: _some_facts(world, lab, keys))
+    for lab in labels:
+        facts += _part(world, ("label", lab), lambda lab=lab: _label_facts(world, lab, labels))
+    for t in rels:
+        facts += _part(world, ("rel", t), lambda t=t: _rel_facts(world, t))
     if at is None:
         rows = world.run_query("MATCH (m:WorldMeta {name: 'WorldMeta'}) RETURN m.sim_time AS t LIMIT 1") or []
         at = rows[0]["t"] if rows and rows[0].get("t") is not None else None
@@ -120,6 +107,46 @@ def _graph_facts(world, files: Tuple[str, ...], at: Optional[float]) -> List[str
         facts.append(fact("g_now", float(at)))
     facts.append(_day_fact())
     return facts
+
+
+def _some_facts(world, lab: str, keys: List[str]) -> List[str]:
+    out: List[str] = []
+    for r in world.run_query(
+        f"MATCH (n:`{lab}`) WHERE n.name IS NOT NULL RETURN n.name AS id, [k IN $keys | [k, n[k]]] AS kv", keys=keys,
+    ) or []:
+        out.append(fact("g_node", lab, r["id"]))
+        for k, v in r["kv"] or []:
+            pv = _value(v)
+            if pv is not None:
+                out.append(f"g_prop({atom(r['id'])}, {atom(k)}, {pv})")
+    return out
+
+
+def _label_facts(world, lab: str, labels: List[str]) -> List[str]:
+    """整个读的标签：节点和全部属性（一个节点有好几个要读的标签时，属性只在排第一的标签下记一次）。"""
+    out: List[str] = []
+    for r in world.run_query(
+        f"MATCH (n:`{lab}`) WHERE n.name IS NOT NULL RETURN labels(n) AS ls, n.name AS id, properties(n) AS props"
+    ) or []:
+        out.append(fact("g_node", lab, r["id"]))
+        if min(x for x in r["ls"] if x in labels) != lab:
+            continue
+        for k, v in (r["props"] or {}).items():
+            pv = _value(v)
+            if pv is not None and k != "name":
+                out.append(f"g_prop({atom(r['id'])}, {atom(k)}, {pv})")
+    return out
+
+
+def _rel_facts(world, t: str) -> List[str]:
+    out: List[str] = []
+    for r in world.run_query(
+        f"MATCH (a)-[r:`{t}`]->(b) WHERE a.name IS NOT NULL AND b.name IS NOT NULL "
+        "RETURN a.name AS a, b.name AS b, properties(r) AS props"
+    ) or []:
+        pairs = [f"{atom(k)}-{_value(v)}" for k, v in (r["props"] or {}).items() if _value(v) is not None]
+        out.append(f"g_rel({atom(t)}, {atom(r['a'])}, {atom(r['b'])}, [{', '.join(pairs)}])")
+    return out
 
 
 def _day_fact() -> str:

@@ -1255,7 +1255,6 @@ class GameLoop:
             pass
         if action_result.success:
             self._feelings_after(agent, action_name, args)
-            self._list_new_goods(state)
         if pending.path:
             from spatial import end_walk, set_person_cell
 
@@ -1819,13 +1818,6 @@ class GameLoop:
         except Exception as e:  # noqa: BLE001
             if self.verbose:
                 print(f"[WARN] want {state.agent.name}: {e}")
-        try:
-            from economy import restock_candidates
-
-            out.extend(restock_candidates(self.world, state.agent.name))
-        except Exception as e:  # noqa: BLE001
-            if self.verbose:
-                print(f"[WARN] restock {state.agent.name}: {e}")
 
         slots = load_person_routine(self.world, state.agent.name)
         if not slots:
@@ -2032,25 +2024,19 @@ class GameLoop:
     # ----- 剧情 -----
 
     def _economy_step(self) -> None:
-        """每个游戏小时：价格随供需变、商店缺货记成需求、做好的东西上架、过期的委托撤下。"""
-        from economy import ECONOMY_EVERY, economy_step
+        """每个游戏小时：过期的委托撤下（价格、商店缺货、上架是内容包规则，见 content/rpg/rules/market.pl）。"""
         from job_board import tidy
+        from routine import DAY_LENGTH_SECONDS
 
         due = getattr(self, "_next_economy_at", None)
         if due is not None and self.sim_time < due:
             return
-        self._next_economy_at = self.sim_time + ECONOMY_EVERY
+        self._next_economy_at = self.sim_time + DAY_LENGTH_SECONDS / 24.0
         try:
             tidy(self.world, now=self.sim_time)
-            report = economy_step(self.world)
         except Exception as e:  # noqa: BLE001
             if self.verbose:
-                print(f"[WARN] economy: {e}")
-            return
-        for trader, items in (report.get("listed") or {}).items():
-            state = self.get_agent_state(trader)
-            if state is not None:
-                self._log(state, "event", f"Put {', '.join(items)} up for sale")
+                print(f"[WARN] job board: {e}")
 
     def _react_step(self, state: AgentState) -> bool:
         """要不要丢下手上的事马上行动（内容包规则 react/2，如打、追、逃）。接手了这个人这一拍就返回 True。
@@ -2179,21 +2165,14 @@ class GameLoop:
             if action is None:
                 return
             params = {p.name: str(v) for p, v in zip(action.parameters, args)}
-            after_action(self.world, agent.name, action_name, params, at=self.sim_time)
+            out = after_action(self.world, agent.name, action_name, params, at=self.sim_time) or {}
+            state = self.get_agent_state(agent.name)
+            for note in out.get("notes") or []:  # 规则要告诉做的人的话（收了多少数、上架了什么……）
+                if state is not None and note:
+                    self._log(state, "event", note)
         except Exception as e:  # noqa: BLE001
             if self.verbose:
                 print(f"[WARN] feelings after {action_name}: {e}")
-
-    def _list_new_goods(self, state: AgentState) -> None:
-        """商人刚做好 / 收来一件他卖的东西：马上上架。"""
-        try:
-            from economy import list_goods
-
-            listed = list_goods(self.world, state.agent.name)
-        except Exception:  # noqa: BLE001
-            return
-        if listed:
-            self._log(state, "event", f"Put {', '.join(listed)} up for sale")
 
     def _follow_step(self, state: AgentState, leader: str) -> None:
         """组队成员：队长在别的区域就赶过去；同一区域就走到他身边站着。"""

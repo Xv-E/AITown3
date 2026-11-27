@@ -182,15 +182,6 @@ Respond with a JSON object:
         lines = [f"You have {int(float(me[0].get('c') or 0))} coins."]
         if me[0].get("t"):
             lines.append("You are a trader: people buy your goods and sell you theirs for half their worth.")
-            try:
-                from economy import shop_shortages
-
-                missing = shop_shortages(self.world, agent.name)
-            except Exception:
-                missing = []
-            if missing:
-                lines.append(f"Your shop is out of: {', '.join(missing)}. Gather, make or buy them "
-                             "(Collect item kind:<kind>) - what you hold goes on sale by itself.")
         shops = [s for s in shops if s.get("trader") and s.get("goods")]
         for shop in shops:
             lines.append(f"{shop['trader']} sells: {', '.join(shop['goods'][:8])}")
