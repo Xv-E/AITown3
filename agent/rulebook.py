@@ -6,7 +6,10 @@
   after(world, action, params)          动作做完：规则推出的效果交给 graph_ops 写图；note / report 收集起来返回
   tick(world, prev, now)                时间过去：tick/1 的效果同样写图（只在跨过规则声明的周期时才问）
   event(action, params)                 事件项：能力名（没有就用动作名）+ 参数（按动作声明的顺序）
+  want(world, me) / context(world, me[, other])   NPC 想做的事 / 提示词里的几行
   const(name, default)                  规则里的常量
+
+效果除了 graph_ops 的写图 op，还有：note / report / announce（新闻）/ remember（记忆）/ extend（Python 扩展）。
 
 世界怎么变成事实见 agent/rules_core.pl 开头：读哪些标签 / 关系由规则自己声明（reads/1）。
 """
@@ -99,9 +102,38 @@ def world_facts(world, files: Tuple[str, ...], *, at: Optional[float] = None,
         at = rows[0]["t"] if rows and rows[0].get("t") is not None else None
     if at is not None:
         facts.append(fact("g_now", float(at)))
+    facts.append(_day_fact())
     facts += [fact("g_sees", w, p) for w, p in sees]
     facts += list(extra)
     return facts
+
+
+def _day_fact() -> str:
+    try:
+        from routine import DAY_LENGTH_SECONDS
+
+        return fact("g_day_length", float(DAY_LENGTH_SECONDS))
+    except Exception:
+        return fact("g_day_length", 300.0)
+
+
+# 记忆（remember 效果写到这里）；游戏循环 / 服务启动时交进来
+_memory: List[Any] = [None]
+
+
+def use_memory(memory) -> None:
+    _memory[0] = memory
+
+
+# extend 效果的处理函数：name -> fn(world, effect) -> 更多效果（可以没有）
+EXTENSIONS: Dict[str, Any] = {}
+
+
+def extension(name: str):
+    def deco(fn):
+        EXTENSIONS[name] = fn
+        return fn
+    return deco
 
 
 def ask(world, template: str, goal: str, *, at: Optional[float] = None,
@@ -137,26 +169,59 @@ def after(world, action: str, params: Dict[str, Any], *, at: float = 0.0) -> Dic
     return apply_effects(world, effects)
 
 
+def happen(world, name: str, *args: Any, at: Optional[float] = None) -> Dict[str, Any]:
+    """不是动作的事（谈完一场话、兑现了人情……）：问 after(name(args...), E)，效果照常生效。"""
+    term = f"{atom(name)}({', '.join(atom(a) for a in args)})" if args else atom(name)
+    return apply_effects(world, ask(world, "E", f"after({term}, E)", at=at))
+
+
 def _periods(files: Tuple[str, ...]) -> List[float]:
     key = ("tick_period",) + files
     if key not in _reads_cache:
-        rows = solve(files, [], "answers_json(P, tick_period(P), J)")
+        rows = solve(files, [_day_fact()], "answers_json(P, tick_period(P), J)")
         _reads_cache[key] = ([float(p) for p in json.loads(rows[0]["J"])] if rows else [], [])
     return _reads_cache[key][0]
 
 
+MAX_CATCHUP = 8  # 跳时间时最多补算几段（每段跨过一个周期边界）
+
+
 def tick(world, prev: float, now: float) -> Dict[str, Any]:
-    """时间从 prev 走到 now：问规则 tick/1，效果照常写图。规则声明了周期时，没跨过任何周期就不问。"""
+    """时间从 prev 走到 now：问规则 tick/1，再按 tick_phase 逐步问 tick/2，效果照常写图。
+    规则声明了周期时，没跨过任何周期就不问；一下跨过好几个边界（跳时间）就逐段补算，最多 MAX_CATCHUP 段。"""
     import math
 
-    periods = _periods(rule_files())
-    if periods and not any(math.floor(now / p) > math.floor(prev / p) for p in periods if p > 0):
-        return {}
+    periods = [p for p in _periods(rule_files()) if p > 0]
+    if periods:
+        marks = sorted({k * p for p in periods
+                        for k in range(math.floor(prev / p) + 1, math.floor(now / p) + 1)})
+        if not marks:
+            return {}
+        marks = marks[-MAX_CATCHUP:]
+        starts = [prev] + marks[:-1]
+        ends = marks[:-1] + [now]
+    else:
+        starts, ends = [prev], [now]
+    out: Dict[str, Any] = {}
+    for a, b in zip(starts, ends):
+        _merge(out, _tick_once(world, a, b))
+    return out
+
+
+def _tick_once(world, prev: float, now: float) -> Dict[str, Any]:
     window = [fact("g_tick", float(prev), float(now))]
     out = apply_effects(world, ask(world, "E", "tick(E)", at=now, extra=window))
     for phase in _phases(rule_files()):  # 每一步之前重读世界：后一步看得到前一步的结果
-        out.update(apply_effects(world, ask(world, "E", f"tick({atom(phase)}, E)", at=now, extra=window)))
+        _merge(out, apply_effects(world, ask(world, "E", f"tick({atom(phase)}, E)", at=now, extra=window)))
     return out
+
+
+def _merge(out: Dict[str, Any], more: Dict[str, Any]) -> None:
+    for k, v in more.items():
+        if isinstance(v, list) and isinstance(out.get(k), list):
+            out[k] += v
+        else:
+            out[k] = v
 
 
 def _phases(files: Tuple[str, ...]) -> List[str]:
@@ -182,6 +247,27 @@ def react(world, me: str, *, at: Optional[float] = None, busy_since: Optional[fl
     return choice
 
 
+def want(world, me: str, *, at: Optional[float] = None) -> List[Dict[str, Any]]:
+    """这个 NPC 想做的事（规则 want/2）：[{"goal", "target_entity", "reason", "priority", "source"}, ...]。"""
+    out = []
+    for g in ask(world, "G", f"want({atom(me)}, G)", at=at):
+        if isinstance(g, dict) and g.get("goal"):
+            g = dict(g)
+            g.setdefault("target_entity", g.pop("target", ""))
+            out.append(g)
+    return out
+
+
+def context(world, me: str, other: Optional[str] = None) -> List[str]:
+    """规则给 me 的提示词加的几行：context(Me, Text)，或面对 other 时的 context(Me, Other, Text)。"""
+    goal = f"context({atom(me)}, T)" if other is None else f"context({atom(me)}, {atom(other)}, T)"
+    seen: List[str] = []
+    for t in ask(world, "T", goal):
+        if str(t) not in seen:
+            seen.append(str(t))
+    return seen
+
+
 def holds(world, goal: str) -> bool:
     """规则里的 goal 现在成立吗（动作条件的 holds op 用）。"""
     return bool(ask(world, "x", goal))
@@ -204,10 +290,43 @@ def apply_effects(world, effects: List[Any]) -> Dict[str, Any]:
         if op == "note":
             out.setdefault("notes", []).append(str(e.get("text") or ""))
         elif op == "report":
-            out.update({k: v for k, v in e.items() if k != "op"})
+            _merge(out, {k: v for k, v in e.items() if k != "op"})
+        elif op == "announce":
+            out.setdefault("events", []).append({"type": "announce", "text": str(e.get("text") or ""),
+                                                 "source": str(e.get("source") or "rules")})
+        elif op == "remember":
+            _remember(e)
+        elif op == "extend":
+            fn = EXTENSIONS.get(str(e.get("name") or ""))
+            if fn is None:
+                _load_extensions()
+                fn = EXTENSIONS.get(str(e.get("name") or ""))
+            if fn is not None:
+                _merge(out, apply_effects(world, list(fn(world, e) or [])))
         else:
             apply_op(world, e, {})
     return out
+
+
+def _remember(e: Dict[str, Any]) -> None:
+    memory = _memory[0]
+    who = str(e.get("who") or "")
+    if memory is None or not who:
+        return
+    meta = {k: v for k, v in e.items() if k not in ("op", "who", "text") and isinstance(v, (str, int, float, bool))}
+    meta.setdefault("type", "event")
+    try:
+        memory.add(who, str(e.get("text") or ""), **meta)
+    except Exception:
+        pass
+
+
+def _load_extensions() -> None:
+    """扩展写在 agent/rule_extensions.py（引擎能力，如 LLM 写故事）；用到时才导入。"""
+    try:
+        import rule_extensions  # noqa: F401
+    except ImportError:
+        pass
 
 
 def const(name: str, default: Any = None) -> Any:

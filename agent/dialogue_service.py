@@ -433,6 +433,13 @@ def _heart_blocks(world, me: str, other: str, knowledge=None) -> tuple[str, str]
         money = ""
     if money:
         heart = f"{heart}\n{money}" if heart else money
+    try:
+        from rulebook import context
+
+        for line in context(world, me, other):  # 内容包规则：面对对方时的几行（context/3）
+            heart = f"{heart}\n{line}" if heart else line
+    except Exception as e:
+        logger.debug("context rules failed: %s", e)
     # 剧情：心事，以及 Storyteller 派来找对方说的事 / 要的东西
     ask_item = None
     try:

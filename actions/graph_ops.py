@@ -403,6 +403,24 @@ def apply_op(world, op_spec: Dict[str, Any], ctx: Dict[str, str]) -> None:
                reason=str(op_spec.get("reason") or ""), at=float(op_spec.get("at") or 0.0))
         return
 
+    if op == "transfer":
+        # from 身上至多 count 件 kind 类物品交给 to（如付钱：一张钞票一件）
+        frm = resolve_token(op_spec["from"], ctx)
+        to = resolve_token(op_spec["to"], ctx)
+        n = int(float(resolve_token(op_spec.get("count", 1), ctx) or 0))
+        if n > 0 and frm and to and frm != to:
+            world.run_query(
+                """
+                MATCH (a:Person {name: $f})-[h:HAS_ITEM]->(i:Item) WHERE i.item_kind = $k
+                WITH h, i ORDER BY i.name LIMIT $n
+                MATCH (b:Person {name: $t})
+                DELETE h
+                MERGE (b)-[:HAS_ITEM]->(i)
+                """,
+                f=frm, t=to, k=str(resolve_token(op_spec["kind"], ctx)), n=n,
+            )
+        return
+
     if op == "add_prop":
         entity = resolve_token(op_spec["entity"], ctx)
         label = op_spec.get("label") or "Item"

@@ -309,6 +309,12 @@ Respond with a JSON object:
                     lines.append(money)
             except Exception:
                 pass
+            try:
+                from rulebook import context
+
+                lines.extend(context(self.world, agent.name))  # 内容包规则加的处境（context/2）
+            except Exception:
+                pass
             favors = favors_text(self.world, agent.name)
             if favors:
                 lines.append("Open favors (keeping or breaking a promise changes how people feel about you):")

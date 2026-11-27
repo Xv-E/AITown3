@@ -11,6 +11,7 @@
 %   sees(W, P)                      W 看得见 P：规则问到时才回头问引擎的感知（P 要已知）；
 %                                   给了 g_sees(W, P) 事实就只用这些（测试 / 调用方指定）
 %   busy_since(P, T).               问 react/2 时：P 从 T 起正在做一件事
+%   g_day_length(L).                一个游戏日有几模拟秒（day_length/1、day/2 用）
 % 读哪些标签 / 关系由规则声明：reads(label('Person')). reads(rel('FEELS')).
 %
 % 规则应通过下面这些谓词读图——它们会叠加「假设」（推演时）：
@@ -29,7 +30,15 @@
 %   react(Me, Choice)                  NPC 要不要丢下手上的事马上行动（打、逃……）；Choice 是 dict：
 %                                      goal / target / why / text / source / plan（[[能力名, [参数...]], ...]）
 %   label/2  explain/4                 原因的标签 / 一句话解释（引擎原样转给提示词与界面）
+%   want(Me, Goal)                     NPC 想做的事（比 react 缓，和日程一起排）；Goal 是 dict：
+%                                      goal / target / reason / priority / source
+%   context(Me, Text)                  给 Me 的提示词加一行（处境）
+%   context(Me, Other, Text)           Me 面对 Other 时提示词加一行（关系、身份）
 %   const(Name, Value)                 引擎在别处也要用的常量
+%
+% 效果里引擎认得的 op 除了动作 JSON 那些，还有：
+%   note（告诉做的人）  report（并进返回值）  announce（进新闻）  remember（写进某人记忆）
+%   extend（交给 Python 注册的同名扩展，如让 LLM 写一段故事；扩展可以再返回效果）
 % 事件 = 能力名（没有就用动作名）+ 动作参数（按声明顺序），如 take('Ash', 'Berry1', 'Grove')。
 % =====================================================================
 
@@ -37,14 +46,14 @@
 :- use_module(library(apply)).
 :- use_module(library(lists)).
 
-:- dynamic g_node/2, g_prop/3, g_rel/4, g_now/1, g_tick/2, g_sees/2, busy_since/2, hyp/1.
-:- multifile reads/1, after/2, tick/1, tick/2, tick_phase/2, tick_period/1, forecast/2, react/2, label/2, explain/4, const/2.
-:- dynamic reads/1, after/2, tick/1, tick/2, tick_phase/2, tick_period/1, forecast/2, react/2, label/2, explain/4, const/2.
-:- discontiguous reads/1, after/2, tick/1, tick/2, tick_phase/2, tick_period/1, forecast/2, react/2, label/2, explain/4, const/2.
+:- dynamic g_node/2, g_prop/3, g_rel/4, g_now/1, g_tick/2, g_sees/2, g_day_length/1, busy_since/2, hyp/1.
+:- multifile reads/1, after/2, tick/1, tick/2, tick_phase/2, tick_period/1, forecast/2, react/2, want/2, context/2, context/3, label/2, explain/4, const/2.
+:- dynamic reads/1, after/2, tick/1, tick/2, tick_phase/2, tick_period/1, forecast/2, react/2, want/2, context/2, context/3, label/2, explain/4, const/2.
+:- discontiguous reads/1, after/2, tick/1, tick/2, tick_phase/2, tick_period/1, forecast/2, react/2, want/2, context/2, context/3, label/2, explain/4, const/2.
 
 load_facts(Facts) :-
     retractall(g_node(_, _)), retractall(g_prop(_, _, _)), retractall(g_rel(_, _, _, _)),
-    retractall(g_now(_)), retractall(g_tick(_, _)), retractall(g_sees(_, _)), retractall(busy_since(_, _)),
+    retractall(g_now(_)), retractall(g_tick(_, _)), retractall(g_sees(_, _)), retractall(g_day_length(_)), retractall(busy_since(_, _)),
     retractall(hyp(_)),
     forall(member(F, Facts), assertz(F)).
 
@@ -87,6 +96,14 @@ now(0).
 
 sees(W, P) :- g_sees(_, _), !, g_sees(W, P).
 sees(W, P) :- nonvar(P), catch(py_call(sees, P, L), _, fail), member(W, L).
+
+% 一个游戏日的长度（模拟秒）；T 时刻是第几天（从 0 起）
+day_length(L) :- g_day_length(L), !.
+day_length(300.0).
+day(T, D) :- day_length(L), D is floor(T / L).
+
+% 可复现的「概率 P 发生」：同一时刻、同一个 Key 每次结果一样（存档重跑也一样）
+chance(Key, P) :- now(T), term_hash(k(Key, T), H), X is (H mod 100000) / 100000.0, X < P.
 
 % 这一拍跨过了周期 P 的边界（每 P 模拟秒一次；跳时间也只算一次）
 every(P) :- g_tick(Prev, Now), floor(Now / P) > floor(Prev / P).

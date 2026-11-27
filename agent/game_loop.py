@@ -239,6 +239,13 @@ class GameLoop:
     ):
         self.world = world
         self.memory = memory
+        if memory is not None:
+            try:
+                from rulebook import use_memory
+
+                use_memory(memory)  # 规则的 remember 效果写到这里
+            except Exception:
+                pass
         self.agents: List[AgentState] = []
         self.turn_count = 0  # 兼容：等同 tick_count
         self.tick_count = 0
@@ -1804,7 +1811,14 @@ class GameLoop:
         fire_goal = urgent_alert_goal(self.world, state.agent.name, sim_time=self.sim_time)
         if fire_goal:
             out.append(fire_goal)
-        # 商人的店缺货：去弄来（采集 / 制造 / 收购交给规划器）—— 这是他的活，日程里也算
+        # 规则里「想做的事」（want/2：商店缺货去补货……），和日程一起排
+        try:
+            from rulebook import want
+
+            out.extend(want(self.world, state.agent.name, at=self.sim_time))
+        except Exception as e:  # noqa: BLE001
+            if self.verbose:
+                print(f"[WARN] want {state.agent.name}: {e}")
         try:
             from economy import restock_candidates
 
@@ -2090,7 +2104,7 @@ class GameLoop:
         try:
             from rulebook import tick
 
-            tick(self.world, prev, self.sim_time)
+            self._record_announcements(tick(self.world, prev, self.sim_time) or {})
         except Exception as e:  # noqa: BLE001
             if self.verbose:
                 print(f"[WARN] rules tick: {e}")
