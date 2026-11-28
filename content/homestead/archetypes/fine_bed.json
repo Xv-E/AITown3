@@ -1,0 +1,27 @@
+{
+  "archetype": "fine_bed",
+  "name": "FineBed",
+  "item_kind": "bed",
+  "portable": false,
+  "value": 0,
+  "footprint": [
+    1,
+    2
+  ],
+  "description": "A sturdy bed with a wool mattress.",
+  "blueprint": {
+    "label": "Fine bed",
+    "description": "A better bed: faster rest, better work.",
+    "zone_tags": [
+      "homestead"
+    ],
+    "order": 11
+  },
+  "script": {
+    "lore": "A good bed. Its owner wakes rested and works better.",
+    "initial_state": {
+      "quality": 4,
+      "owner": ""
+    }
+  }
+}

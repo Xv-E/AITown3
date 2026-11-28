@@ -1,0 +1,8 @@
+{
+  "archetype": "stew",
+  "name": "Stew",
+  "item_kind": "meal",
+  "portable": true,
+  "value": 16,
+  "description": "A bowl of turnip stew."
+}

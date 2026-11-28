@@ -253,6 +253,7 @@ def ensure_cast_quality(
                 desire=(p.desire or "").strip(),
                 fear=(p.fear or "").strip(),
                 bonds=dict(p.bonds or {}),
+                props=dict(getattr(p, "props", None) or {}),
             )
         )
 

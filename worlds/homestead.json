@@ -1,0 +1,281 @@
+{
+  "id": "homestead",
+  "title": "Hollowbrook Homestead",
+  "premise": "A small homestead in a river valley. Its residents each have a job and a hobby; they eat from the stockpile, sleep in their own beds and get on with their days. You are the one who keeps the place.",
+  "locations": [
+    {
+      "name": "Yard",
+      "description": "The packed-earth yard between the farmhouse and the bunkhouse. The stockpile, the chopping block and the herb bed are here.",
+      "tags": "hub,home,homestead,social,build"
+    },
+    {
+      "name": "Farmhouse",
+      "description": "A low stone farmhouse with a kitchen hearth and two beds.",
+      "tags": "home,rest,homestead",
+      "indoor": true,
+      "parent": "Yard"
+    },
+    {
+      "name": "Bunkhouse",
+      "description": "A timber bunkhouse with a couple of beds.",
+      "tags": "home,rest,homestead",
+      "indoor": true,
+      "parent": "Yard"
+    },
+    {
+      "name": "Fields",
+      "description": "Turnip fields running down to the brook.",
+      "tags": "work,homestead"
+    },
+    {
+      "name": "Brookside",
+      "description": "Willows and a shallow brook just past the fields.",
+      "tags": "wild,water"
+    }
+  ],
+  "adjacencies": [
+    {
+      "a": "Yard",
+      "b": "Farmhouse"
+    },
+    {
+      "a": "Yard",
+      "b": "Bunkhouse"
+    },
+    {
+      "a": "Yard",
+      "b": "Fields"
+    },
+    {
+      "a": "Fields",
+      "b": "Brookside"
+    }
+  ],
+  "persons": [
+    {
+      "name": "Keeper",
+      "located_at": "Yard",
+      "role": "player",
+      "personality": "steady, fair",
+      "background": "You took over Hollowbrook when old Ansel died.",
+      "goal": "Keep the homestead fed and happy",
+      "values": "care",
+      "mood": "calm",
+      "hp": 100,
+      "power_level": 8
+    },
+    {
+      "name": "Wren",
+      "located_at": "Fields",
+      "personality": "patient, earthy",
+      "background": "Grew up on a farm downriver; knows turnips better than people.",
+      "goal": "Bring in a good harvest",
+      "values": "diligence",
+      "mood": "content",
+      "trust_toward_player": 4,
+      "props": {
+        "work": "farmer",
+        "hobby": "gardening",
+        "skills": {
+          "farming": 3,
+          "gardening": 2
+        },
+        "hunger": 20,
+        "fatigue": 10
+      }
+    },
+    {
+      "name": "Tobin",
+      "located_at": "Yard",
+      "personality": "gruff, reliable",
+      "background": "A former logger with a bad knee and good hands.",
+      "goal": "Keep the woodpile high",
+      "values": "hard work",
+      "mood": "neutral",
+      "trust_toward_player": 2,
+      "props": {
+        "work": "woodcutter",
+        "hobby": "whittling",
+        "skills": {
+          "woodcutting": 4,
+          "crafting": 2
+        },
+        "hunger": 30,
+        "fatigue": 15
+      }
+    },
+    {
+      "name": "Mabel",
+      "located_at": "Farmhouse",
+      "personality": "warm, bossy",
+      "background": "Cooked for a road inn for twenty years before coming here.",
+      "goal": "Nobody leaves her table hungry",
+      "values": "hospitality",
+      "mood": "cheerful",
+      "trust_toward_player": 6,
+      "props": {
+        "work": "cook",
+        "hobby": "music",
+        "skills": {
+          "cooking": 5,
+          "music": 3
+        },
+        "hunger": 10,
+        "fatigue": 5
+      }
+    },
+    {
+      "name": "Pell",
+      "located_at": "Yard",
+      "personality": "shy, eager",
+      "background": "A runaway apprentice who turned up last week and was told to stay.",
+      "goal": "Earn a place here",
+      "values": "belonging",
+      "mood": "nervous",
+      "trust_toward_player": 1,
+      "props": {
+        "work": "farmer",
+        "hobby": "whittling",
+        "skills": {
+          "farming": 0
+        },
+        "hunger": 40,
+        "fatigue": 20
+      }
+    }
+  ],
+  "items": [
+    {
+      "name": "Stockpile",
+      "archetype": "stockpile",
+      "located_at": "Yard"
+    },
+    {
+      "name": "ChoppingBlock",
+      "archetype": "chopping_block",
+      "located_at": "Yard"
+    },
+    {
+      "name": "HerbBed",
+      "archetype": "herb_bed",
+      "located_at": "Yard"
+    },
+    {
+      "name": "WhittlingBench",
+      "archetype": "whittling_bench",
+      "located_at": "Yard"
+    },
+    {
+      "name": "TurnipField",
+      "archetype": "field",
+      "located_at": "Fields"
+    },
+    {
+      "name": "KitchenHearth",
+      "archetype": "kitchen_hearth",
+      "located_at": "Farmhouse"
+    },
+    {
+      "name": "WrenBed",
+      "archetype": "bed",
+      "located_at": "Farmhouse",
+      "script": {
+        "initial_state": {
+          "owner": "Wren",
+          "quality": 2
+        }
+      }
+    },
+    {
+      "name": "MabelBed",
+      "archetype": "fine_bed",
+      "located_at": "Farmhouse",
+      "script": {
+        "initial_state": {
+          "owner": "Mabel",
+          "quality": 4
+        }
+      }
+    },
+    {
+      "name": "TobinBed",
+      "archetype": "bed",
+      "located_at": "Bunkhouse",
+      "script": {
+        "initial_state": {
+          "owner": "Tobin",
+          "quality": 2
+        }
+      }
+    },
+    {
+      "name": "SpareBed",
+      "archetype": "bed",
+      "located_at": "Bunkhouse"
+    },
+    {
+      "name": "Turnip1",
+      "archetype": "turnip",
+      "located_at": "Yard"
+    },
+    {
+      "name": "Turnip2",
+      "archetype": "turnip",
+      "located_at": "Yard"
+    },
+    {
+      "name": "Turnip3",
+      "archetype": "turnip",
+      "located_at": "Yard"
+    },
+    {
+      "name": "Turnip4",
+      "archetype": "turnip",
+      "located_at": "Yard"
+    }
+  ],
+  "quests": [],
+  "facts": [],
+  "rumors": [],
+  "social": [],
+  "factions": [
+    {
+      "name": "Hollowbrook",
+      "kind": "homestead",
+      "scale": "small",
+      "description": "The household at Hollowbrook.",
+      "goal": "Get through the year fed and warm",
+      "members": [
+        {
+          "name": "Keeper",
+          "role": "keeper",
+          "loyalty": 9
+        },
+        {
+          "name": "Wren",
+          "role": "resident",
+          "loyalty": 7
+        },
+        {
+          "name": "Tobin",
+          "role": "resident",
+          "loyalty": 6
+        },
+        {
+          "name": "Mabel",
+          "role": "resident",
+          "loyalty": 8
+        },
+        {
+          "name": "Pell",
+          "role": "resident",
+          "loyalty": 5
+        }
+      ],
+      "territory": {
+        "Yard": 6,
+        "Fields": 6
+      }
+    }
+  ]
+}

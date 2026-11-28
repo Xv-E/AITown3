@@ -92,6 +92,7 @@ VS Code / Cursor: launch configs under `.vscode/launch.json` (`AITown3: Web 服�
 | `town_daily_life` | Campfire Camp — wood, berries, keep the fire |
 | `two_npc_talk` | Two-NPC Dialogue Template |
 | `triad_streets` | Neon Streets of Sam Shui — two triads fight street by street over protection money (16 places, 15 NPCs, street economy) |
+| `homestead` | Hollowbrook Homestead — residents with jobs and hobbies who eat from the stockpile and sleep in their own beds |
 
 Add a new world by placing a JSON file in `worlds/` (filename stem = world id).
 
@@ -212,6 +213,14 @@ How it ties into factions and the story:
 - NPC dialogue and decisions see their cash, what they owe or are owed, and their shop's stock. Routines buy and eat (`"goal": "Use item on", "item_kind": "cash"`, then `"Use item", "item_kind": "food"`) and collect (`"action": "collect_dues"`).
 - The play UI shows your cash, the money supply, and every shop's owner, protector, dues and stock. Cash is grouped in the inventory (`Cash ×4`).
 - It is all content rules: a world without the `streets` pack has no street economy.
+
+## Homestead life (`content/homestead`)
+
+Residents of a homestead (a group of kind `homestead`) live by their needs, jobs and hobbies, all written as content rules:
+
+- **Needs**: people with a `hunger` property get hungry and tired. They eat what is at hand or in the stockpile, sleep in their own bed (better beds, and beds under a roof, rest them faster) and wake when rested and it is day. Bedless residents claim a free bed at home.
+- **Jobs and hobbies**: each resident has a `work` and a `hobby`. A job runs once the resident has a bed under a roof, the homestead has the workplace (a field, a chopping block, a kitchen hearth…) and a stockpile. Output goes to the stockpile; efficiency comes from skill, bed quality and how they feel about the keeper. Without a written routine they work 8–17, take up their hobby 17–21 and sleep at night.
+- Jobs and hobbies are data (`job/2`, `hobby/2` in `content/homestead/rules/jobs.pl`); world files set resident properties under `"props"`.
 
 ## Project layout
 

@@ -1,0 +1,9 @@
+{
+  "name": "at_leisure",
+  "label": "\u266a",
+  "description": "is enjoying a hobby",
+  "targetable": true,
+  "wake_priority": 0.6,
+  "ends_on_routine_change": true,
+  "on_exit": []
+}

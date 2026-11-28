@@ -1,0 +1,24 @@
+{
+  "name": "pastime",
+  "description": "Spend the evening on your hobby (gardening, carving, music\u2026) until it gets late",
+  "duration": 1.0,
+  "params": [
+    {
+      "name": "c",
+      "type": "Person",
+      "source": "self"
+    }
+  ],
+  "requires": [
+    {
+      "op": "prop_gte",
+      "entity": "@c",
+      "label": "Person",
+      "prop": "hp",
+      "value": 1,
+      "message": "@c is dead"
+    }
+  ],
+  "effects": [],
+  "enter_state": "at_leisure"
+}

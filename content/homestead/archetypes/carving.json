@@ -1,0 +1,8 @@
+{
+  "archetype": "carving",
+  "name": "Carving",
+  "item_kind": "carving",
+  "portable": true,
+  "value": 8,
+  "description": "A little wooden figure of a fox."
+}

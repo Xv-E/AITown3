@@ -151,6 +151,8 @@ class PersonSpec:
     fear: str = ""
     # 与他人的羁绊：{对方名字: "感受 + 共同经历"}
     bonds: Dict[str, str] = field(default_factory=dict)
+    # 内容包规则要用的其它属性（职业 work、爱好 hobby、技能 skills、饥饿 hunger……），原样写到人物身上
+    props: Dict[str, Any] = field(default_factory=dict)
 
     def normalized(self) -> "PersonSpec":
         routine_out: List[Dict[str, Any]] = []
@@ -212,6 +214,7 @@ class PersonSpec:
             desire=(self.desire or "").strip(),
             fear=(self.fear or "").strip(),
             bonds=_clean_bonds(self.bonds),
+            props=dict(self.props or {}),
         )
 
 
@@ -857,6 +860,7 @@ class EventBlueprint:
                     desire=p.desire,
                     fear=p.fear,
                     bonds=dict(p.bonds or {}),
+                    props=dict(getattr(p, "props", None) or {}),
                 )
             )
         person_names = {p.name for p in fixed_persons}
@@ -1047,6 +1051,7 @@ class EventBlueprint:
                 desire=str(x.get("desire") or ""),
                 fear=str(x.get("fear") or ""),
                 bonds=_clean_bonds(x.get("bonds")),
+                props=dict(x.get("props") or {}) if isinstance(x.get("props"), dict) else {},
             )
             for x in (data.get("persons") or [])
             if isinstance(x, dict)

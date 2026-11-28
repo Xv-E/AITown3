@@ -1,0 +1,23 @@
+{
+  "archetype": "stockpile",
+  "name": "Stockpile",
+  "item_kind": "stockpile",
+  "portable": false,
+  "value": 0,
+  "footprint": [
+    2,
+    2
+  ],
+  "description": "A roped-off corner where the household keeps what it makes.",
+  "blueprint": {
+    "label": "Stockpile",
+    "description": "Where residents put what their work produces. Without one, nothing gets made.",
+    "zone_tags": [
+      "homestead"
+    ],
+    "order": 1
+  },
+  "script": {
+    "lore": "The household's store. Residents' work ends up here, and hungry residents eat from it."
+  }
+}

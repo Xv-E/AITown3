@@ -1,0 +1,27 @@
+{
+  "archetype": "bed",
+  "name": "Bed",
+  "item_kind": "bed",
+  "portable": false,
+  "value": 0,
+  "footprint": [
+    1,
+    2
+  ],
+  "description": "A straw-stuffed bed. Whoever owns it sleeps here.",
+  "blueprint": {
+    "label": "Bed",
+    "description": "A place for one resident to sleep. Residents only work once they have a bed under a roof.",
+    "zone_tags": [
+      "homestead"
+    ],
+    "order": 10
+  },
+  "script": {
+    "lore": "A resident's own bed. Under a roof it lets them rest properly; better beds rest them faster and make their work go better.",
+    "initial_state": {
+      "quality": 2,
+      "owner": ""
+    }
+  }
+}

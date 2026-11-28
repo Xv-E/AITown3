@@ -1,0 +1,23 @@
+{
+  "archetype": "chopping_block",
+  "name": "ChoppingBlock",
+  "item_kind": "chopping_block",
+  "portable": false,
+  "value": 0,
+  "footprint": [
+    1,
+    1
+  ],
+  "description": "A scarred stump with an axe sunk in it.",
+  "blueprint": {
+    "label": "Chopping block",
+    "description": "Lets a woodcutter work.",
+    "zone_tags": [
+      "homestead"
+    ],
+    "order": 21
+  },
+  "script": {
+    "lore": "A woodcutter's workplace: firewood comes off it."
+  }
+}

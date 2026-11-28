@@ -137,7 +137,7 @@ join_shift(friendly, 0.25).
 join_shift(rival, -1.0).
 join_shift(hostile, -2.0).
 
-leader_word(W) :- memberchk(W, [boss, leader, head, elder, sergeant, captain, master, chief]).
+leader_word(W) :- member(W, [boss, leader, head, elder, sergeant, captain, master, chief, keeper, owner, founder, mayor, lord, lady]).
 
 % ---------------------------------------------------------------------
 % 词汇

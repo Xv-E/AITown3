@@ -1,0 +1,8 @@
+{
+  "archetype": "herb",
+  "name": "Herb",
+  "item_kind": "herb",
+  "portable": true,
+  "value": 3,
+  "description": "A bundle of fragrant herbs."
+}

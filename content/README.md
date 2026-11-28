@@ -19,6 +19,7 @@ content/
 - `village`：边境村落的建设（工地、作坊、面包房……）
 - `streets`：街头经济 — `cash` 付给摊档时进摊主口袋（不销毁），摊档卖完向码头 `wholesale` 进 `supplies`，
   `rent_book` 记房租，`collect_dues` 收保护费（全是规则：`streets/rules/street.pl`）
+- `homestead`：据点里过日子的居民 — 饿了吃、困了睡、各有职业和爱好、产出进储物处（规则 `homestead/rules/`，见第 8 节）
 环境变量 `AITOWN_CONTENT_PACKS`（逗号分隔）可以显式指定加载哪些包。
 **后加载的包覆盖同名定义**，所以想改 `base` 里的某个动作，新建一个包写同名文件即可：
 
@@ -538,3 +539,37 @@ tick(_{op: add_prop, entity: F, label: 'Item', prop: fuel, delta: -5, min: 0}) :
     every(12.5), prop(F, archetype, campfire), prop(F, fuel, N), N > 0.
 ```
 
+
+---
+
+## 8. 据点和居民（`content/homestead/`）
+
+据点就是一个群体（`kind: homestead`，特性 `household`、`landed`：名下的地没人看着也不流失）。它控制的地点，
+以及这些地点里的室内房间，就是「家」。居民是它的直接成员，身上的属性写在世界文件的 `props` 里：
+
+```json
+{ "name": "Wren", "located_at": "Fields",
+  "props": { "work": "farmer", "hobby": "gardening", "skills": { "farming": 3 }, "hunger": 20, "fatigue": 10 } }
+```
+
+人物的 `props` 会原样写到人物身上（字典 / 列表存成 JSON），任何内容包的规则都能读。
+
+**需求**（`rules/needs.pl`，只管有 `hunger` 属性的人）：
+- `hunger` 醒着每小时 +3、睡着 +1；吃东西减掉食物 `value × 3`（base 的 `use_item`）。≥ 50 想去吃：先吃手上的，再吃同一处或家里的（顶饱的先吃，别人的不碰）。≥ 85 手上有吃的就马上吃；到 100 掉血。
+- `fatigue` 醒着每小时 +5；睡在自己的床上每小时恢复 `6 + 3 × 品质`（床在室内再 +2），别处只恢复 4。≥ 70（夜里 ≥ 30）想回自己的床睡；≥ 95 就地睡下。睡够了而且天亮了就醒，饿坏了也会醒。
+- 床：`item_kind: bed` 的物品，`owner` 是谁的床、`quality` 1..5；没床的居民会自己认领家里没主的床。
+
+**职业和爱好**（`rules/jobs.pl`）是数据：
+
+```prolog
+job(farmer, _{skill: farming, facility: field, product: turnip, rate: 0.4, text: "tend the fields"}).
+job(cook,   _{skill: cooking, facility: kitchen_hearth, product: stew, uses: turnip, rate: 0.4, text: "cook for the household"}).
+hobby(music, _{skill: music, cheer: true, text: "play music for whoever is around"}).
+```
+
+- 要能干活：自己有一张**屋檐下的床**；家里有对应的设施（`facility`，人得站在设施所在的地点）；要产出东西的还得有**储物处**（`item_kind: stockpile`）；要用料的（`uses`）储物处里得有料；不能饿坏、累垮。干不了时，提示词和面板里会写原因。
+- 效率 = `(1 + 技能/10) × (0.7 + 0.1 × 床的品质) × (0.9 + 0.04 × 对当家人的好感)`；每干一小时技能 +0.05，攒够一件产出一件，放在储物处旁边。
+- 作息（没写日程的居民）：8–17 点去设施那儿 `work`，17–21 点做爱好（`pastime`），夜里睡觉；其余时间在家附近歇着。写了日程的照日程。
+- 面板：`panel(_, home, Card)`，居民的职业、爱好、能不能干、为什么、效率、饥饿、疲劳、床，以及储物处的存货。
+
+示例世界：`worlds/homestead.json`（Hollowbrook：农夫、樵夫、厨子和一个刚来、还没有床的学徒）。

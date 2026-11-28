@@ -1,0 +1,23 @@
+{
+  "archetype": "herb_bed",
+  "name": "HerbBed",
+  "item_kind": "herb_bed",
+  "portable": false,
+  "value": 0,
+  "footprint": [
+    2,
+    1
+  ],
+  "description": "A raised bed of thyme, sage and mint.",
+  "blueprint": {
+    "label": "Herb bed",
+    "description": "Somewhere for a gardener to spend the evening.",
+    "zone_tags": [
+      "homestead"
+    ],
+    "order": 30
+  },
+  "script": {
+    "lore": "A pastime spot: gardeners grow herbs here."
+  }
+}

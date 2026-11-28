@@ -1,0 +1,23 @@
+{
+  "archetype": "kitchen_hearth",
+  "name": "KitchenHearth",
+  "item_kind": "kitchen_hearth",
+  "portable": false,
+  "value": 0,
+  "footprint": [
+    2,
+    1
+  ],
+  "description": "A stone hearth with a black pot hanging over it.",
+  "blueprint": {
+    "label": "Kitchen hearth",
+    "description": "Lets a cook turn turnips into stew.",
+    "zone_tags": [
+      "homestead"
+    ],
+    "order": 22
+  },
+  "script": {
+    "lore": "A cook's workplace: turnips from the stockpile go in, stew comes out."
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "archetype": "firewood",
+  "name": "Firewood",
+  "item_kind": "firewood",
+  "portable": true,
+  "value": 2,
+  "description": "An armful of split logs."
+}

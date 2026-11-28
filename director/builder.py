@@ -120,8 +120,8 @@ def _sides_as_groups(world: "Neo4jWorld") -> None:
     rows = world.run_query(
         """
         MATCH (p:Person) WHERE coalesce(p.faction, '') <> ''
-        OPTIONAL MATCH (f:Faction {name: p.faction})
-        RETURN p.name AS p, p.faction AS side, f IS NOT NULL AS known
+        OPTIONAL MATCH (f:Faction) WHERE toLower(f.name) = toLower(p.faction)
+        RETURN p.name AS p, coalesce(f.name, p.faction) AS side, f IS NOT NULL AS known
         """
     ) or []
     for r in rows:
@@ -234,6 +234,10 @@ def build_from_blueprint(
                 props[key] = getattr(person, key)
         if getattr(person, "bonds", None):
             props["bonds"] = json.dumps(dict(person.bonds), ensure_ascii=False)
+        for key, value in (getattr(person, "props", None) or {}).items():
+            if key in props or key == "name" or value is None:
+                continue  # 内置字段优先
+            props[key] = json.dumps(value, ensure_ascii=False) if isinstance(value, (dict, list)) else value
         world.add_entity(person.name, entity_type="Person", **props)
         world.link_entities(person.name, "Person", person.located_at, "Location", "LOCATED_AT")
         world.link_entities(person.name, "Person", person.located_at, "Location", "VISITED")

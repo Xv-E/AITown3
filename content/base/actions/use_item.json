@@ -21,6 +21,11 @@
       ] } ] },
     { "op": "set_prop", "entity": "@c", "label": "Person", "prop": "mood", "value": "content",
       "when": [ { "op": "prop_in", "entity": "@i", "prop": "item_kind", "values": ["food", "meal", "cooked"] } ] },
+    { "op": "add_prop", "entity": "@c", "label": "Person", "prop": "hunger", "delta": "@i.value", "scale": -3, "min": 0,
+      "when": [
+        { "op": "prop_gte", "entity": "@c", "label": "Person", "prop": "hunger", "value": 0.001 },
+        { "op": "prop_in", "entity": "@i", "prop": "item_kind", "values": ["food", "meal", "cooked"] }
+      ] },
     { "op": "delete_entity", "entity": "@i", "label": "Item" }
   ],
   "pddl_preconditions": ["(has-item ?c ?i)", "(alive ?c)"],

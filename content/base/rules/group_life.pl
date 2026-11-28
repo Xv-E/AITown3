@@ -202,6 +202,7 @@ holds_ground(G) :- const(control_min, Min), strength(G, L, S), S >= Min, node('L
 grown(G, L, S1) :-
     ( strength(G, L, S0) -> true ; S0 = 0.0 ), presence(G, L, P),
     (   P > 0 -> const(claim_rate, R), mult(G, claim, M), S1 is S0 + P * R * M
+    ;   has(G, landed) -> S1 = S0                       % 名下的地（据点）：没人看着也不流失
     ;   const(decay, D), S1 is S0 - D
     ).
 
@@ -350,9 +351,12 @@ emergence(_{type: coalition, founders: [A, B], location: Pub, from: From}) :-
     findall(G, ((direct(A, G) ; direct(B, G)), \+ has(G, homebound)), F0), sort(F0, From),
     public_place(Loc, Pub).
 emergence(_{type: arrival, founders: [], location: L}) :-
-    findall(L0, (node('Location', L0), \+ controller(L0, _), \+ private_home(L0)), Free0), sort(Free0, Free),
+    findall(L0, (node('Location', L0), \+ controller(L0, _), \+ private_home(L0), \+ within_held(L0)), Free0), sort(Free0, Free),
     Free \== [], const(arrival_chance, C), chance(arrival, C),
     now(T), term_hash(T, H), length(Free, N), I is H mod N, nth0(I, Free, L).
+
+% 别人地盘里的室内房间（据点的农舍、帮派楼里的屋子）不算空地
+within_held(L) :- prop(L, parent, Out), Out \== '', controller(Out, _).
 
 best_loyalty(P, L) :- aggregate_all(max(L0), (direct(P, G, _, L0), \+ has(G, homebound)), L).
 

@@ -1,0 +1,23 @@
+{
+  "archetype": "whittling_bench",
+  "name": "WhittlingBench",
+  "item_kind": "whittling_bench",
+  "portable": false,
+  "value": 0,
+  "footprint": [
+    1,
+    1
+  ],
+  "description": "A low bench littered with wood shavings.",
+  "blueprint": {
+    "label": "Whittling bench",
+    "description": "Somewhere for a carver to spend the evening.",
+    "zone_tags": [
+      "homestead"
+    ],
+    "order": 31
+  },
+  "script": {
+    "lore": "A pastime spot: carvers make little wooden figures here."
+  }
+}

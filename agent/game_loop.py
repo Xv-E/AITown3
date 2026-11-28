@@ -2544,7 +2544,8 @@ class GameLoop:
         routine_cands = self._routine_candidates(state)
         if routine_only:
             # 背景 NPC：只看日程（含日程里的「和周围的人聊聊」），不管物品动作、不随性格找事做
-            routine_cands = [c for c in routine_cands if (c or {}).get("source") in ("routine", "social_interrupt", "shop")]
+            routine_cands = [c for c in routine_cands
+                             if (c or {}).get("source") in ("routine", "social_interrupt", "shop") or (c or {}).get("rules")]
         ephemeral_cands = [] if routine_only else self._ephemeral_action_candidates(state)
         has_routine = self._has_routine(state)
         if routine_only:

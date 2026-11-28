@@ -1,0 +1,23 @@
+{
+  "archetype": "field",
+  "name": "Field",
+  "item_kind": "field",
+  "portable": false,
+  "value": 0,
+  "footprint": [
+    3,
+    2
+  ],
+  "description": "Turned earth in neat rows of turnips.",
+  "blueprint": {
+    "label": "Field",
+    "description": "Lets a farmer work.",
+    "zone_tags": [
+      "homestead"
+    ],
+    "order": 20
+  },
+  "script": {
+    "lore": "A farmer's workplace: turnips come out of it."
+  }
+}

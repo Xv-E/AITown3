@@ -150,10 +150,11 @@ def _rel_facts(world, t: str) -> List[str]:
 
 
 def _day_fact() -> str:
+    """一天多长、sim_time = 0 是几点（routine 的时钟）。"""
     try:
-        from routine import DAY_LENGTH_SECONDS
+        from routine import DAY_HOUR_OFFSET, DAY_LENGTH_SECONDS
 
-        return fact("g_day_length", float(DAY_LENGTH_SECONDS))
+        return f"{fact('g_day_length', float(DAY_LENGTH_SECONDS))}, {fact('g_day_start', float(DAY_HOUR_OFFSET))}"
     except Exception:
         return fact("g_day_length", 300.0)
 
@@ -299,8 +300,9 @@ def want(world, me: str, *, at: Optional[float] = None) -> List[Dict[str, Any]]:
         if isinstance(g, dict) and g.get("goal"):
             g = dict(g)
             g.setdefault("target_entity", g.pop("target", ""))
+            g["rules"] = True  # 内容包规则给的：只跑日程的背景 NPC 也照做
             out.append(g)
-    return out
+    return sorted(out, key=lambda g: -float(g.get("priority") or 0))  # 急的在前（各包的规则加载顺序不算数）
 
 
 def context(world, me: str, other: Optional[str] = None) -> List[str]:

@@ -1,0 +1,8 @@
+{
+  "archetype": "turnip",
+  "name": "Turnip",
+  "item_kind": "food",
+  "portable": true,
+  "value": 6,
+  "description": "A fat purple-topped turnip. Edible raw, better in a stew."
+}

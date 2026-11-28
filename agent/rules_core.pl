@@ -11,7 +11,7 @@
 %   sees(W, P)                      W 看得见 P：规则问到时才回头问引擎的感知（P 要已知）；
 %                                   给了 g_sees(W, P) 事实就只用这些（测试 / 调用方指定）
 %   busy_since(P, T).               问 react/2 时：P 从 T 起正在做一件事
-%   g_day_length(L).                一个游戏日有几模拟秒（day_length/1、day/2 用）
+%   g_day_length(L). g_day_start(H). 一个游戏日有几模拟秒、sim_time = 0 是几点（day_length/1、day/2、hour/1 用）
 % 读哪些标签 / 关系由规则声明：reads(label('Person')). reads(rel('FEELS')).
 %
 % 规则应通过下面这些谓词读图——它们会叠加「假设」（推演时）：
@@ -50,14 +50,14 @@
 :- use_module(library(apply)).
 :- use_module(library(lists)).
 
-:- dynamic g_node/2, g_prop/3, g_rel/4, g_now/1, g_tick/2, g_sees/2, g_day_length/1, busy_since/2, hyp/1, memo_/2.
+:- dynamic g_node/2, g_prop/3, g_rel/4, g_now/1, g_tick/2, g_sees/2, g_day_length/1, g_day_start/1, busy_since/2, hyp/1, memo_/2.
 :- multifile reads/1, after/2, tick/1, tick/2, tick_phase/2, tick_period/1, forecast/2, react/2, want/2, context/2, context/3, panel/3, plea/1, label/2, explain/4, const/2.
 :- dynamic reads/1, after/2, tick/1, tick/2, tick_phase/2, tick_period/1, forecast/2, react/2, want/2, context/2, context/3, panel/3, plea/1, label/2, explain/4, const/2.
 :- discontiguous reads/1, after/2, tick/1, tick/2, tick_phase/2, tick_period/1, forecast/2, react/2, want/2, context/2, context/3, panel/3, plea/1, label/2, explain/4, const/2.
 
 load_facts(Facts) :-
     retractall(g_node(_, _)), retractall(g_prop(_, _, _)), retractall(g_rel(_, _, _, _)),
-    retractall(g_now(_)), retractall(g_tick(_, _)), retractall(g_sees(_, _)), retractall(g_day_length(_)), retractall(busy_since(_, _)),
+    retractall(g_now(_)), retractall(g_tick(_, _)), retractall(g_sees(_, _)), retractall(g_day_length(_)), retractall(g_day_start(_)), retractall(busy_since(_, _)),
     retractall(hyp(_)), retractall(memo_(_, _)),
     forall(member(F, Facts), assertz(F)).
 
@@ -105,6 +105,8 @@ sees(W, P) :- nonvar(P), catch(py_call(sees, P, L), _, fail), member(W, L).
 day_length(L) :- g_day_length(L), !.
 day_length(300.0).
 day(T, D) :- day_length(L), D is floor(T / L).
+% 现在几点（0 ≤ H < 24，可带小数）
+hour(H) :- now(T), day_length(L), ( g_day_start(S) -> true ; S = 6.0 ), H0 is T / L * 24 + S, H is H0 - 24 * floor(H0 / 24).
 
 % 可复现的「概率 P 发生」：同一时刻、同一个 Key 每次结果一样（存档重跑也一样）
 chance(Key, P) :- now(T), term_hash(k(Key, T), H), X is (H mod 100000) / 100000.0, X < P.
